@@ -1,0 +1,126 @@
+/* ui-sdk primeiro, para ficar na camada de menor prioridade. keep vem antes do base para que o
+   !important dela vença o do preflight (entre camadas, o !important da anterior ganha). */
+@layer ui-sdk, keep, theme, base, components, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+@custom-variant reduced-transparency (@media (prefers-reduced-transparency: reduce));
+
+/* O preflight esconde [hidden] com display:none !important; no painel do terminal isso zeraria
+   a medida do xterm. Ele fica em layout e some só pela visibilidade. */
+@layer keep {
+  [data-slot="tabs-panel"][hidden] {
+    /* biome-ignore lint/complexity/noImportantStyles: precisa vencer o !important do preflight */
+    display: block !important;
+    visibility: hidden;
+  }
+}
+
+/*
+ * Tokens do tema. Estes valores são o Termo Escuro e servem de padrão até o tema carregar;
+ * o tema escolhido sobrescreve tudo no :root (src/features/theme/useTheme.ts).
+ */
+:root {
+  --bg: #0f1117;
+  --surface: #161a23;
+  --surface-hover: #1d2230;
+  --border: #252b38;
+  --text: #d7dce4;
+  --muted: #7d8597;
+  --accent: #7aa2ff;
+  --claude: #e8916a;
+  --material: rgb(22 26 35 / 62%);
+  --material-thick: rgb(26 31 42 / 74%);
+  --hairline: rgb(255 255 255 / 9%);
+  --highlight: rgb(255 255 255 / 7%);
+  --field: rgb(15 17 23 / 70%);
+  --on-accent: #0f1117;
+  /* Multiplica a opacidade das sombras: 1 no escuro, menos no claro. */
+  --shadow-strength: 1;
+  /* Molas aproximadas com linear(): sem JS, e o CSS retoma do valor atual se interrompido. */
+  --spring: linear(0, 0.18 4%, 0.52 9%, 0.78 15%, 0.93 22%, 1.01 30%, 1.02 38%, 1.01 48%, 1 60%, 1);
+  --spring-soft: cubic-bezier(0.2, 0.9, 0.3, 1);
+  color-scheme: dark;
+}
+
+/* inline: as classes usam var(--x) direto, então seguem a troca de tema feita no :root. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-on-accent: var(--on-accent);
+  --color-claude: var(--claude);
+  --color-field: var(--field);
+  --color-hairline: var(--hairline);
+  --color-highlight: var(--highlight);
+  --color-material: var(--material);
+  --color-material-thick: var(--material-thick);
+
+  --font-sans: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  --ease-spring: var(--spring);
+  --ease-spring-soft: var(--spring-soft);
+
+  --shadow-titlebar: inset 0 -1px 0 var(--hairline), 0 1px 12px rgb(0 0 0 / calc(0.25 * var(--shadow-strength)));
+  --shadow-tab:
+    inset 0 0 0 1px var(--border), inset 0 1px 0 var(--highlight),
+    0 1px 3px rgb(0 0 0 / calc(0.35 * var(--shadow-strength)));
+  --shadow-panel:
+    inset 0 1px 0 var(--highlight), 0 2px 6px rgb(0 0 0 / calc(0.25 * var(--shadow-strength))),
+    0 18px 48px rgb(0 0 0 / calc(0.5 * var(--shadow-strength)));
+  --shadow-pop: 0 10px 28px rgb(0 0 0 / calc(0.4 * var(--shadow-strength)));
+  --shadow-tip: 0 6px 18px rgb(0 0 0 / calc(0.4 * var(--shadow-strength)));
+
+  --animate-tab-in: tab-in 420ms var(--spring) both;
+  --animate-pop-in: pop-in 120ms ease-out;
+
+  @keyframes tab-in {
+    from {
+      max-width: 0;
+      min-width: 0;
+      opacity: 0;
+      transform: scale(0.9);
+    }
+  }
+
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+  }
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font: 13px / 1.4 var(--font-sans);
+    transition:
+      background-color 200ms ease-out,
+      color 200ms ease-out;
+  }
+
+  .xterm-viewport {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+}

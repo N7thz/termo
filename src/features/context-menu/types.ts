@@ -1,0 +1,35 @@
+/** O que o menu do terminal precisa do xterm; o TerminalView entrega pelo `onActions`. */
+export interface TerminalActions {
+  hasSelection: () => boolean
+  /** Copia a seleção para a área de transferência do sistema. */
+  copy: () => void
+  /** Cola como o Ctrl+V do terminal (texto, ou repassa a imagem para o Claude Code). */
+  paste: () => void
+  selectAll: () => void
+  /** Limpa a tela e o histórico de rolagem. */
+  clear: () => void
+  /** Abre a busca na saída (o mesmo do Ctrl+Shift+F). */
+  find: () => void
+}
+
+export type TabMenuAction =
+  | 'new-shell'
+  | 'new-claude'
+  | 'duplicate'
+  | 'move-left'
+  | 'move-right'
+  | 'close'
+  | 'close-others'
+  | 'close-right'
+
+export type TerminalMenuAction =
+  | 'copy'
+  | 'paste'
+  | 'select-all'
+  | 'clear'
+  | 'find'
+  | 'new-shell'
+  | 'new-claude'
+  | 'themes'
+  | 'settings'
+  | 'close'
