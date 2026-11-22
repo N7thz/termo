@@ -35,13 +35,15 @@ src/                 frontend (React + xterm.js)
   features/ai        IA pelo `claude -p`: explicar erro e `#` linguagem natural → comando
   features/sessions  sessões do Claude Code (painel do coord)
   features/code-review  painel de revisão: diff por arquivo, comentários e envio ao Claude
+  features/claude-bar  barra da aba do Claude: modelo, esforço, permissões, comandos, anexos e uso
+  features/folder-picker  menu do botão da pasta: escolher, subir, recentes e Explorador
   features/usage-battery  bateria do uso do Claude (5 h e semana)
 src-tauri/           backend (Rust)
   src/pty.rs         sessões ConPTY, saída em lotes, controle de vazão por ack
   src/shell.rs       shell, Claude Code, pasta inicial e linha de comando
   src/settings.rs    configurações validadas, com gravação atômica
   src/ai.rs          `claude -p` sem ferramentas, prompt pela entrada padrão
-  src/usage.rs       limites do Claude lidos do `statusLine` das abas do Claude
+  src/usage.rs       limites do Claude e a linha de status de cada aba (modelo, esforço, contexto, custo)
   src/review.rs      arquivos alterados, diff, stage e descartar (caminhos validados)
   src/coord.rs       leitura do painel do coord (127.0.0.1:4747)
   src/window.rs      várias janelas (`termo-<n>`), cada uma com abas e painel próprios
@@ -63,14 +65,18 @@ src-tauri/           backend (Rust)
 - Blocos por comando: barra verde ou vermelha na margem, duração, copiar o comando ou a saída e "explicar o erro" com o Claude, que sugere a correção pronta para rodar
 - Prévia de imagem nos blocos: se o comando ou a saída citam imagens que existem (`ls` numa pasta com PNGs, `magick a.jpg b.png`), o bloco ganha o botão com as miniaturas; o clique abre no visualizador do Windows
 - Linha de contexto acima da entrada, como a do Warp: versão do Node (em projetos com `package.json`, avisando quando o `.nvmrc`/`.node-version` pede outra), pasta e branch. A versão troca pelo fnm (por aba), nvm-windows ou Volta; o Termo ativa o fnm sozinho se o $PROFILE não fizer isso
+- Botão da pasta: escolher outra pasta no seletor do Windows, subir uma pasta, ir para uma pasta recente ou abrir no Explorador (a troca é um `Set-Location` no próprio shell)
+- Barra da aba do Claude Code, no lugar da linha de contexto: modelo (`/model`), esforço (`/effort`), modo de permissão (o Shift+Tab do Claude), comandos rápidos (`/compact`, `/clear`, `/context`, `/usage`, `/resume`), pasta, branch, contexto usado e custo da sessão. Os dados vêm da linha de status que o Claude Code manda a cada resposta, gravada por aba
+- Anexos no Claude: o botão Anexar escolhe vários arquivos ou pastas de uma vez e os põe na mensagem como `@menção` (imagens, PDF, notebooks, código e texto; caminho relativo à pasta da sessão, entre aspas quando tem espaço)
 - Branches: trocar e criar (`git switch -c`, a partir da atual) pelo botão da branch
+- Lateral minimizável (Ctrl+Alt+B ou o botão no topo dela): uma faixa estreita só com os ícones das abas, que continua com arrastar, grupos e o menu da aba. Ctrl+Shift+B esconde a lateral inteira
 - Abas na lateral: arrastar muda a ordem (as outras abrem espaço, como no Chrome) e entra ou sai de grupos; soltar sobre o terminal divide a tela. O menu da aba tem "Dividir a tela com" para juntar duas abas já abertas
 - Caixa de comando com highlight; `# o que você quer fazer` + Enter vira um comando do PowerShell (não executa sozinho)
 - Painéis divididos (Ctrl+Shift+E) e várias janelas (Ctrl+Shift+N)
 - Bateria do uso do Claude na barra de título, com mascote em pixel art. Os limites vêm do `statusLine` das abas do Claude (quem já tem um `statusLine` próprio continua com ele, e a bateria fica sem dados)
 - Avatar de estado por aba do Claude (pensando, trabalhando, esperando, bloqueado, pronto), pelos hooks do Claude Code
 - Revisão de código (Ctrl+Shift+G ou clique no +N −M): arquivos alterados com o diff, stage, descartar, abrir no editor, comentários por linha enviados ao Claude Code e "Revisar com o Claude"
-- Sessões do Claude Code (Ctrl+Shift+A): quem está trabalhando ou esperando, plano, progresso e reservas, lidos do painel do coord
+- Sessões do Claude Code (Ctrl+Shift+A ou o indicador na barra de título, com quantas estão trabalhando e esperando você): modelo e esforço, plano com as etapas e o tempo de cada uma, arquivos em edição e reservas (esquecer/liberar), abrir a sessão numa aba (`claude attach` ou `claude --resume`) e o histórico, lidos do painel do coord
 
 ## Roadmap
 
