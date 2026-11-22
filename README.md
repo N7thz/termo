@@ -34,6 +34,7 @@ src/                 frontend (React + xterm.js)
   features/input     caixa de comando com highlight, histórico e Tab
   features/ai        IA pelo `claude -p`: explicar erro e `#` linguagem natural → comando
   features/sessions  sessões do Claude Code (painel do coord)
+  features/code-review  painel de revisão: diff por arquivo, comentários e envio ao Claude
   features/usage-battery  bateria do uso do Claude (5 h e semana)
 src-tauri/           backend (Rust)
   src/pty.rs         sessões ConPTY, saída em lotes, controle de vazão por ack
@@ -41,6 +42,7 @@ src-tauri/           backend (Rust)
   src/settings.rs    configurações validadas, com gravação atômica
   src/ai.rs          `claude -p` sem ferramentas, prompt pela entrada padrão
   src/usage.rs       limites do Claude lidos do `statusLine` das abas do Claude
+  src/review.rs      arquivos alterados, diff, stage e descartar (caminhos validados)
   src/coord.rs       leitura do painel do coord (127.0.0.1:4747)
   src/window.rs      várias janelas (`termo-<n>`), cada uma com abas e painel próprios
   src/node.rs        versão do Node da aba e versões do fnm/nvm-windows/Volta
@@ -67,6 +69,7 @@ src-tauri/           backend (Rust)
 - Painéis divididos (Ctrl+Shift+E) e várias janelas (Ctrl+Shift+N)
 - Bateria do uso do Claude na barra de título, com mascote em pixel art. Os limites vêm do `statusLine` das abas do Claude (quem já tem um `statusLine` próprio continua com ele, e a bateria fica sem dados)
 - Avatar de estado por aba do Claude (pensando, trabalhando, esperando, bloqueado, pronto), pelos hooks do Claude Code
+- Revisão de código (Ctrl+Shift+G ou clique no +N −M): arquivos alterados com o diff, stage, descartar, abrir no editor, comentários por linha enviados ao Claude Code e "Revisar com o Claude"
 - Sessões do Claude Code (Ctrl+Shift+A): quem está trabalhando ou esperando, plano, progresso e reservas, lidos do painel do coord
 
 ## Roadmap

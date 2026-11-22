@@ -1,6 +1,6 @@
 import { Button } from '@ui-sdk/react/button'
 import { Tooltip, TooltipContent, TooltipShortcut, TooltipTrigger } from '@ui-sdk/react/tooltip'
-import { ChevronRight, Columns2, Folder, Plus, X } from 'lucide-react'
+import { ChevronRight, Columns2, Folder, PanelLeftClose, PanelLeftOpen, Plus, X } from 'lucide-react'
 import { type ReactNode, useRef, useState } from 'react'
 import { tooltip, tooltipKbd } from '../../lib/ui'
 import { MAX_PROFILES } from '../../shared/settings'
@@ -53,6 +53,55 @@ interface Props {
   onReorder: (key: number, before: number | null, group: string | null) => void
   /** Aba solta sobre o terminal: abre ao lado da aba ativa. */
   onSplitWith: (key: number) => void
+  /** Lateral minimizada: faixa estreita só com os ícones. */
+  collapsed: boolean
+  onToggleCollapsed: () => void
+}
+
+/** Largura da lateral aberta e minimizada (o App usa a mesma para animar a coluna). */
+export const SIDEBAR_WIDTH = { open: 'w-56', collapsed: 'w-14' } as const
+
+/** Botão quadrado da faixa minimizada (favoritos, pastas fixadas, nova aba). */
+const RAIL_BUTTON =
+  'grid size-10 flex-none place-items-center rounded-[10px] text-muted outline-none [transition:background-color_140ms_ease-out,color_140ms_ease-out,scale_300ms_var(--spring)] hover:bg-surface-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent active:scale-[0.94] motion-reduce:active:scale-100'
+
+/** Botão de minimizar/expandir a lateral, com o atalho no tooltip. */
+function CollapseButton({ collapsed, onClick }: { collapsed: boolean; onClick: () => void }) {
+  const label = collapsed ? 'Expandir a lateral' : 'Minimizar a lateral'
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            className="grid size-7 flex-none place-items-center rounded-[7px] text-muted outline-none hover:bg-surface-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
+            aria-label={label}
+            aria-expanded={!collapsed}
+            onClick={onClick}
+          />
+        }
+      >
+        {collapsed ? <PanelLeftOpen aria-hidden size={15} /> : <PanelLeftClose aria-hidden size={15} />}
+      </TooltipTrigger>
+      <TooltipContent className={tooltip} side="right" sideOffset={6}>
+        {label}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+/** Ícone com tooltip à direita, para a faixa minimizada. */
+function RailButton({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<button type="button" className={RAIL_BUTTON} aria-label={label} onClick={onClick} />}>
+        {children}
+      </TooltipTrigger>
+      <TooltipContent className={tooltip} side="right" sideOffset={6}>
+        {label}
+      </TooltipContent>
+    </Tooltip>
+  )
 }
 
 /** Cabeçalho do grupo: recolhe/abre no clique, renomeia no duplo clique, desfaz no X. */
@@ -276,10 +325,200 @@ export function TabSidebar(props: Props) {
     )
   }
 
+  const renderRailTab = (tab: Tab) => {
+    const index = tabs.indexOf(tab)
+    const { cwd } = info(tab.key)
+    const isActive = tab.key === active
+    const partner = props.partnerOf(tab.key)
+    return (
+      <TabMenu
+        key={tab.key}
+        vertical
+        first={index === 0}
+        last={index === tabs.length - 1}
+        alone={tabs.length === 1}
+        canPin={!!cwd && !isPinned(profile, cwd)}
+        groups={props.groups.filter((g) => g.id !== tab.group)}
+        inGroup={!!tab.group}
+        split={partner != null}
+        canSplitWithActive={active != null && tab.key !== active && partner !== active}
+        splitTargets={tabs
+          .filter((t) => t.key !== tab.key && t.key !== partner)
+          .map((t) => ({ key: t.key, title: t.title }))}
+        onAction={(action) => onTabAction(tab, action)}
+        trigger={
+          <div
+            className="relative grid size-10 flex-none animate-row-in place-items-center rounded-[10px] text-muted [transition:background-color_140ms_ease-out,color_140ms_ease-out,box-shadow_200ms_ease-out,scale_300ms_var(--spring),opacity_120ms_ease-out] hover:bg-surface-hover hover:text-text active:scale-[0.94] active:duration-60 data-active:bg-bg data-active:text-text data-active:shadow-tab data-closing:pointer-events-none data-closing:scale-75 data-closing:opacity-0 motion-reduce:animate-none motion-reduce:active:scale-100 data-dragging:pointer-events-none data-dragging:z-10 data-dragging:bg-bg data-dragging:shadow-pop data-dragging:animate-none"
+            data-active={isActive || undefined}
+            data-closing={closing.has(tab.key) || undefined}
+            data-dragging={dragKey === tab.key || undefined}
+            onAuxClick={(e) => e.button === 1 && onClose(tab.key)}
+            {...handlers(tab.key)}
+          />
+        }
+      >
+        <button
+          type="button"
+          className="absolute inset-0 rounded-[10px] outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+          aria-current={isActive ? 'page' : undefined}
+          aria-label={`${tab.title}${cwd ? `, ${cwd}` : ''}`}
+          title={`${tab.title}${cwd ? `\n${cwd}` : ''}${partner != null ? '\nEm tela dividida' : ''}`}
+          onClick={() => onActivate(tab.key)}
+        />
+        <span className="pointer-events-none">
+          <TabKindIcon kind={tab.kind} size={18} agent={props.agents?.get(tab.key)} />
+        </span>
+        {partner != null && (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute right-1 bottom-1 size-1.5 rounded-full bg-accent"
+            title="Em tela dividida"
+          />
+        )}
+        {renderAlert && (
+          <span className="pointer-events-none absolute -top-1 -right-1 scale-90">{renderAlert(tab.key)}</span>
+        )}
+      </TabMenu>
+    )
+  }
+
+  const profileDots = (vertical: boolean) => (
+    <div
+      className={`flex flex-none items-center justify-center gap-1 ${vertical ? 'flex-col py-2' : 'h-11'}`}
+      role="toolbar"
+      aria-label="Perfis"
+      aria-orientation={vertical ? 'vertical' : 'horizontal'}
+    >
+      {profiles.map((p) => {
+        const current = p.id === profile.id
+        return (
+          <Tooltip key={p.id}>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  className="grid h-6 min-w-6 place-items-center rounded-full px-1 outline-none hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-accent"
+                  aria-label={`Perfil ${p.name}`}
+                  aria-pressed={current}
+                  onClick={() => props.onSwitchProfile(p.id)}
+                />
+              }
+            >
+              <span
+                className={`block rounded-full [transition:width_350ms_var(--spring),height_350ms_var(--spring),opacity_150ms_ease-out] motion-reduce:transition-[opacity] ${
+                  vertical
+                    ? current
+                      ? 'h-4 w-1.5'
+                      : 'size-1.5 opacity-55'
+                    : current
+                      ? 'h-1.5 w-4'
+                      : 'size-1.5 opacity-55'
+                }`}
+                style={{ background: profileColorCss(p.color) }}
+              />
+            </TooltipTrigger>
+            <TooltipContent className={tooltip} side={vertical ? 'right' : 'top'} sideOffset={6}>
+              {p.name}
+            </TooltipContent>
+          </Tooltip>
+        )
+      })}
+      {profiles.length < MAX_PROFILES && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                className="grid size-6 place-items-center rounded-full text-muted outline-none hover:bg-surface-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
+                aria-label="Novo perfil"
+                onClick={props.onAddProfile}
+              />
+            }
+          >
+            <Plus aria-hidden size={12} />
+          </TooltipTrigger>
+          <TooltipContent className={tooltip} side={vertical ? 'right' : 'top'} sideOffset={6}>
+            Novo perfil
+          </TooltipContent>
+        </Tooltip>
+      )}
+    </div>
+  )
+
+  if (props.collapsed) {
+    const loose = tabs.filter((t) => !t.group || !props.groups.some((g) => g.id === t.group))
+    return (
+      <aside
+        className={`flex h-full ${SIDEBAR_WIDTH.collapsed} flex-none flex-col items-center px-2 select-none`}
+        aria-label="Perfil e abas (minimizada)"
+      >
+        <div data-tauri-drag-region className="flex h-10 w-full flex-none items-center justify-center">
+          <CollapseButton collapsed onClick={props.onToggleCollapsed} />
+        </div>
+        <div className="flex flex-none flex-col items-center gap-1.5">
+          <RailButton label="Nova aba: Shell (Ctrl+Shift+T)" onClick={() => onNew('shell')}>
+            <TabKindIcon kind="shell" size={17} />
+          </RailButton>
+          <RailButton label="Nova aba: Claude Code (Ctrl+Shift+K)" onClick={() => onNew('claude')}>
+            <TabKindIcon kind="claude" size={17} />
+          </RailButton>
+        </div>
+        <nav
+          ref={navRef}
+          className="flex min-h-0 w-full flex-1 flex-col items-center overflow-x-hidden overflow-y-auto pb-2 [scrollbar-width:none]"
+          aria-label="Abas do perfil"
+        >
+          <div key={profile.id} className={`flex flex-col items-center gap-1.5 ${slide} motion-reduce:animate-none`}>
+            {profile.pinned.map((dir) => (
+              <RailButton key={dir} label={`Abrir aba em ${folderName(dir)}`} onClick={() => onNew('shell', dir)}>
+                <Folder aria-hidden size={15} />
+              </RailButton>
+            ))}
+            <hr className="my-1 h-px w-6 flex-none border-0 bg-hairline" />
+            {props.groups.map((group) => {
+              const inside = tabs.filter((t) => t.group === group.id)
+              return (
+                <section
+                  key={group.id}
+                  className="flex flex-col items-center gap-1.5"
+                  aria-label={`Grupo ${group.name}`}
+                >
+                  <div data-drop-group={group.id}>
+                    <button
+                      type="button"
+                      className="grid h-4 w-8 place-items-center rounded outline-none hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-accent"
+                      title={`${group.name} (${inside.length}) · clique para ${group.collapsed ? 'abrir' : 'recolher'}`}
+                      aria-label={`Grupo ${group.name}, ${inside.length} aba(s)`}
+                      aria-expanded={!group.collapsed}
+                      onClick={() => props.onGroupToggle(group.id)}
+                    >
+                      <span className={`block h-0.5 rounded-full bg-muted ${group.collapsed ? 'w-2' : 'w-6'}`} />
+                    </button>
+                  </div>
+                  {!group.collapsed && inside.map((tab) => renderRailTab(tab))}
+                </section>
+              )
+            })}
+            {loose.map((tab) => renderRailTab(tab))}
+            <div data-drop-loose className="flex flex-col items-center">
+              <RailButton label="Nova aba" onClick={() => onNew('shell')}>
+                <Plus aria-hidden size={15} />
+              </RailButton>
+            </div>
+          </div>
+        </nav>
+        {profileDots(true)}
+      </aside>
+    )
+  }
+
   return (
     // Grade de 4px com margem de 6px: a borda esquerda do nome do perfil, dos blocos e das abas é a mesma,
     // e os blocos começam na mesma linha do topo do cartão do terminal.
-    <aside className="flex h-full w-56 flex-none flex-col px-2.5 select-none" aria-label="Perfil e abas">
+    <aside
+      className={`flex h-full ${SIDEBAR_WIDTH.open} flex-none flex-col px-2.5 select-none`}
+      aria-label="Perfil e abas"
+    >
       {/* Fica na altura da barra de título: o vazio arrasta a janela. */}
       <div data-tauri-drag-region className="flex h-10 flex-none items-center gap-1">
         <span key={profile.id} className="flex min-w-0 animate-fade-in motion-reduce:animate-none">
@@ -291,6 +530,7 @@ export function TabSidebar(props: Props) {
           />
         </span>
         <span data-tauri-drag-region className="flex-1 self-stretch" />
+        <CollapseButton collapsed={false} onClick={props.onToggleCollapsed} />
       </div>
 
       <div className="grid flex-none grid-cols-2 gap-2">
@@ -383,53 +623,7 @@ export function TabSidebar(props: Props) {
       </nav>
 
       {/* Os pontos do rodapé trocam de perfil, como no Dia. */}
-      <div className="flex h-11 flex-none items-center justify-center gap-1" role="toolbar" aria-label="Perfis">
-        {profiles.map((p) => {
-          const current = p.id === profile.id
-          return (
-            <Tooltip key={p.id}>
-              <TooltipTrigger
-                render={
-                  <button
-                    type="button"
-                    className="grid h-6 min-w-6 place-items-center rounded-full px-1 outline-none hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-accent"
-                    aria-label={`Perfil ${p.name}`}
-                    aria-pressed={current}
-                    onClick={() => props.onSwitchProfile(p.id)}
-                  />
-                }
-              >
-                <span
-                  className={`block h-1.5 rounded-full [transition:width_350ms_var(--spring),opacity_150ms_ease-out] motion-reduce:transition-[opacity] ${current ? 'w-4' : 'w-1.5 opacity-55'}`}
-                  style={{ background: profileColorCss(p.color) }}
-                />
-              </TooltipTrigger>
-              <TooltipContent className={tooltip} sideOffset={6}>
-                {p.name}
-              </TooltipContent>
-            </Tooltip>
-          )
-        })}
-        {profiles.length < MAX_PROFILES && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  className="grid size-6 place-items-center rounded-full text-muted outline-none hover:bg-surface-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
-                  aria-label="Novo perfil"
-                  onClick={props.onAddProfile}
-                />
-              }
-            >
-              <Plus aria-hidden size={12} />
-            </TooltipTrigger>
-            <TooltipContent className={tooltip} sideOffset={6}>
-              Novo perfil
-            </TooltipContent>
-          </Tooltip>
-        )}
-      </div>
+      {profileDots(false)}
     </aside>
   )
 }

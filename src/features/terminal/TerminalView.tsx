@@ -17,6 +17,7 @@ import { ShellIntegration } from '../autocomplete/shellIntegration'
 import { CommandBlocks } from '../blocks/commandBlocks'
 import { ImagePreview, type ImagePreviewAnchor } from '../blocks/ImagePreview'
 import { openLink } from '../browser/links'
+import { ClaudeBar } from '../claude-bar/ClaudeBar'
 import type { TerminalActions } from '../context-menu/types'
 import type { Severity } from '../highlights/matchers'
 import { SearchBar } from '../highlights/SearchBar'
@@ -55,6 +56,8 @@ interface Props {
   onAgent?: (state: AgentState) => void
   /** Git da pasta da aba, para a linha de contexto (`null` fora de repositório). */
   git?: GitInfo | null
+  /** Comando rodado no primeiro prompt da aba (ex.: `claude --resume <id>`, vindo da página de Sessões). */
+  initialCommand?: string
 }
 
 const highlightColors = (t: ITheme) => ({
@@ -99,6 +102,7 @@ export function TerminalView({
   onPrompt,
   onAgent,
   git = null,
+  initialCommand,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
@@ -122,6 +126,11 @@ export function TerminalView({
   const aiSeq = useRef(0)
   const [altBuffer, setAltBuffer] = useState(false)
   const [dead, setDead] = useState(false)
+  /** Id do pty e estado do Claude da aba, para a barra do Claude. */
+  const [ptyId, setPtyId] = useState<number | null>(null)
+  const [agentState, setAgentState] = useState<AgentState | null>(null)
+  /** Manda bytes ao pty (definido quando a sessão abre). */
+  const sendRef = useRef<(data: string) => void>(() => {})
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const historyRef = useRef<string[]>([])
   const submitRef = useRef<(text: string) => void>(() => {})
@@ -144,6 +153,7 @@ export function TerminalView({
     const wrap = wrapRef.current
     if (!host || !wrap) return
     let sessionId: number | null = null
+    let pendingCommand = initialCommand ?? null
     let disposed = false
     let exited = false
 
@@ -191,7 +201,15 @@ export function TerminalView({
           .then((info) => !disposed && setNode((cur) => (JSON.stringify(cur) === JSON.stringify(info) ? cur : info)))
           .catch(() => undefined)
       },
-      setIdle,
+      (idle) => {
+        setIdle(idle)
+        // Primeiro prompt: roda o comando pedido na abertura da aba (uma vez só).
+        if (idle && pendingCommand) {
+          const command = pendingCommand
+          pendingCommand = null
+          window.setTimeout(() => runRef.current(command), 50)
+        }
+      },
     )
     // Blocos por comando: barra de status na margem, duração e copiar/explicar na linha do prompt.
     const blocks = new CommandBlocks(term, {
@@ -239,6 +257,7 @@ export function TerminalView({
       console.warn('[termo] WebGL indisponível, usando renderizador DOM', err)
     }
 
+    sendRef.current = (data) => send(data)
     const send = (data: string) => {
       if (sessionId != null) void ipc.write(sessionId, data)
     }
@@ -275,6 +294,12 @@ export function TerminalView({
         term.focus()
       },
       find: () => openSearchRef.current(),
+      sendText: (text) => {
+        term.focus()
+        term.paste(text)
+        // O Enter separado da colagem: dentro dela o Claude Code trataria como quebra de linha.
+        window.setTimeout(() => send('\r'), 120)
+      },
     })
 
     // ---- Sugestões de pasta: lê a linha digitada depois do prompt e lista `cd` clicáveis ----
@@ -432,6 +457,7 @@ export function TerminalView({
             })
           } else if (ev.kind === 'agent') {
             cbRef.current.onAgent?.(ev.state)
+            setAgentState(ev.state)
           } else {
             exited = true
             setDead(true)
@@ -442,6 +468,7 @@ export function TerminalView({
         })
         if (disposed) return void ipc.kill(res.id)
         sessionId = res.id
+        setPtyId(res.id)
         for (const w of res.warnings) term.write(warn(w))
         if (res.kind !== kind) cbRef.current.onKind(res.kind)
         term.focus()
@@ -522,6 +549,28 @@ export function TerminalView({
         onPick={(item) => pickRef.current(item)}
         onDismiss={() => dismissRef.current()}
       />
+      {kind === 'claude' && !dead && (
+        <ClaudeBar
+          ptyId={ptyId}
+          agentState={agentState === 'off' ? null : agentState}
+          cwd={cwd ?? null}
+          git={git}
+          theme={terminalTheme}
+          fontFamily={settings.fontFamily}
+          fontSize={terminalFontSize(settings.fontSize, settings.interfaceSize)}
+          visible={visible}
+          onKeys={(data) => {
+            sendRef.current(data)
+            termRef.current?.focus()
+          }}
+          onCommand={(command) => {
+            // O texto e o Enter separados: o Enter junto do texto o Claude Code trataria como colagem.
+            sendRef.current(command)
+            window.setTimeout(() => sendRef.current('\r'), 80)
+            termRef.current?.focus()
+          }}
+        />
+      )}
       {kind === 'shell' && !altBuffer && !dead && (
         <ContextBar
           cwd={shellCwd}

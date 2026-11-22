@@ -106,7 +106,8 @@ export function CommandPalette({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogBackdrop className="fixed inset-0 bg-black/30 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
-      <DialogContent className="mx-auto mt-[12vh] flex max-h-[min(520px,70vh)] w-[min(640px,calc(100vw-48px))] origin-top flex-col overflow-hidden rounded-[14px] border border-hairline bg-material-thick p-0 text-text shadow-panel backdrop-blur-[28px] backdrop-saturate-180 [transition:opacity_140ms_ease-out,scale_220ms_var(--spring-soft)] data-ending-style:scale-[0.98] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0 reduced-transparency:bg-surface reduced-transparency:backdrop-blur-none motion-reduce:scale-100">
+      {/* Fixa no topo e centrada na horizontal (inset-x-0 + mx-auto com largura definida), como a do VS Code. */}
+      <DialogContent className="fixed inset-x-0 top-[12vh] bottom-auto mx-auto my-0 flex h-fit max-h-[min(520px,70vh)] w-[min(640px,calc(100vw-48px))] origin-top flex-col overflow-hidden rounded-[14px] border border-hairline bg-material-thick p-0 text-text shadow-panel backdrop-blur-[28px] backdrop-saturate-180 [transition:opacity_140ms_ease-out,scale_220ms_var(--spring-soft)] data-ending-style:scale-[0.98] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0 reduced-transparency:bg-surface reduced-transparency:backdrop-blur-none motion-reduce:scale-100">
         <DialogTitle className="sr-only">Busca geral</DialogTitle>
         <Command filter="fuzzy" loop onAction={run} onQueryChange={setQuery} className="flex min-h-0 flex-1 flex-col">
           <div className="flex items-center gap-2 border-b border-hairline px-4">

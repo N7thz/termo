@@ -10,6 +10,7 @@ mod node;
 mod paths;
 mod pty;
 mod recent;
+mod review;
 mod session;
 mod settings;
 mod shell;
@@ -357,6 +358,30 @@ async fn new_window(app: AppHandle, cwd: Option<String>) -> Result<(), String> {
     window::open(&app, cwd.as_deref())
 }
 
+/// Code review: arquivos alterados do repositório da pasta (em relação ao HEAD); `None` fora de repositório.
+#[tauri::command]
+async fn review_status(cwd: String) -> Result<Option<review::ReviewStatus>, String> {
+    review::status(std::path::Path::new(&cwd))
+}
+
+/// Diff unificado de um arquivo alterado (`path` relativo à raiz do repositório).
+#[tauri::command]
+async fn review_diff(cwd: String, path: String) -> Result<review::FileDiff, String> {
+    review::diff(std::path::Path::new(&cwd), &path)
+}
+
+/// Prepara (`staged: true`) ou tira do stage um arquivo alterado.
+#[tauri::command]
+async fn review_stage(cwd: String, path: String, staged: bool) -> Result<(), String> {
+    review::stage(std::path::Path::new(&cwd), &path, staged)
+}
+
+/// Descarta as alterações de um arquivo (volta ao HEAD; arquivo novo é apagado).
+#[tauri::command]
+async fn review_discard(cwd: String, path: String) -> Result<(), String> {
+    review::discard(std::path::Path::new(&cwd), &path)
+}
+
 /// IA pelo Claude Code (`claude -p`): `mode` é `explain` (explicar um erro) ou `command` (linguagem natural
 /// vira um comando do PowerShell, que volta para a caixa sem ser executado).
 #[tauri::command]
@@ -374,10 +399,28 @@ async fn ai_ask(mode: String, input: String, cwd: Option<String>) -> Result<Stri
     .map_err(|e| e.to_string())?
 }
 
+/// Linha de status do Claude Code da aba `id` (modelo, esforço, contexto, custo); `None` antes da primeira resposta.
+#[tauri::command]
+async fn claude_line(id: u32) -> Option<usage::ClaudeLine> {
+    usage::session_line(id)
+}
+
 /// Uso do plano do Claude (5 h e semana), do último `statusLine` das abas do Claude.
 #[tauri::command]
 async fn claude_usage() -> usage::Usage {
     usage::read()
+}
+
+/// Ação no painel do coord sobre um arquivo: `release-claim` libera a reserva, `release` esquece o registro
+/// de edição. Devolve o `/state` atualizado.
+#[tauri::command]
+async fn coord_act(action: String, file: String) -> Result<serde_json::Value, String> {
+    let action = match action.as_str() {
+        "release-claim" => "/release-claim",
+        "release" => "/release",
+        other => return Err(format!("ação desconhecida: {other}")),
+    };
+    tauri::async_runtime::spawn_blocking(move || coord::act(action, &file)).await.map_err(|e| e.to_string())?
 }
 
 /// Histórico do coord (`/state`): sessões que já terminaram, com o plano de cada uma.
@@ -393,6 +436,8 @@ pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
+        // Só o seletor de pasta ("Escolher pasta…" da linha de contexto); nada de ler ou gravar arquivos.
+        .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
             let dir = app.path().app_config_dir()?;
             app.manage(SettingsStore::load(&dir));
@@ -459,8 +504,14 @@ pub fn run() {
             session_save,
             coord_agents,
             coord_state,
+            coord_act,
             claude_usage,
+            claude_line,
             ai_ask,
+            review_status,
+            review_diff,
+            review_stage,
+            review_discard,
             new_window,
         ])
         .build(tauri::generate_context!())

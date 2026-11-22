@@ -149,6 +149,8 @@ fn sanitize_profiles(list: Vec<Profile>) -> Vec<Profile> {
 #[serde(rename_all = "camelCase", default)]
 pub struct LayoutSettings {
     pub sidebar: bool,
+    /// Lateral minimizada: uma faixa estreita só com os ícones das abas.
+    pub sidebar_collapsed: bool,
     pub status_bar: bool,
     pub diff_badge: bool,
 }
@@ -157,6 +159,7 @@ impl Default for LayoutSettings {
     fn default() -> Self {
         Self {
             sidebar: true,
+            sidebar_collapsed: false,
             status_bar: true,
             diff_badge: true,
         }

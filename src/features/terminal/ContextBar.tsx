@@ -1,9 +1,7 @@
-import { Button } from '@ui-sdk/react/button'
 import type { ITheme } from '@xterm/xterm'
-import { Folder } from 'lucide-react'
 import type { CSSProperties } from 'react'
-import { ipc } from '../../lib/ipc'
 import type { GitInfo } from '../../shared/types'
+import { FolderPicker } from '../folder-picker/FolderPicker'
 import { BranchPicker } from '../git-branch/BranchPicker'
 import { NodePicker } from '../node-version/NodePicker'
 import type { NodeInfo } from '../node-version/types'
@@ -15,7 +13,7 @@ interface Props {
   theme: ITheme
   fontFamily: string
   fontSize: number
-  /** Prompt ocioso: dá para mandar um comando ao shell (trocar o Node). */
+  /** Prompt ocioso: dá para mandar um comando ao shell (trocar o Node ou a pasta). */
   idle: boolean
   onRun: (command: string) => void
 }
@@ -41,14 +39,7 @@ export function ContextBar({ cwd, git, node, theme, fontFamily, fontSize, idle, 
       {node?.project && (
         <NodePicker info={node} color={green} className={`${chip} text-text`} canRun={idle} onRun={onRun} />
       )}
-      <Button
-        className={`${chip} max-w-[50%] text-text`}
-        title={`${cwd}\nClique para abrir no Explorador`}
-        onClick={() => void ipc.openFolder(cwd)}
-      >
-        <Folder aria-hidden size={12} className="flex-none text-muted" />
-        <span className="truncate">{cwd}</span>
-      </Button>
+      <FolderPicker cwd={cwd} className={`${chip} max-w-[50%] text-text`} canRun={idle} onRun={onRun} />
       {git && <BranchPicker cwd={cwd} git={git} className={`${chip} text-(--ctx-branch)`} />}
     </div>
   )

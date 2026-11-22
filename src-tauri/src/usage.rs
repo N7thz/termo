@@ -17,9 +17,79 @@ pub fn usage_file() -> PathBuf {
 }
 
 /// Comando do `statusLine`: grava o JSON e não imprime nada (a linha de status fica vazia).
+///
+/// Também grava uma cópia por aba em `$TERMO_AGENT_STATUS.line` (modelo, esforço, contexto e custo daquela
+/// sessão, para a barra do Claude). Fora do Termo a variável não existe e só o arquivo geral é gravado.
 pub fn statusline_command() -> String {
     let path = usage_file().to_string_lossy().replace('\\', "/");
-    format!("cat > \"{path}.tmp\" && mv -f \"{path}.tmp\" \"{path}\"; exit 0")
+    let env = crate::agent_status::ENV_VAR;
+    format!(
+        "t=$(cat); printf '%s' \"$t\" > \"{path}.tmp\" && mv -f \"{path}.tmp\" \"{path}\"; \
+         [ -n \"${env}\" ] && printf '%s' \"$t\" > \"${env}.line\"; exit 0"
+    )
+}
+
+/// Arquivo com a última linha de status da sessão `id` (veja [`statusline_command`]).
+pub fn line_file(id: u32) -> std::path::PathBuf {
+    let mut p = crate::agent_status::state_file(id).into_os_string();
+    p.push(".line");
+    p.into()
+}
+
+/// O que a barra do Claude mostra de uma aba, tirado da linha de status do Claude Code.
+#[derive(Serialize, Debug, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeLine {
+    pub model_id: Option<String>,
+    pub model_name: Option<String>,
+    pub effort: Option<String>,
+    /// `default`, `acceptEdits`, `plan`... quando o Claude Code manda (nem toda versão manda).
+    pub permission_mode: Option<String>,
+    pub cwd: Option<String>,
+    pub cost_usd: Option<f64>,
+    pub duration_ms: Option<i64>,
+    pub lines_added: Option<i64>,
+    pub lines_removed: Option<i64>,
+    /// Quanto do contexto já foi usado, de 0 a 100.
+    pub context_pct: Option<f64>,
+    pub context_size: Option<i64>,
+    pub fast_mode: bool,
+    /// Quando o Claude Code mandou esses dados (ms desde 1970).
+    pub updated_at: i64,
+}
+
+/// Extrai a linha de status de uma aba. `None` se o JSON estiver pela metade.
+pub fn parse_line(text: &str, updated_at: i64) -> Option<ClaudeLine> {
+    let v: serde_json::Value = serde_json::from_str(text.trim()).ok()?;
+    let s = |ptr: &str| v.pointer(ptr).and_then(|x| x.as_str()).map(str::to_string);
+    let f = |ptr: &str| v.pointer(ptr).and_then(|x| x.as_f64());
+    let i = |ptr: &str| v.pointer(ptr).and_then(|x| x.as_f64()).map(|n| n as i64);
+    Some(ClaudeLine {
+        model_id: s("/model/id"),
+        model_name: s("/model/display_name"),
+        effort: s("/effort/level"),
+        permission_mode: s("/permission_mode"),
+        cwd: s("/workspace/current_dir").or_else(|| s("/cwd")),
+        cost_usd: f("/cost/total_cost_usd"),
+        duration_ms: i("/cost/total_duration_ms"),
+        lines_added: i("/cost/total_lines_added"),
+        lines_removed: i("/cost/total_lines_removed"),
+        context_pct: f("/context_window/used_percentage").map(|p| p.clamp(0.0, 100.0)),
+        context_size: i("/context_window/context_window_size"),
+        fast_mode: v.pointer("/fast_mode").and_then(|x| x.as_bool()).unwrap_or(false),
+        updated_at,
+    })
+}
+
+/// Última linha de status da aba `id`; `None` antes da primeira resposta do Claude.
+pub fn session_line(id: u32) -> Option<ClaudeLine> {
+    let file = line_file(id);
+    let updated_at = fs::metadata(&file)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_millis() as i64);
+    parse_line(&fs::read_to_string(&file).ok()?, updated_at)
 }
 
 /// O usuário já tem `statusLine` próprio em `~/.claude/settings.json`? Nesse caso não o trocamos.
@@ -163,8 +233,31 @@ mod tests {
     #[test]
     fn statusline_is_silent() {
         let cmd = statusline_command();
-        assert!(cmd.starts_with("cat > \""));
+        assert!(cmd.starts_with("t=$(cat); "));
         assert!(cmd.ends_with("exit 0"));
         assert!(!cmd.contains('\\'));
+        assert!(cmd.contains("> \"$TERMO_AGENT_STATUS.line\""));
+        assert!(!cmd.contains("echo"), "a linha de status precisa ficar vazia");
+    }
+
+    #[test]
+    fn parses_session_line() {
+        let json = r#"{"model":{"id":"claude-opus-5-5","display_name":"Opus 5.5"},"workspace":{"current_dir":"D:/x"},"cost":{"total_cost_usd":1.25,"total_duration_ms":60000,"total_lines_added":10,"total_lines_removed":2},"context_window":{"used_percentage":42.5,"context_window_size":200000},"effort":{"level":"high"},"fast_mode":true}"#;
+        let l = parse_line(json, 7).unwrap();
+        assert_eq!(l.model_name.as_deref(), Some("Opus 5.5"));
+        assert_eq!(l.effort.as_deref(), Some("high"));
+        assert_eq!(l.cwd.as_deref(), Some("D:/x"));
+        assert_eq!(l.context_pct, Some(42.5));
+        assert_eq!(l.context_size, Some(200_000));
+        assert_eq!((l.lines_added, l.lines_removed), (Some(10), Some(2)));
+        assert!(l.fast_mode);
+        assert_eq!(l.permission_mode, None);
+        assert_eq!(l.updated_at, 7);
+        assert!(parse_line("{\"model\":", 1).is_none());
+    }
+
+    #[test]
+    fn line_file_sits_next_to_the_state_file() {
+        assert!(line_file(5).to_string_lossy().ends_with("5.state.line"));
     }
 }

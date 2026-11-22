@@ -27,6 +27,8 @@ export interface AgentSession {
   atualizado?: number | null
   agente?: string | null
   modelo?: string | null
+  /** `low`..`max`, da linha de comando ou da definição do agente. */
+  esforco?: string | null
   detalhe?: string
   pedido?: string
   resultado?: string | null
@@ -56,9 +58,30 @@ export interface HistoryEntry {
   progress?: PlanProgress
 }
 
+/** Sessão registrada no coord (`/state` → `sessions`), pela chave do `sessionId` completo. */
+export interface CoordSession {
+  cwd?: string
+  task?: string
+  /** Última atividade (ms). */
+  last: number
+  plan?: { titulo?: string; started: number; estMin?: number; steps: Step[] }
+  progress?: PlanProgress
+}
+
+/** Registro de edição (`locks`) ou reserva (`claims`) de um arquivo ou pasta. */
+export interface FileMark {
+  session: string
+  display: string
+  since: number
+  dir?: boolean
+}
+
 export interface StateResponse {
   now: number
   history: HistoryEntry[]
+  sessions?: Record<string, CoordSession>
+  locks?: Record<string, FileMark>
+  claims?: Record<string, FileMark>
 }
 
 export type Tone = 'busy' | 'idle' | 'done' | 'failed' | 'unknown'
@@ -148,4 +171,103 @@ export function groupByProject(sessions: readonly AgentSession[], current?: stri
       ),
     }))
     .sort((a, b) => Number(b.current) - Number(a.current) || latest(b.sessions) - latest(a.sessions))
+}
+
+export interface TimelineStep {
+  t: string
+  state: 'done' | 'current' | 'pending'
+  /** Quando terminou (ms), nas concluídas. */
+  at: number | null
+  /** Tempo gasto: da etapa anterior até esta (concluída) ou até agora (atual). */
+  took: number | null
+}
+
+/**
+ * Etapas do plano com o tempo de cada uma, como a aba Etapas do painel do coord. `ended` (sessão que já
+ * acabou) faz a etapa pendente deixar de ser "atual".
+ */
+export function timeline(
+  plan: { started: number; steps: readonly Step[] },
+  now: number,
+  ended: number | null = null,
+): TimelineStep[] {
+  let prev = plan.started
+  let currentSeen = false
+  return plan.steps.map((st) => {
+    if (st.done) {
+      const took = st.done - prev
+      prev = st.done
+      return { t: st.t, state: 'done', at: st.done, took }
+    }
+    if (!currentSeen && ended == null) {
+      currentSeen = true
+      return { t: st.t, state: 'current', at: null, took: now - prev }
+    }
+    return { t: st.t, state: 'pending', at: null, took: null }
+  })
+}
+
+/** "8 min", "1 h 05 min". */
+export function duration(ms: number): string {
+  const m = Math.max(1, Math.round(ms / 60000))
+  if (m < 60) return `${m} min`
+  return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`
+}
+
+/** "19:42". */
+export function clock(ts: number): string {
+  return new Date(ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+}
+
+export type ModelTier = 'opus' | 'sonnet' | 'haiku' | 'fable' | 'outro'
+
+/** Família do modelo pelo nome (`claude-opus-5-5`, `sonnet`...); `null` para o modelo da sessão. */
+export function modelTier(model: string | null | undefined): ModelTier | null {
+  const m = (model ?? '').toLowerCase()
+  if (!m || m === 'inherit') return null
+  return (['opus', 'sonnet', 'haiku', 'fable'] as const).find((k) => m.includes(k)) ?? 'outro'
+}
+
+export const TIER_NAME: Record<ModelTier, string> = {
+  opus: 'Opus',
+  sonnet: 'Sonnet',
+  haiku: 'Haiku',
+  fable: 'Fable',
+  outro: 'outro modelo',
+}
+
+/** Nível do esforço de 1 a 5 (`low`..`max`); 0 sem esforço conhecido. */
+export function effortLevel(effort: string | null | undefined): number {
+  return { low: 1, medium: 2, high: 3, xhigh: 4, max: 5 }[effort ?? ''] ?? 0
+}
+
+/** Arquivos que a sessão está editando e os que ela reservou, mais recentes primeiro. */
+export function filesOf(state: StateResponse | null, sessionId: string): { editing: FileMark[]; claims: FileMark[] } {
+  const mine = (marks?: Record<string, FileMark>) =>
+    Object.values(marks ?? {})
+      .filter((m) => m.session === sessionId)
+      .sort((a, b) => b.since - a.since)
+  return { editing: mine(state?.locks), claims: mine(state?.claims) }
+}
+
+/**
+ * Comando que abre a sessão num terminal: as de segundo plano com `claude attach <id>`, as interativas com
+ * `claude --resume <sessionId>` (retoma a conversa).
+ */
+export function openCommand(s: Pick<AgentSession, 'tipo' | 'id' | 'sessionId'>): string | null {
+  const safe = (v: string) => /^[\w-]+$/.test(v)
+  if (s.tipo === 'background') return safe(s.id) ? `claude attach ${s.id}` : null
+  return s.sessionId && safe(s.sessionId) ? `claude --resume ${s.sessionId}` : null
+}
+
+/** Quantas sessões estão trabalhando e quantas esperam você (para o indicador da barra de título). */
+export function counts(sessions: readonly AgentSession[]): { busy: number; waiting: number } {
+  let busy = 0
+  let waiting = 0
+  for (const s of sessions) {
+    const tone = statusOf(s).tone
+    if (tone === 'busy') busy++
+    else if (tone === 'idle') waiting++
+  }
+  return { busy, waiting }
 }

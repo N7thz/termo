@@ -16,6 +16,8 @@ describe('actionFor', () => {
     expect(actionFor(key('E', ctrlShift))).toBe('split-tab')
     expect(actionFor(key('W', ctrlShift))).toBe('close-tab')
     expect(actionFor(key('A', ctrlShift))).toBe('sessions')
+    expect(actionFor(key('G', ctrlShift))).toBe('code-review')
+    expect(actionFor(key('b', { ctrlKey: true, altKey: true, code: 'KeyB' }))).toBe('collapse-sidebar')
     expect(actionFor(key('N', ctrlShift))).toBe('new-window')
     expect(actionFor(key('Tab', ctrl))).toBe('next-tab')
     expect(actionFor(key('Tab', ctrlShift))).toBe('prev-tab')

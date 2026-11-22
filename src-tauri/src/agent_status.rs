@@ -148,6 +148,7 @@ where
             }
         }
         let _ = fs::remove_file(&file);
+        let _ = fs::remove_file(crate::usage::line_file(id));
     })?;
     Ok(())
 }

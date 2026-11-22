@@ -12,8 +12,11 @@ use std::time::Duration;
 
 pub const PORT: u16 = 4747;
 
-/// Caminhos que o app pode pedir ao painel (só leitura).
+/// Caminhos que o app pode ler do painel.
 const ALLOWED: [&str; 2] = ["/agents", "/state"];
+/// Ações que o app pode pedir ao painel, sempre sobre um arquivo: liberar a reserva (`/release-claim`)
+/// ou esquecer o registro de edição (`/release`). Nada de `all=1`.
+const ACTIONS: [&str; 2] = ["/release-claim", "/release"];
 
 fn addr() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], PORT))
@@ -36,10 +39,17 @@ fn parse_response(raw: &[u8]) -> Result<&[u8], String> {
 }
 
 fn get(path: &str, timeout: Duration) -> std::io::Result<Vec<u8>> {
+    request("GET", path, timeout)
+}
+
+fn request(method: &str, path: &str, timeout: Duration) -> std::io::Result<Vec<u8>> {
     let mut stream = TcpStream::connect_timeout(&addr(), Duration::from_millis(600))?;
     stream.set_read_timeout(Some(timeout))?;
     stream.set_write_timeout(Some(Duration::from_secs(2)))?;
-    write!(stream, "GET {path} HTTP/1.0\r\nHost: 127.0.0.1:{PORT}\r\nConnection: close\r\n\r\n")?;
+    write!(
+        stream,
+        "{method} {path} HTTP/1.0\r\nHost: 127.0.0.1:{PORT}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    )?;
     let mut buf = Vec::new();
     stream.read_to_end(&mut buf)?;
     Ok(buf)
@@ -90,6 +100,36 @@ pub fn fetch(path: &str) -> Result<serde_json::Value, String> {
     serde_json::from_slice(body).map_err(|e| format!("JSON inválido do painel: {e}"))
 }
 
+/// Codifica o valor de um parâmetro da URL (tudo fora de `A-Za-z0-9-_.~` vira `%XX`).
+fn encode(value: &str) -> String {
+    value
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+/// Monta o caminho de uma ação sobre `file`; recusa ações fora da lista e arquivo vazio.
+pub fn action_path(action: &str, file: &str) -> Result<String, String> {
+    if !ACTIONS.contains(&action) {
+        return Err(format!("ação não permitida: {action}"));
+    }
+    if file.trim().is_empty() {
+        return Err("arquivo vazio".into());
+    }
+    Ok(format!("{action}?file={}", encode(file)))
+}
+
+/// Pede ao painel uma ação sobre um arquivo (o painel já está rodando: quem chama acabou de ler `/agents`).
+pub fn act(action: &str, file: &str) -> Result<serde_json::Value, String> {
+    let path = action_path(action, file)?;
+    let raw = request("POST", &path, Duration::from_secs(5)).map_err(|e| format!("o painel não respondeu: {e}"))?;
+    let body = parse_response(&raw)?;
+    serde_json::from_slice(body).map_err(|e| format!("JSON inválido do painel: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,6 +144,14 @@ mod tests {
     fn rejects_error_status_and_garbage() {
         assert!(parse_response(b"HTTP/1.1 500 Internal\r\n\r\n{}").unwrap_err().contains("500"));
         assert!(parse_response(b"lixo").is_err());
+    }
+
+    #[test]
+    fn actions_are_limited_and_encoded() {
+        assert_eq!(action_path("/release-claim", r"D:\a b\ç").unwrap(), "/release-claim?file=D%3A%5Ca%20b%5C%C3%A7");
+        assert!(action_path("/release?all=1", "x").is_err());
+        assert!(action_path("/shutdown", "x").is_err());
+        assert!(action_path("/release", "  ").is_err());
     }
 
     #[test]

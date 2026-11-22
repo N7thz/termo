@@ -19,11 +19,13 @@ export type AppAction =
   | 'themes'
   | 'settings'
   | 'sessions'
+  | 'code-review'
   | 'new-window'
   | 'fullscreen'
   | 'shortcuts'
   | 'palette'
   | 'toggle-sidebar'
+  | 'collapse-sidebar'
   | `profile-${ProfileNumber}`
   | 'next-profile'
   | 'prev-profile'
@@ -205,6 +207,13 @@ export const SHORTCUTS: readonly Shortcut[] = [
   },
   {
     group: 'Janela',
+    label: 'Revisão de código',
+    keys: ['mod+shift+g'],
+    action: 'code-review',
+    match: (e) => ctrlShift(e) && key(e) === 'g',
+  },
+  {
+    group: 'Janela',
     label: 'Nova janela',
     keys: ['mod+shift+n'],
     action: 'new-window',
@@ -223,6 +232,13 @@ export const SHORTCUTS: readonly Shortcut[] = [
     keys: ['mod+shift+b'],
     action: 'toggle-sidebar',
     match: (e) => ctrlShift(e) && key(e) === 'b',
+  },
+  {
+    group: 'Janela',
+    label: 'Minimizar/expandir a lateral',
+    keys: ['mod+alt+b'],
+    action: 'collapse-sidebar',
+    match: (e) => ctrlAlt(e) && e.code === 'KeyB',
   },
   {
     group: 'Janela',

@@ -6,12 +6,14 @@ import { Plus, X } from 'lucide-react'
 import { type CSSProperties, useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { type AgentState, withAgentState } from './features/agent-status/agentState'
 import { BrowserPanel } from './features/browser/BrowserPanel'
+import { CodeReviewPanel } from './features/code-review/CodeReviewPanel'
 import { TabMenu } from './features/context-menu/TabMenu'
 import { TerminalMenu } from './features/context-menu/TerminalMenu'
 import type { TabMenuAction, TerminalActions, TerminalMenuAction } from './features/context-menu/types'
 import type { Severity } from './features/highlights/matchers'
 import { CommandPalette } from './features/palette/CommandPalette'
 import { createProfile, PROFILE_COLORS, pinFolder, profileColorCss } from './features/profiles/profiles'
+import { SessionsIndicator } from './features/sessions/SessionsIndicator'
 import { SessionsPage } from './features/sessions/SessionsPage'
 import { SettingsPanel } from './features/settings/SettingsPanel'
 import { ShortcutsDialog } from './features/shortcuts/ShortcutsDialog'
@@ -316,6 +318,45 @@ export function App() {
 
   // Ações do xterm de cada aba, para o menu do botão direito.
   const terminalActions = useRef(new Map<number, TerminalActions>())
+  /** Comando que a aba nova roda no primeiro prompt (pela chave da aba; vem da página de Sessões). */
+  const initialCommands = useRef(new Map<number, string>())
+  /** Abre uma aba na pasta e, se houver, roda o comando nela (`claude attach` / `claude --resume`). */
+  const openTabWithCommand = (dir: string, command: string | null) => {
+    if (command) initialCommands.current.set(state.nextKey, command)
+    setShowSessions(false)
+    openTab('shell', { cwd: dir || undefined })
+  }
+
+  // ---- Code review: painel ao lado do terminal e envio dos comentários ao Claude Code ----
+  const [showReview, setShowReview] = useState(false)
+  const reviewCwd = state.active != null ? (workspace.info(state.active).cwd ?? null) : (cwd ?? null)
+  const reviewVersion = activeInfo.git
+    ? `${activeInfo.git.added}:${activeInfo.git.removed}:${activeInfo.git.changed}:${activeInfo.git.untracked}`
+    : ''
+  /** Texto esperando uma aba do Claude ficar pronta (`key` nula: a próxima aba do Claude que abrir). */
+  const pendingClaude = useRef<{ text: string; key: number | null; at: number } | null>(null)
+  const deliverToClaude = (key: number, text: string) => {
+    dispatch({ type: 'activate', key })
+    // Um instante para a aba aparecer e o xterm receber o foco antes da colagem.
+    window.setTimeout(() => terminalActions.current.get(key)?.sendText?.(text), 150)
+  }
+  const sendToClaude = (text: string) => {
+    const active = tabs.find((t) => t.key === state.active)
+    const target = active?.kind === 'claude' ? active : tabs.find((t) => t.kind === 'claude')
+    const ready = target && agents.get(target.key) && agents.get(target.key) !== 'off'
+    if (target && ready) return deliverToClaude(target.key, text)
+    pendingClaude.current = { text, key: target?.key ?? null, at: Date.now() }
+    if (target) dispatch({ type: 'activate', key: target.key })
+    else openTab('claude', { cwd: reviewCwd ?? undefined })
+  }
+  /** O Claude da aba ficou pronto: entrega o texto pendente (vale por 2 minutos). */
+  const onClaudeState = (tab: { key: number; kind: SessionKind }, s: AgentState) => {
+    const pending = pendingClaude.current
+    if (!pending || s !== 'idle' || tab.kind !== 'claude') return
+    if (pending.key != null && pending.key !== tab.key) return
+    pendingClaude.current = null
+    if (Date.now() - pending.at < 120_000) deliverToClaude(tab.key, pending.text)
+  }
 
   const openThemes = useCallback(() => {
     setShowSettings(false)
@@ -444,6 +485,8 @@ export function App() {
         case 'sessions':
           setShowThemes(false)
           return setShowSessions((v) => !v)
+        case 'code-review':
+          return setShowReview((v) => !v)
         case 'fullscreen':
           return void toggleFullscreen()
         case 'shortcuts':
@@ -452,6 +495,11 @@ export function App() {
           return setShowPalette((v) => !v)
         case 'toggle-sidebar':
           return updateSettings({ layout: { ...layout, sidebar: !layout.sidebar } })
+        case 'collapse-sidebar':
+          // Com a lateral escondida, o atalho mostra já minimizada.
+          return updateSettings({
+            layout: { ...layout, sidebar: true, sidebarCollapsed: layout.sidebar ? !layout.sidebarCollapsed : true },
+          })
         case 'next-profile':
         case 'prev-profile': {
           const step = action === 'next-profile' ? 1 : -1
@@ -483,7 +531,7 @@ export function App() {
           só o terminal tem cartão. Fica sempre montada e abre/fecha pela largura (o que sobra fechada, 6px,
           é a margem esquerda), para a animação partir de onde estiver se o atalho for apertado no meio. */}
       <div
-        className={`flex-none overflow-hidden [transition:width_380ms_var(--spring-soft),opacity_200ms_ease-out] motion-reduce:[transition:opacity_150ms_ease] ${layout.sidebar ? 'w-56' : 'w-2.5 opacity-0'}`}
+        className={`flex-none overflow-hidden [transition:width_380ms_var(--spring-soft),opacity_200ms_ease-out] motion-reduce:[transition:opacity_150ms_ease] ${layout.sidebar ? (layout.sidebarCollapsed ? 'w-14' : 'w-56') : 'w-2.5 opacity-0'}`}
         inert={!layout.sidebar}
       >
         <TabSidebar
@@ -511,6 +559,10 @@ export function App() {
           partnerOf={partnerOf}
           agents={agents}
           onReorder={(key, before, group) => dispatch({ type: 'reorder', key, before, group })}
+          collapsed={layout.sidebarCollapsed}
+          onToggleCollapsed={() =>
+            updateSettings({ layout: { ...layout, sidebarCollapsed: !layout.sidebarCollapsed } })
+          }
           onSplitWith={(key) =>
             state.active != null && key !== state.active && dispatch({ type: 'split', key: state.active, with: key })
           }
@@ -588,7 +640,16 @@ export function App() {
             ))}
           </TabsList>
           <span data-tauri-drag-region className="flex-1 self-stretch" />
-          {layout.diffBadge && <GitDiff git={activeInfo.git} colors={diffColors} className="px-1" />}
+          {layout.diffBadge && activeInfo.git && (
+            <Button
+              className="rounded-md hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-accent"
+              aria-label="Abrir a revisão de código"
+              title="Revisão de código (Ctrl+Shift+G)"
+              onClick={() => setShowReview((v) => !v)}
+            >
+              <GitDiff git={activeInfo.git} colors={diffColors} className="px-1" />
+            </Button>
+          )}
           <div className="flex gap-1">
             {/* Os atalhos são ligados em actionFor; o shortcut do Tooltip só mostra e anuncia. */}
             <Tooltip shortcut="mod+shift+t">
@@ -601,6 +662,7 @@ export function App() {
                 Nova aba <TooltipShortcut className={tooltipKbd} />
               </TooltipContent>
             </Tooltip>
+            <SessionsIndicator onOpen={() => setShowSessions((v) => !v)} />
             <UsageBattery />
             <Tooltip shortcut="mod+shift+k">
               <TooltipTrigger
@@ -654,6 +716,7 @@ export function App() {
                 >
                   <TerminalView
                     kind={tab.kind}
+                    initialCommand={initialCommands.current.get(tab.key)}
                     active={tab.key === state.active}
                     visible={tab.key === state.active || paneStyle(tab.key) != null}
                     onFocus={() => tab.key !== state.active && dispatch({ type: 'activate', key: tab.key })}
@@ -670,7 +733,10 @@ export function App() {
                     }
                     onClose={() => dispatch({ type: 'close', key: tab.key })}
                     onSeverity={(severity) => onSeverity(tab.key, severity)}
-                    onAgent={(s) => setAgents((m) => withAgentState(m, tab.key, s))}
+                    onAgent={(s) => {
+                      setAgents((m) => withAgentState(m, tab.key, s))
+                      onClaudeState(tab, s)
+                    }}
                     onActions={(actions) =>
                       actions ? terminalActions.current.set(tab.key, actions) : terminalActions.current.delete(tab.key)
                     }
@@ -707,6 +773,7 @@ export function App() {
                 active
                 cwd={state.active != null ? workspace.info(state.active).cwd : null}
                 onClose={() => setShowSessions(false)}
+                onOpen={openTabWithCommand}
               />
             )}
             {showThemes && (
@@ -719,6 +786,15 @@ export function App() {
             )}
           </main>
           <BrowserPanel linkTarget={settings.linkTarget} />
+          <CodeReviewPanel
+            open={showReview}
+            cwd={reviewCwd}
+            version={reviewVersion}
+            colors={diffColors}
+            fontFamily={settings.fontFamily}
+            onClose={() => setShowReview(false)}
+            onSendToClaude={sendToClaude}
+          />
         </div>
         {layout.statusBar && (
           <StatusBar
@@ -749,12 +825,25 @@ export function App() {
             keys: 'mod+shift+n',
             run: () => void ipc.newWindow(state.active != null ? workspace.info(state.active).cwd : cwd),
           },
+          {
+            id: 'code-review',
+            label: showReview ? 'Fechar a revisão de código' : 'Revisão de código',
+            keys: 'mod+shift+g',
+            run: () => setShowReview((v) => !v),
+          },
           { id: 'sessions', label: 'Sessões do Claude Code', keys: 'mod+shift+a', run: () => setShowSessions(true) },
           {
             id: 'sidebar',
             label: layout.sidebar ? 'Ocultar abas na lateral' : 'Mostrar abas na lateral',
             keys: 'mod+shift+b',
             run: () => updateSettings({ layout: { ...layout, sidebar: !layout.sidebar } }),
+          },
+          {
+            id: 'collapse-sidebar',
+            label: layout.sidebarCollapsed ? 'Expandir a lateral' : 'Minimizar a lateral',
+            keys: 'mod+alt+b',
+            run: () =>
+              updateSettings({ layout: { ...layout, sidebar: true, sidebarCollapsed: !layout.sidebarCollapsed } }),
           },
           { id: 'shortcuts', label: 'Atalhos de teclado', keys: 'f1', run: () => setShowShortcuts(true) },
           ...profiles

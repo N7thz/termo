@@ -45,6 +45,8 @@ export interface Profile {
 export interface LayoutSettings {
   /** Abas numa lista na lateral (com pasta, branch e +/-) no lugar da barra de abas. */
   sidebar: boolean
+  /** Lateral minimizada: faixa estreita só com os ícones das abas. */
+  sidebarCollapsed: boolean
   /** Barra de status embaixo: pasta, branch e alterações da aba ativa. */
   statusBar: boolean
   /** Contador +linhas/-linhas da aba ativa na barra do topo. */

@@ -10,6 +10,8 @@ export interface TerminalActions {
   clear: () => void
   /** Abre a busca na saída (o mesmo do Ctrl+Shift+F). */
   find: () => void
+  /** Cola o texto como uma colagem (bracketed paste) e manda Enter: assim o Claude Code recebe uma mensagem só. */
+  sendText?: (text: string) => void
 }
 
 export type TabMenuAction =

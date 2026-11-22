@@ -22,7 +22,7 @@ export const DEFAULT_SETTINGS: Settings = {
     uuids: true,
     rules: [{ pattern: String.raw`\b(TODO|FIXME|HACK)\b`, color: '#e0af68' }],
   },
-  layout: { sidebar: true, statusBar: true, diffBadge: true },
+  layout: { sidebar: true, sidebarCollapsed: false, statusBar: true, diffBadge: true },
   profiles: [
     { id: 'trabalho', name: 'Trabalho', color: 'green', cwd: '', pinned: [] },
     { id: 'pessoal', name: 'Pessoal', color: 'yellow', cwd: '', pinned: [] },

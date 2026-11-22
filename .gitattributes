@@ -1,0 +1,7 @@
+# O Biome exige LF; sem isto, o core.autocrlf do Windows põe CRLF a cada checkout e o lint falha.
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.icns binary
+*.dll binary
+*.exe binary

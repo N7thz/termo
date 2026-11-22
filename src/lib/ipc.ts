@@ -4,6 +4,8 @@
  */
 import { Channel, invoke } from '@tauri-apps/api/core'
 import type { BrowserBounds } from '../features/browser/types'
+import type { ClaudeLine } from '../features/claude-bar/claude'
+import type { FileDiff, ReviewStatus } from '../features/code-review/diff'
 import type { GitBranchInfo } from '../features/git-branch/types'
 import type { NodeInfo, NodeVersions } from '../features/node-version/types'
 import type { SessionSnapshot } from '../features/tabs/tabs'
@@ -64,12 +66,25 @@ export const ipc = {
     invoke<FileHit[]>('search_files', { cwd, query, limit: limit ?? null }),
   openFolder: (path: string) => invoke<void>('open_folder', { path }),
 
+  /** Code review: arquivos alterados do repositório da pasta (em relação ao HEAD); `null` fora de repositório. */
+  reviewStatus: (cwd: string) => invoke<ReviewStatus | null>('review_status', { cwd }),
+  /** Diff unificado de um arquivo alterado (`path` relativo à raiz do repositório). */
+  reviewDiff: (cwd: string, path: string) => invoke<FileDiff>('review_diff', { cwd, path }),
+  /** Prepara (`true`) ou tira do stage um arquivo alterado. */
+  reviewStage: (cwd: string, path: string, staged: boolean) => invoke<void>('review_stage', { cwd, path, staged }),
+  /** Descarta as alterações do arquivo: volta ao HEAD; arquivo novo é apagado. */
+  reviewDiscard: (cwd: string, path: string) => invoke<void>('review_discard', { cwd, path }),
+
   /** Sessões do Claude Code no painel do coord (`/agents`); o formato está em features/sessions/sessions.ts. */
   coordAgents: () => invoke<unknown>('coord_agents'),
   /** Histórico do coord (`/state`): sessões que já terminaram. */
   coordState: () => invoke<unknown>('coord_state'),
+  /** Painel do coord: `release-claim` libera a reserva de um arquivo; `release` esquece o registro de edição. */
+  coordAct: (action: 'release-claim' | 'release', file: string) => invoke<unknown>('coord_act', { action, file }),
   /** Uso do plano do Claude (5 h e semana), do último `statusLine` das abas do Claude Code. */
   claudeUsage: () => invoke<ClaudeUsage>('claude_usage'),
+  /** Linha de status do Claude Code da aba (`id` do pty): modelo, esforço, contexto e custo. */
+  claudeLine: (id: number) => invoke<ClaudeLine | null>('claude_line', { id }),
   /** Abre outra janela do Termo; a primeira aba dela abre em `cwd`. */
   newWindow: (cwd?: string | null) => invoke<void>('new_window', { cwd: cwd ?? null }),
   /** IA pelo Claude Code: `explain` explica um erro; `command` converte um pedido em comando (sem executar). */
