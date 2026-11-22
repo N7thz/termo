@@ -1,6 +1,7 @@
 import { Button } from '@ui-sdk/react/button'
 import { Field, FieldDescription, FieldLabel } from '@ui-sdk/react/field'
 import { Switch, SwitchThumb } from '@ui-sdk/react/switch'
+import { X } from 'lucide-react'
 import { useState } from 'react'
 import { MAX_PATTERN, MAX_RULES } from '../../shared/settings'
 import type { HighlightRule, HighlightSettings } from '../../shared/types'
@@ -93,7 +94,7 @@ export function HighlightSettingsSection({ value, onChange, switchClass, thumbCl
                 aria-label={`Remover regra ${i + 1}`}
                 onClick={() => saveRules(drafts.filter((_, j) => j !== i))}
               >
-                ×
+                <X size={13} />
               </Button>
             </div>
           )

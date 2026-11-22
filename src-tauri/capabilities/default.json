@@ -1,7 +1,18 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Janela principal: os eventos e o IPC do núcleo, mais alternar a tela cheia (F11). Área de transferência e links passam por comandos próprios, validados no Rust.",
+  "description": "Janela principal: os eventos e o IPC do núcleo, o zoom do tamanho da interface e o controle da janela pela barra de título própria (arrastar, minimizar, maximizar, fechar) e a tela cheia (F11). Área de transferência e links passam por comandos próprios, validados no Rust.",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-set-fullscreen", "core:window:allow-is-fullscreen"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-is-maximized",
+    "core:window:allow-close",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-is-fullscreen",
+    "core:webview:allow-set-webview-zoom"
+  ]
 }

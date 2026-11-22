@@ -1,7 +1,7 @@
 // Classes repetidas entre a barra e o painel de configurações.
 
 export const actionButton =
-  'h-7 min-w-7.5 rounded-[7px] px-[9px] text-[14px] text-muted [transition:background-color_140ms_ease-out,color_140ms_ease-out,scale_400ms_var(--spring)] hover:bg-surface-hover hover:text-text focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent active:scale-[0.94] active:bg-border active:text-text active:duration-50 data-open:bg-border data-open:text-text motion-reduce:active:scale-100'
+  'inline-flex items-center justify-center gap-1.5 h-7 min-w-7.5 rounded-[7px] px-[9px] text-[14px] text-muted [transition:background-color_140ms_ease-out,color_140ms_ease-out,scale_400ms_var(--spring)] hover:bg-surface-hover hover:text-text focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent active:scale-[0.94] active:bg-border active:text-text active:duration-50 data-open:bg-border data-open:text-text motion-reduce:active:scale-100'
 
 export const tooltip =
   'm-0 flex origin-(--transform-origin) items-center gap-2 rounded-[7px] border border-hairline bg-surface px-2 py-[5px] text-[12px] text-text shadow-tip [transition:opacity_120ms_ease-out,scale_200ms_var(--spring-soft)] data-ending-style:scale-[0.96] data-ending-style:opacity-0 data-instant:transition-none data-starting-style:scale-[0.96] data-starting-style:opacity-0'

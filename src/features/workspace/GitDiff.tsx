@@ -1,3 +1,4 @@
+import { ArrowDown, ArrowUp, GitBranch as GitBranchIcon, TriangleAlert } from 'lucide-react'
 import type { GitInfo } from '../../shared/types'
 import { compactCount } from './format'
 
@@ -34,13 +35,26 @@ export function GitBranch({ git, className = '' }: { git: GitInfo; className?: s
   const name = git.branch ?? (git.commit ? `@${git.commit}` : 'sem commits')
   return (
     <span className={`inline-flex min-w-0 items-center gap-1 ${className}`} title={`Branch: ${name}`}>
-      <span aria-hidden className="opacity-70">
-        ⎇
-      </span>
+      <GitBranchIcon aria-hidden size={12} className="flex-none opacity-70" />
       <span className="truncate">{name}</span>
-      {git.ahead > 0 && <span title={`${git.ahead} commit(s) para enviar`}>↑{git.ahead}</span>}
-      {git.behind > 0 && <span title={`${git.behind} commit(s) para receber`}>↓{git.behind}</span>}
-      {git.conflicts > 0 && <span title={`${git.conflicts} conflito(s)`}>⚠{git.conflicts}</span>}
+      {git.ahead > 0 && (
+        <span className="inline-flex items-center" title={`${git.ahead} commit(s) para enviar`}>
+          <ArrowUp aria-hidden size={11} />
+          {git.ahead}
+        </span>
+      )}
+      {git.behind > 0 && (
+        <span className="inline-flex items-center" title={`${git.behind} commit(s) para receber`}>
+          <ArrowDown aria-hidden size={11} />
+          {git.behind}
+        </span>
+      )}
+      {git.conflicts > 0 && (
+        <span className="inline-flex items-center gap-0.5" title={`${git.conflicts} conflito(s)`}>
+          <TriangleAlert aria-hidden size={11} />
+          {git.conflicts}
+        </span>
+      )}
     </span>
   )
 }

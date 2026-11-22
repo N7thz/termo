@@ -10,9 +10,11 @@ import {
   CommandShortcut,
 } from '@ui-sdk/react/command'
 import { Dialog, DialogBackdrop, DialogContent, DialogTitle } from '@ui-sdk/react/dialog'
+import { File, History, Search } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { ipc } from '../../lib/ipc'
 import type { FileHit } from '../../shared/types'
+import { TabKindIcon } from '../tabs/TabKindIcon'
 import type { Tab } from '../tabs/tabs'
 import { folderName, shortPath } from '../workspace/format'
 import type { TabInfo } from '../workspace/useWorkspace'
@@ -40,7 +42,7 @@ interface Props {
 const ITEM =
   'flex cursor-default items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] outline-none select-none data-highlighted:bg-surface-hover [&_[data-slot=command-shortcut]]:ml-auto [&_[data-slot=command-shortcut]]:font-mono [&_[data-slot=command-shortcut]]:text-[11px] [&_[data-slot=command-shortcut]]:text-muted'
 const GROUP_LABEL = 'px-2.5 pt-2 pb-1 text-[10px] font-semibold tracking-[0.06em] text-muted uppercase'
-const ICON = 'w-4 flex-none text-center font-mono text-[11px] text-muted'
+const ICON = 'flex w-4 flex-none justify-center text-muted'
 
 /**
  * Busca geral (Ctrl+Shift+P): abas abertas, pastas recentes, arquivos da pasta da aba ativa
@@ -108,9 +110,7 @@ export function CommandPalette({
         <DialogTitle className="sr-only">Busca geral</DialogTitle>
         <Command filter="fuzzy" loop onAction={run} onQueryChange={setQuery} className="flex min-h-0 flex-1 flex-col">
           <div className="flex items-center gap-2 border-b border-hairline px-4">
-            <span aria-hidden className="text-muted">
-              ⌕
-            </span>
+            <Search aria-hidden size={16} className="flex-none text-muted" />
             <CommandInput
               aria-label="Buscar abas, pastas, arquivos e ações"
               placeholder="Buscar abas, pastas, arquivos e ações…"
@@ -131,8 +131,8 @@ export function CommandPalette({
                     keywords={[tabCwd ?? '', git?.branch ?? '']}
                     className={ITEM}
                   >
-                    <span className={`${ICON} ${tab.kind === 'claude' ? 'text-claude' : 'text-accent'}`}>
-                      {tab.kind === 'claude' ? '✦' : '›_'}
+                    <span className={ICON}>
+                      <TabKindIcon kind={tab.kind} />
                     </span>
                     <span className="truncate">{tab.title}</span>
                     {tabCwd && <span className="truncate text-[12px] text-muted">{shortPath(tabCwd)}</span>}
@@ -149,7 +149,9 @@ export function CommandPalette({
                   <CommandGroupLabel className={GROUP_LABEL}>Arquivos em {folderName(cwd)}</CommandGroupLabel>
                   {files.map((f) => (
                     <CommandItem key={f.path} value={`file:${f.path}`} label={f.path} className={ITEM}>
-                      <span className={ICON}>▤</span>
+                      <span className={ICON}>
+                        <File size={13} />
+                      </span>
                       <span className="truncate">{f.path.split('/').pop()}</span>
                       <span className="truncate text-[12px] text-muted">{f.path}</span>
                     </CommandItem>
@@ -165,7 +167,9 @@ export function CommandPalette({
                   <CommandGroupLabel className={GROUP_LABEL}>Pastas recentes (cd na aba atual)</CommandGroupLabel>
                   {dirs.map((dir) => (
                     <CommandItem key={dir} value={`dir:${dir}`} label={dir} className={ITEM}>
-                      <span className={ICON}>↻</span>
+                      <span className={ICON}>
+                        <History size={13} />
+                      </span>
                       <span className="truncate">{folderName(dir)}</span>
                       <span className="truncate text-[12px] text-muted">{dir}</span>
                     </CommandItem>

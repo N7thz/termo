@@ -1,5 +1,6 @@
 import type { ISearchOptions, SearchAddon } from '@xterm/addon-search'
 import type { ITheme } from '@xterm/xterm'
+import { ArrowDown, ArrowUp, Regex, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 interface Props {
@@ -99,7 +100,7 @@ export function SearchBar({ search, theme, onClose }: Props) {
         title="Expressão regular"
         onClick={() => setRegex((v) => !v)}
       >
-        .*
+        <Regex size={14} />
       </button>
       <button
         type="button"
@@ -108,13 +109,13 @@ export function SearchBar({ search, theme, onClose }: Props) {
         title="Anterior (Shift+Enter)"
         onClick={prev}
       >
-        ↑
+        <ArrowUp size={14} />
       </button>
       <button type="button" className={navButton} disabled={!results.count} title="Próxima (Enter)" onClick={next}>
-        ↓
+        <ArrowDown size={14} />
       </button>
       <button type="button" className={navButton} title="Fechar (Esc)" aria-label="Fechar busca" onClick={onClose}>
-        ×
+        <X size={14} />
       </button>
     </search>
   )

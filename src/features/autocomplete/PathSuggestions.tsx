@@ -1,4 +1,5 @@
 import { Listbox, ListboxItem, ListboxItemIcon } from '@ui-sdk/react/listbox'
+import { ChevronRight, CornerLeftUp, History } from 'lucide-react'
 import type { PathSuggestion } from '../../shared/types'
 
 /** Em px relativos ao terminal: `bottom` abre para cima do cursor, `top` abre para baixo. */
@@ -57,10 +58,15 @@ export function PathSuggestions({ items, position, onPick, onDismiss }: Props) {
           title={`Executar: ${item.command}`}
         >
           <ListboxItemIcon
-            className={`w-3 ${item.scope === 'parent' ? 'text-claude' : item.scope === 'recent' ? 'text-muted' : 'text-accent'}`}
-            mirror={item.scope === 'parent'}
+            className={`flex w-3 ${item.scope === 'parent' ? 'text-claude' : item.scope === 'recent' ? 'text-muted' : 'text-accent'}`}
           >
-            {item.scope === 'parent' ? '↰' : item.scope === 'recent' ? '↻' : '▸'}
+            {item.scope === 'parent' ? (
+              <CornerLeftUp size={12} />
+            ) : item.scope === 'recent' ? (
+              <History size={12} />
+            ) : (
+              <ChevronRight size={12} />
+            )}
           </ListboxItemIcon>
           <span className="flex-1 truncate">
             <span className="text-muted">cd </span>

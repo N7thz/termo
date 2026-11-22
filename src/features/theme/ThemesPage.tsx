@@ -3,6 +3,7 @@ import { Input } from '@ui-sdk/react/input'
 import { Listbox, ListboxItem, ListboxItemIndicator } from '@ui-sdk/react/listbox'
 import { SegmentedControl, SegmentedControlIndicator, SegmentedControlItem } from '@ui-sdk/react/segmented-control'
 import type { ITheme } from '@xterm/xterm'
+import { ArrowLeft } from 'lucide-react'
 import { type KeyboardEvent, useEffect, useMemo, useState } from 'react'
 import { ipc } from '../../lib/ipc'
 import { actionButton } from '../../lib/ui'
@@ -52,7 +53,7 @@ export function ThemesPage({ value, onChange, onPreview, onClose }: Props) {
     >
       <header className="flex flex-wrap items-center gap-3 border-b border-hairline px-5 py-3">
         <Button className={actionButton} aria-label="Voltar ao terminal" onClick={onClose}>
-          ←
+          <ArrowLeft size={15} />
         </Button>
         <h1 id="themes-title" className="text-[15px] font-semibold tracking-[0.01em]">
           Temas

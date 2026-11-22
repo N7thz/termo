@@ -1,5 +1,6 @@
 import { formatShortcut } from '@ui-sdk/core/shortcuts'
 import { Dialog, DialogBackdrop, DialogClose, DialogContent, DialogTitle } from '@ui-sdk/react/dialog'
+import { X } from 'lucide-react'
 import { Fragment } from 'react'
 import { actionButton } from '../../lib/ui'
 import { SHORTCUT_GROUPS, SHORTCUTS } from '../tabs/shortcuts'
@@ -54,7 +55,7 @@ export function ShortcutsDialog({ open, onOpenChange }: Props) {
         <header className="flex items-center gap-3 border-b border-hairline px-5 py-3">
           <DialogTitle className="flex-1 text-[15px] font-semibold tracking-[0.01em]">Atalhos de teclado</DialogTitle>
           <DialogClose className={actionButton} aria-label="Fechar">
-            ×
+            <X size={15} />
           </DialogClose>
         </header>
         <div className="grid min-h-0 flex-1 gap-x-8 gap-y-5 overflow-y-auto px-5 py-4 sm:grid-cols-2">
