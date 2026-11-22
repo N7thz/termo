@@ -436,50 +436,53 @@ const oneDark: ThemeDefinition = {
 }
 
 /**
- * Vesper++: o Vesper de Rauno Freiberg (github.com/raunofreiberg/vesper), fundo quase preto com laranja e
- * menta, com a paleta ANSI do port para terminais (mbadolato/iTerm2-Color-Schemes, "Vesper"). O "++" é a
- * interface feita à mão (superfícies em cinza neutro, acento laranja, Claude em salmão), cursor laranja e
- * uma seleção âmbar mais discreta que a original (#988049), para o texto branco continuar legível.
+ * Vesper++ ("Vesper ++", de Obstinate, MIT): o Vesper de Rauno Freiberg com mais cor. Cores tiradas do
+ * próprio tema do VS Code (obstinate.vesper-pp 2.0.0): fundo #101010, laranja #FFC799, menta #99FFE4,
+ * salmão #FF8080 e rosa #FBADFF. Ajustes para o terminal:
+ * - o tema não define `terminal.foreground` nem cursor: valem o `editor.foreground` (#FFF) e o laranja;
+ * - a seleção #FFFFFF25 vira a cor sólida equivalente sobre o fundo (#333333);
+ * - `ansiBrightBlack` no original é #101010, igual ao fundo, e deixaria invisíveis as previsões do
+ *   PSReadLine, os comentários e as datas; usa o cinza do título do tema (#7E7E7E).
  */
 const vesperPlusPlus: ThemeDefinition = {
   id: 'vesper-plus-plus',
   name: 'Vesper++',
   scheme: 'dark',
-  credit: { author: 'Rauno Freiberg', source: 'https://github.com/raunofreiberg/vesper' },
+  credit: { author: 'Obstinate', source: 'https://marketplace.visualstudio.com/items?itemName=Obstinate.vesper-pp' },
   ui: {
     bg: '#101010',
-    surface: '#171717',
-    surfaceHover: '#1f1f1f',
-    border: '#2a2a2a',
+    surface: '#161616',
+    surfaceHover: '#232323',
+    border: '#282828',
     text: '#ffffff',
-    muted: '#8b8b8b',
+    muted: '#a0a0a0',
     accent: '#ffc799',
-    claude: '#f5a191',
+    claude: '#ff8080',
     material: 'rgb(16 16 16 / 64%)',
-    materialThick: 'rgb(23 23 23 / 80%)',
+    materialThick: 'rgb(22 22 22 / 82%)',
     hairline: 'rgb(255 255 255 / 8%)',
     highlight: 'rgb(255 255 255 / 5%)',
-    field: 'rgb(10 10 10 / 80%)',
-    onAccent: '#101010',
+    field: '#1c1c1c',
+    onAccent: '#000000',
     shadowStrength: 1,
   },
-  terminal: term('#101010', '#ffffff', '#ffc799', '#4a3d2b', {
+  terminal: term('#101010', '#ffffff', '#ffc799', '#333333', {
     black: '#101010',
-    red: '#f5a191',
-    green: '#90b99f',
-    yellow: '#e6b99d',
-    blue: '#aca1cf',
-    magenta: '#e29eca',
-    cyan: '#ea83a5',
-    white: '#a0a0a0',
+    red: '#ff8080',
+    green: '#99ffe4',
+    yellow: '#ffc799',
+    blue: '#ffc799',
+    magenta: '#fbadff',
+    cyan: '#99ffe4',
+    white: '#e3e3dd',
     brightBlack: '#7e7e7e',
     brightRed: '#ff8080',
     brightGreen: '#99ffe4',
     brightYellow: '#ffc799',
-    brightBlue: '#b9aeda',
-    brightMagenta: '#ecaad6',
-    brightCyan: '#f591b2',
-    brightWhite: '#ffffff',
+    brightBlue: '#ffc799',
+    brightMagenta: '#fbadff',
+    brightCyan: '#99ffe4',
+    brightWhite: '#f8f8f2',
   }),
 }
 
