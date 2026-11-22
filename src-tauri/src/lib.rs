@@ -1,3 +1,4 @@
+mod browser;
 mod editor;
 mod files;
 mod git;
@@ -243,6 +244,34 @@ fn open_url(app: AppHandle, url: String) -> Result<(), String> {
     app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
 
+/// Abre `url` no painel de navegador ao lado do terminal, na área `bounds` (pixels lógicos).
+#[tauri::command]
+async fn browser_open(app: AppHandle, url: String, bounds: browser::Bounds) -> Result<(), String> {
+    browser::open(&app, browser::parse_web_url(&url)?, bounds)
+}
+
+/// Reposiciona o painel quando a área reservada para ele muda de tamanho.
+#[tauri::command]
+async fn browser_bounds(app: AppHandle, bounds: browser::Bounds) -> Result<(), String> {
+    browser::set_bounds(&app, bounds)
+}
+
+#[tauri::command]
+async fn browser_visible(app: AppHandle, visible: bool) -> Result<(), String> {
+    browser::set_visible(&app, visible)
+}
+
+/// `back`, `forward` ou `reload`.
+#[tauri::command]
+async fn browser_go(app: AppHandle, action: String) -> Result<(), String> {
+    browser::go(&app, &action)
+}
+
+#[tauri::command]
+async fn browser_close(app: AppHandle) -> Result<(), String> {
+    browser::close(&app)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let cli = shell::parse_cli(std::env::args());
@@ -264,6 +293,10 @@ pub fn run() {
             if payload.event() == PageLoadEvent::Started {
                 if let Some(ptys) = webview.try_state::<Ptys>() {
                     ptys.kill_owner(webview.label());
+                }
+                // A interface recarregou e perdeu o estado do painel: fecha a página que ficou aberta.
+                if webview.label() == "main" {
+                    let _ = browser::close(webview.app_handle());
                 }
             }
         })
@@ -293,6 +326,11 @@ pub fn run() {
             open_in_editor,
             open_folder,
             open_url,
+            browser_open,
+            browser_bounds,
+            browser_visible,
+            browser_go,
+            browser_close,
         ])
         .build(tauri::generate_context!())
         .expect("falha ao iniciar o Termo");

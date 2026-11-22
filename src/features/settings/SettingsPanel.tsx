@@ -1,16 +1,16 @@
 import { Button } from '@ui-sdk/react/button'
 import { Field, FieldDescription, FieldLabel } from '@ui-sdk/react/field'
 import { Input } from '@ui-sdk/react/input'
-import { NumberInput, NumberInputControl, NumberInputGroup } from '@ui-sdk/react/number-input'
 import { Popover, PopoverContent, PopoverDescription, PopoverTitle, PopoverTrigger } from '@ui-sdk/react/popover'
 import { Switch, SwitchThumb } from '@ui-sdk/react/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@ui-sdk/react/tooltip'
-import { useState } from 'react'
+import { ChevronRight, Settings2 } from 'lucide-react'
 import { actionButton, tooltip } from '../../lib/ui'
-import { clampFontSize, FONT_MAX, FONT_MIN } from '../../shared/settings'
 import type { Settings } from '../../shared/types'
 import { HighlightSettingsSection } from '../highlights/HighlightSettingsSection'
 import { findTheme } from '../theme/themes'
+import { FontSettingsSection } from './FontSettingsSection'
+import { useInterfaceZoom } from './interfaceSize'
 
 // Popover na top layer: o UI SDK posiciona; aqui só aparência e entrada/saída.
 const PANEL =
@@ -37,11 +37,13 @@ interface Props {
 }
 
 export function SettingsPanel({ open, onOpenChange, settings, onChange, onOpenThemes, onOpenShortcuts }: Props) {
+  // O painel está sempre montado (o botão fica na barra), então é ele quem aplica o zoom da interface.
+  useInterfaceZoom(settings.interfaceSize)
   return (
     <Popover open={open} onOpenChange={onOpenChange} modal={false}>
       <Tooltip>
         <TooltipTrigger render={<PopoverTrigger className={actionButton} aria-label="Configurações" />}>
-          ⚙
+          <Settings2 size={15} />
         </TooltipTrigger>
         <TooltipContent className={tooltip} sideOffset={6}>
           Configurações
@@ -71,20 +73,13 @@ function SettingsFields({
   onChange,
   onOpenThemes,
 }: Omit<Props, 'open' | 'onOpenChange' | 'onOpenShortcuts'>) {
-  const [font, setFont] = useState<number | null>(settings.fontSize)
-
-  const commitFont = (value: number | null) => {
-    const size = clampFontSize(value ?? settings.fontSize)
-    setFont(size)
-    if (size !== settings.fontSize) onChange({ fontSize: size })
-  }
-
   return (
     <>
       <Field className="flex items-center justify-between gap-2.5 text-[13px] tracking-[0.005em]">
         <FieldLabel>Tema</FieldLabel>
         <Button className={`${actionButton} max-w-44 truncate text-[12.5px] text-text`} onClick={onOpenThemes}>
-          {findTheme(settings.theme)?.name ?? 'Sistema'} →
+          <span className="truncate">{findTheme(settings.theme)?.name ?? 'Sistema'}</span>
+          <ChevronRight size={13} className="flex-none" />
         </Button>
       </Field>
       <Field className="flex items-center justify-between gap-2.5 text-[13px] tracking-[0.005em]">
@@ -107,20 +102,20 @@ function SettingsFields({
           <SwitchThumb className={THUMB} />
         </Switch>
       </Field>
-      <Field className="flex items-center justify-between gap-2.5 text-[13px] tracking-[0.005em]">
-        <FieldLabel>Tamanho da fonte</FieldLabel>
-        <NumberInput
-          value={font}
-          min={FONT_MIN}
-          max={FONT_MAX}
-          step={1}
-          onValueChange={setFont}
-          onValueCommit={commitFont}
-        >
-          <NumberInputGroup>
-            <NumberInputControl className={`${INPUT} w-16`} />
-          </NumberInputGroup>
-        </NumberInput>
+      <Field className="flex flex-col gap-1.5 text-[13px] tracking-[0.005em]">
+        <span className="flex items-center justify-between gap-2.5">
+          <FieldLabel>Abrir links num painel ao lado</FieldLabel>
+          <Switch
+            className={SWITCH}
+            checked={settings.linkTarget === 'panel'}
+            onCheckedChange={(checked) => onChange({ linkTarget: checked ? 'panel' : 'browser' })}
+          >
+            <SwitchThumb className={THUMB} />
+          </Switch>
+        </span>
+        <FieldDescription className="m-0 text-[11px] text-muted">
+          Ctrl+clique faz o contrário: abre no navegador padrão (ou no painel, se desligado).
+        </FieldDescription>
       </Field>
       <Field className="flex flex-col gap-1.5 text-[13px] tracking-[0.005em]">
         <FieldLabel>Pasta inicial</FieldLabel>
@@ -136,6 +131,7 @@ function SettingsFields({
         />
         <FieldDescription className="m-0 text-[11px] text-muted">Vazio usa a pasta do usuário.</FieldDescription>
       </Field>
+      <FontSettingsSection settings={settings} onChange={onChange} inputClass={INPUT} />
       <HighlightSettingsSection
         value={settings.highlights}
         onChange={(highlights) => onChange({ highlights })}

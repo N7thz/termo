@@ -12,10 +12,12 @@ import type { PathSuggestion, SessionKind, Settings } from '../../shared/types'
 import { PathSuggestions, type SuggestionsPosition } from '../autocomplete/PathSuggestions'
 import { extractQuery } from '../autocomplete/query'
 import { ShellIntegration } from '../autocomplete/shellIntegration'
+import { openLink } from '../browser/links'
 import type { TerminalActions } from '../context-menu/types'
 import type { Severity } from '../highlights/matchers'
 import { SearchBar } from '../highlights/SearchBar'
 import { TerminalHighlights } from '../highlights/terminalHighlights'
+import { terminalFontSize } from '../settings/interfaceSize'
 import { isAppShortcut } from '../tabs/shortcuts'
 
 interface Props {
@@ -45,6 +47,21 @@ const highlightColors = (t: ITheme) => ({
 })
 
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`
+// A régua da direita (marcas e busca) vem com uma borda branca de 1px por padrão; sem ela, some a linha vertical.
+const withRuler = (theme: ITheme): ITheme => {
+  // Barra de rolagem discreta, na cor do texto do tema (o padrão do xterm é um branco forte).
+  const fg = typeof theme.foreground === 'string' && /^#[0-9a-f]{6}$/i.test(theme.foreground) ? theme.foreground : null
+  return {
+    ...theme,
+    overviewRulerBorder: 'transparent',
+    ...(fg && {
+      scrollbarSliderBackground: `${fg}26`,
+      scrollbarSliderHoverBackground: `${fg}40`,
+      scrollbarSliderActiveBackground: `${fg}59`,
+    }),
+  }
+}
+
 const warn = (s: string) => `\x1b[33m⚠ ${s}\x1b[0m\r\n`
 /** Espaço mínimo acima do cursor para a lista abrir para cima. */
 const ROOM_ABOVE = 140
@@ -91,13 +108,13 @@ export function TerminalView({
 
     const term = new Terminal({
       fontFamily: settings.fontFamily,
-      fontSize: settings.fontSize,
+      fontSize: terminalFontSize(settings.fontSize, settings.interfaceSize),
       lineHeight: 1.2,
       cursorBlink: true,
       cursorStyle: 'bar',
       allowProposedApi: true,
       scrollback: 10000,
-      theme: terminalTheme,
+      theme: withRuler(terminalTheme),
       // Régua da direita: marcas de erro/aviso e resultados da busca.
       overviewRuler: { width: 8 },
     })
@@ -108,7 +125,8 @@ export function TerminalView({
     term.loadAddon(fit)
     term.loadAddon(new Unicode11Addon())
     term.unicode.activeVersion = '11'
-    term.loadAddon(new WebLinksAddon((_e, uri) => void ipc.openUrl(uri)))
+    // Clique abre no painel ao lado ou no navegador, conforme a configuração; Ctrl+clique faz o contrário.
+    term.loadAddon(new WebLinksAddon((e, uri) => openLink(uri, e.ctrlKey || e.metaKey)))
     // Imagens: Sixel (chafa, img2sixel) e protocolo inline do iTerm2 (imgcat).
     term.loadAddon(new ImageAddon({ sixelSupport: true, iipSupport: true, enableSizeReports: true }))
 
@@ -362,12 +380,12 @@ export function TerminalView({
     const term = termRef.current
     if (!term) return
     term.options.fontFamily = settings.fontFamily
-    term.options.fontSize = settings.fontSize
+    term.options.fontSize = terminalFontSize(settings.fontSize, settings.interfaceSize)
     fitRef.current?.fit()
-  }, [settings.fontFamily, settings.fontSize])
+  }, [settings.fontFamily, settings.fontSize, settings.interfaceSize])
 
   useEffect(() => {
-    if (termRef.current) termRef.current.options.theme = terminalTheme
+    if (termRef.current) termRef.current.options.theme = withRuler(terminalTheme)
   }, [terminalTheme])
 
   useEffect(() => {
@@ -380,7 +398,7 @@ export function TerminalView({
 
   return (
     <div
-      className={`absolute inset-0 pt-2 pr-1 pb-1 pl-3 ${active ? 'visible' : 'invisible'}`}
+      className={`absolute inset-0 pt-3 pr-2 pb-3 pl-5 ${active ? 'visible' : 'invisible'}`}
       data-terminal-active={active || undefined}
       ref={wrapRef}
     >

@@ -1,6 +1,7 @@
 import type { IDecoration, IDisposable, ILink, Terminal } from '@xterm/xterm'
 import { ipc } from '../../lib/ipc'
 import type { HighlightSettings } from '../../shared/types'
+import { openLink } from '../browser/links'
 import {
   type CompiledRule,
   classifyLine,
@@ -83,12 +84,12 @@ export class TerminalHighlights implements IDisposable {
         range: { start: { x: m.start + 1, y }, end: { x: m.end, y } },
         text: m.text,
         decorations: { underline: true, pointerCursor: true },
-        activate: () => this.activate(m),
+        activate: (event: MouseEvent) => this.activate(m, event),
       }))
     return links.length ? links : undefined
   }
 
-  private activate(m: TextMatch) {
+  private activate(m: TextMatch, event?: MouseEvent) {
     switch (m.kind) {
       case 'file':
         void ipc
@@ -96,7 +97,7 @@ export class TerminalHighlights implements IDisposable {
           .catch((err) => this.term.write(`\r\n\x1b[33m⚠ ${String(err)}\x1b[0m\r\n`))
         return
       case 'address':
-        void ipc.openUrl(`http://${m.text.replace('0.0.0.0', 'localhost')}`)
+        openLink(`http://${m.text.replace('0.0.0.0', 'localhost')}`, event?.ctrlKey || event?.metaKey)
         return
       case 'hash':
       case 'ip':

@@ -3,6 +3,7 @@
  * se um comando mudar de nome ou de formato, só este arquivo muda.
  */
 import { Channel, invoke } from '@tauri-apps/api/core'
+import type { BrowserBounds } from '../features/browser/types'
 import type {
   ClipboardContent,
   CreateSessionOptions,
@@ -49,6 +50,13 @@ export const ipc = {
   readClipboard: () => invoke<ClipboardContent>('clipboard_read'),
   writeClipboard: (text: string) => invoke<void>('clipboard_write', { text }),
   openUrl: (url: string) => invoke<void>('open_url', { url }),
+
+  /** Painel de navegador ao lado do terminal (webview nativo posicionado em `bounds`, em pixels lógicos). */
+  browserOpen: (url: string, bounds: BrowserBounds) => invoke<void>('browser_open', { url, bounds }),
+  browserBounds: (bounds: BrowserBounds) => invoke<void>('browser_bounds', { bounds }),
+  browserVisible: (visible: boolean) => invoke<void>('browser_visible', { visible }),
+  browserGo: (action: 'back' | 'forward' | 'reload') => invoke<void>('browser_go', { action }),
+  browserClose: () => invoke<void>('browser_close'),
   /** Abre o arquivo no VS Code na linha/coluna (ou no app padrão); caminho relativo usa `cwd`. */
   openInEditor: (path: string, line?: number, column?: number, cwd?: string | null) =>
     invoke<void>('open_in_editor', { path, line: line ?? null, column: column ?? null, cwd: cwd ?? null }),
