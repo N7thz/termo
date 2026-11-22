@@ -7,6 +7,8 @@ import type {
   ClipboardContent,
   CreateSessionOptions,
   CreateSessionResult,
+  FileHit,
+  GitInfo,
   LaunchInfo,
   PathSuggestion,
   PtyEvent,
@@ -32,6 +34,14 @@ export const ipc = {
   suggestPaths: (cwd: string, query: string) => invoke<PathSuggestion[]>('suggest_paths', { cwd, query }),
   /** Registra a pasta atual no histórico de pastas recentes (a cada mudança de pasta). */
   recordDir: (path: string) => invoke<void>('record_dir', { path }),
+  /** Pastas recentes, mais relevantes primeiro. */
+  recentDirs: (limit?: number) => invoke<string[]>('recent_dirs', { limit: limit ?? null }),
+  /** Branch e alterações do git da pasta; `null` fora de repositório. */
+  gitInfo: (cwd: string) => invoke<GitInfo | null>('git_info', { cwd }),
+  /** Arquivos da pasta que combinam com a busca (correspondência difusa). */
+  searchFiles: (cwd: string, query: string, limit?: number) =>
+    invoke<FileHit[]>('search_files', { cwd, query, limit: limit ?? null }),
+  openFolder: (path: string) => invoke<void>('open_folder', { path }),
 
   getSettings: () => invoke<Settings>('settings_get'),
   setSettings: (patch: Partial<Settings>) => invoke<Settings>('settings_set', { patch }),

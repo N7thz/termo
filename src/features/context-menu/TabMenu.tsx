@@ -24,14 +24,14 @@ export function TabMenu({ trigger, children, first, last, alone, onAction }: Pro
         <MenuItem className={menuItem} value="new-claude" shortcut="mod+shift+k">
           Nova aba com Claude Code
         </MenuItem>
-        <MenuItem className={menuItem} value="duplicate">
+        <MenuItem className={menuItem} value="duplicate" shortcut="mod+shift+d">
           Duplicar aba
         </MenuItem>
         <MenuSeparator className={menuSeparator} />
-        <MenuItem className={menuItem} value="move-left" disabled={first}>
+        <MenuItem className={menuItem} value="move-left" shortcut="ctrl+shift+pageup" disabled={first}>
           Mover para a esquerda
         </MenuItem>
-        <MenuItem className={menuItem} value="move-right" disabled={last}>
+        <MenuItem className={menuItem} value="move-right" shortcut="ctrl+shift+pagedown" disabled={last}>
           Mover para a direita
         </MenuItem>
         <MenuSeparator className={menuSeparator} />

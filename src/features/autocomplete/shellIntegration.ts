@@ -14,10 +14,14 @@ export class ShellIntegration implements IDisposable {
   private running = true
   private disposables: IDisposable[] = []
 
-  /** `onCwd`: chamado quando a pasta da aba muda (alimenta o histórico de pastas recentes). */
+  /**
+   * `onCwd`: chamado quando a pasta da aba muda (alimenta o histórico de pastas recentes).
+   * `onPrompt`: chamado a cada prompt novo, ou seja, quando um comando termina (atualiza o git).
+   */
   constructor(
     private term: Terminal,
     onCwd?: (cwd: string) => void,
+    onPrompt?: () => void,
   ) {
     this.disposables.push(
       term.parser.registerOscHandler(633, (data) => {
@@ -35,6 +39,7 @@ export class ShellIntegration implements IDisposable {
           this.inputStart?.marker.dispose()
           this.inputStart = { marker: term.registerMarker(0), x: term.buffer.active.cursorX }
           this.running = false
+          onPrompt?.()
         } else if (data.startsWith('A')) {
           this.running = true
         }

@@ -32,9 +32,11 @@ interface Props {
   onChange: (patch: Partial<Settings>) => void
   /** Abre a página de temas. */
   onOpenThemes: () => void
+  /** Abre a folha de atalhos. */
+  onOpenShortcuts: () => void
 }
 
-export function SettingsPanel({ open, onOpenChange, settings, onChange, onOpenThemes }: Props) {
+export function SettingsPanel({ open, onOpenChange, settings, onChange, onOpenThemes, onOpenShortcuts }: Props) {
   return (
     <Popover open={open} onOpenChange={onOpenChange} modal={false}>
       <Tooltip>
@@ -49,8 +51,14 @@ export function SettingsPanel({ open, onOpenChange, settings, onChange, onOpenTh
         <PopoverTitle className="m-0 text-[13px] font-semibold tracking-[0.01em]">Configurações</PopoverTitle>
         <SettingsFields settings={settings} onChange={onChange} onOpenThemes={onOpenThemes} />
         <PopoverDescription className="m-0 border-t border-hairline pt-2.5 text-[11px]/normal tracking-[0.01em] text-muted">
-          Atalhos: Ctrl+Shift+T nova aba · Ctrl+Shift+K Claude · Ctrl+Shift+W fechar · Ctrl+Tab trocar · Ctrl+= / Ctrl+-
-          fonte · Ctrl+Shift+F buscar · Ctrl+Shift+, temas
+          Ctrl+Shift+T nova aba · Ctrl+Shift+K Claude · Ctrl+Shift+, temas ·{' '}
+          <button
+            type="button"
+            className="cursor-pointer text-accent underline-offset-2 hover:underline"
+            onClick={onOpenShortcuts}
+          >
+            todos os atalhos (F1)
+          </button>
         </PopoverDescription>
       </PopoverContent>
     </Popover>
@@ -58,7 +66,11 @@ export function SettingsPanel({ open, onOpenChange, settings, onChange, onOpenTh
 }
 
 // Monta a cada abertura, então os rascunhos partem sempre do que está salvo.
-function SettingsFields({ settings, onChange, onOpenThemes }: Omit<Props, 'open' | 'onOpenChange'>) {
+function SettingsFields({
+  settings,
+  onChange,
+  onOpenThemes,
+}: Omit<Props, 'open' | 'onOpenChange' | 'onOpenShortcuts'>) {
   const [font, setFont] = useState<number | null>(settings.fontSize)
 
   const commitFont = (value: number | null) => {

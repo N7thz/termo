@@ -1,4 +1,6 @@
 mod editor;
+mod files;
+mod git;
 mod paths;
 mod pty;
 mod recent;
@@ -141,6 +143,42 @@ async fn suggest_paths(
     Ok(paths::suggest(dir, &query, &recent.ranked()))
 }
 
+/// Branch e alterações do git da pasta; `None` fora de repositório.
+#[tauri::command]
+async fn git_info(cwd: String) -> Option<git::GitInfo> {
+    let dir = std::path::Path::new(&cwd);
+    if !dir.is_dir() {
+        return None;
+    }
+    git::git_info(dir)
+}
+
+/// Arquivos da pasta que combinam com a busca (correspondência difusa), para a busca geral.
+#[tauri::command]
+async fn search_files(
+    index: State<'_, files::FileIndex>,
+    cwd: String,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<files::FileHit>, String> {
+    let dir = std::path::Path::new(&cwd);
+    if !dir.is_dir() || query.len() > 200 {
+        return Ok(Vec::new());
+    }
+    Ok(files::search(&index.files(dir), &query, limit.unwrap_or(30).min(100)))
+}
+
+/// Lista as pastas recentes (mais relevantes primeiro), para a busca geral.
+#[tauri::command]
+async fn recent_dirs(recent: State<'_, recent::RecentDirs>, limit: Option<usize>) -> Result<Vec<String>, String> {
+    Ok(recent
+        .ranked()
+        .into_iter()
+        .take(limit.unwrap_or(50).min(300))
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect())
+}
+
 /// Registra a pasta atual de uma aba (a cada prompt) no histórico de pastas recentes.
 #[tauri::command]
 async fn record_dir(recent: State<'_, recent::RecentDirs>, path: String) -> Result<(), String> {
@@ -188,6 +226,15 @@ async fn open_in_editor(
     app.opener().open_path(file.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
 }
 
+/// Abre uma pasta no Explorador de Arquivos.
+#[tauri::command]
+fn open_folder(app: AppHandle, path: String) -> Result<(), String> {
+    if !std::path::Path::new(&path).is_dir() {
+        return Err(format!("pasta não encontrada: {path}"));
+    }
+    app.opener().open_path(path, None::<&str>).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn open_url(app: AppHandle, url: String) -> Result<(), String> {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
@@ -207,6 +254,7 @@ pub fn run() {
             let dir = app.path().app_config_dir()?;
             app.manage(SettingsStore::load(&dir));
             app.manage(recent::RecentDirs::load(&dir, dirs::home_dir().as_deref()));
+            app.manage(files::FileIndex::default());
             app.manage::<Ptys>(Arc::new(PtyManager::default()));
             app.manage(cli);
             Ok(())
@@ -235,11 +283,15 @@ pub fn run() {
             pty_kill,
             suggest_paths,
             record_dir,
+            recent_dirs,
+            git_info,
+            search_files,
             settings_get,
             settings_set,
             clipboard_read,
             clipboard_write,
             open_in_editor,
+            open_folder,
             open_url,
         ])
         .build(tauri::generate_context!())

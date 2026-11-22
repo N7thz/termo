@@ -33,6 +33,10 @@ interface Props {
   onSeverity?: (severity: Severity) => void
   /** Entrega as ações do xterm para o menu do botão direito; `null` quando o terminal some. */
   onActions?: (actions: TerminalActions | null) => void
+  /** Pasta atual da aba (a cada mudança). */
+  onCwd?: (cwd: string) => void
+  /** Prompt novo: um comando terminou (bom momento para atualizar o git). */
+  onPrompt?: () => void
 }
 
 const highlightColors = (t: ITheme) => ({
@@ -56,6 +60,8 @@ export function TerminalView({
   onClose,
   onSeverity,
   onActions,
+  onCwd,
+  onPrompt,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
@@ -71,8 +77,8 @@ export function TerminalView({
   const [search, setSearch] = useState<SearchAddon | null>(null)
   const openSearchRef = useRef<() => void>(() => {})
   // Callbacks mudam a cada render; a ref evita recriar o terminal.
-  const cbRef = useRef({ onTitle, onKind, onClose, onSeverity, onActions })
-  cbRef.current = { onTitle, onKind, onClose, onSeverity, onActions }
+  const cbRef = useRef({ onTitle, onKind, onClose, onSeverity, onActions, onCwd, onPrompt })
+  cbRef.current = { onTitle, onKind, onClose, onSeverity, onActions, onCwd, onPrompt }
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: o terminal é criado uma vez por aba; a fonte é tratada no efeito abaixo
   useEffect(() => {
@@ -110,7 +116,14 @@ export function TerminalView({
     term.loadAddon(searchAddon)
 
     term.open(host)
-    const shell = new ShellIntegration(term, (dir) => void ipc.recordDir(dir).catch(() => undefined))
+    const shell = new ShellIntegration(
+      term,
+      (dir) => {
+        void ipc.recordDir(dir).catch(() => undefined)
+        cbRef.current.onCwd?.(dir)
+      },
+      () => cbRef.current.onPrompt?.(),
+    )
     const highlights = new TerminalHighlights(term, {
       settings: settings.highlights,
       colors: highlightColors(terminalTheme),

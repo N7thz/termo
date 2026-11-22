@@ -7,12 +7,18 @@ import { TabMenu } from './features/context-menu/TabMenu'
 import { TerminalMenu } from './features/context-menu/TerminalMenu'
 import type { TabMenuAction, TerminalActions, TerminalMenuAction } from './features/context-menu/types'
 import type { Severity } from './features/highlights/matchers'
+import { CommandPalette } from './features/palette/CommandPalette'
 import { SettingsPanel } from './features/settings/SettingsPanel'
+import { ShortcutsDialog } from './features/shortcuts/ShortcutsDialog'
 import { actionFor } from './features/tabs/shortcuts'
 import { initialTabs, type Tab, tabsReducer, tabsToClose } from './features/tabs/tabs'
 import { TerminalView } from './features/terminal/TerminalView'
 import { ThemesPage } from './features/theme/ThemesPage'
 import { useTheme } from './features/theme/useTheme'
+import { GitDiff } from './features/workspace/GitDiff'
+import { StatusBar } from './features/workspace/StatusBar'
+import { TabSidebar } from './features/workspace/TabSidebar'
+import { useWorkspace } from './features/workspace/useWorkspace'
 import { ipc } from './lib/ipc'
 import { actionButton, tooltip, tooltipKbd } from './lib/ui'
 import { clampFontSize, DEFAULT_SETTINGS } from './shared/settings'
@@ -54,6 +60,15 @@ function TabAlert({
       aria-label={`${alert.warnings} aviso(s) novo(s)`}
     />
   )
+}
+
+async function toggleFullscreen() {
+  const win = getCurrentWindow()
+  try {
+    await win.setFullscreen(!(await win.isFullscreen()))
+  } catch (err) {
+    console.error('[termo] falha ao alternar a tela cheia', err)
+  }
 }
 
 export function App() {
@@ -148,6 +163,13 @@ export function App() {
     }, 180)
   }, [])
 
+  const [showShortcuts, setShowShortcuts] = useState(false)
+  const [showPalette, setShowPalette] = useState(false)
+  const workspace = useWorkspace(state.active)
+  const activeInfo = workspace.info(state.active)
+  const diffColors = { added: theme.terminal.green as string, removed: theme.terminal.red as string }
+  const layout = settings.layout ?? DEFAULT_SETTINGS.layout
+
   // Ações do xterm de cada aba, para o menu do botão direito.
   const terminalActions = useRef(new Map<number, TerminalActions>())
 
@@ -221,29 +243,57 @@ export function App() {
       if (!action) return
       e.preventDefault()
       const size = settingsRef.current.fontSize
+      const activeTab = state.tabs.find((t) => t.key === state.active)
       switch (action) {
         case 'new-shell':
           return openTab('shell')
         case 'new-claude':
           return openTab('claude')
+        case 'duplicate-tab':
+          return activeTab && runTabAction(activeTab, 'duplicate')
         case 'close-tab':
           return state.active != null && closeTab(state.active)
         case 'next-tab':
           return dispatch({ type: 'cycle', delta: 1 })
         case 'prev-tab':
           return dispatch({ type: 'cycle', delta: -1 })
+        case 'move-tab-left':
+          return activeTab && runTabAction(activeTab, 'move-left')
+        case 'move-tab-right':
+          return activeTab && runTabAction(activeTab, 'move-right')
+        case 'last-tab': {
+          const last = state.tabs.at(-1)
+          return last && dispatch({ type: 'activate', key: last.key })
+        }
         case 'font-up':
           return updateSettings({ fontSize: clampFontSize(size + 1) })
         case 'font-down':
           return updateSettings({ fontSize: clampFontSize(size - 1) })
+        case 'font-reset':
+          return updateSettings({ fontSize: DEFAULT_SETTINGS.fontSize })
         case 'themes':
           setShowSettings(false)
           return setShowThemes((v) => !v)
+        case 'settings':
+          setShowThemes(false)
+          return setShowSettings((v) => !v)
+        case 'fullscreen':
+          return void toggleFullscreen()
+        case 'shortcuts':
+          return setShowShortcuts((v) => !v)
+        case 'palette':
+          return setShowPalette((v) => !v)
+        case 'toggle-sidebar':
+          return updateSettings({ layout: { ...layout, sidebar: !layout.sidebar } })
+        default: {
+          const tab = state.tabs[Number(action.slice('tab-'.length)) - 1]
+          return tab && dispatch({ type: 'activate', key: tab.key })
+        }
       }
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [state.active, openTab, updateSettings, closeTab])
+  })
 
   return (
     <Tabs
@@ -254,7 +304,10 @@ export function App() {
     >
       {/* Barra de título nativa fica por fora; esta barra é só a de abas. */}
       <header className="relative z-5 flex h-10 items-center gap-2 bg-linear-to-b from-material-thick to-material px-2 shadow-titlebar backdrop-blur-[24px] backdrop-saturate-160 select-none reduced-transparency:bg-surface reduced-transparency:bg-none reduced-transparency:backdrop-blur-none">
-        <TabsList className="flex min-w-0 gap-0.5 overflow-x-auto py-0.5 [scrollbar-width:none]" aria-label="Abas">
+        <TabsList
+          className={`flex min-w-0 gap-0.5 overflow-x-auto py-0.5 [scrollbar-width:none] ${layout.sidebar ? 'hidden' : ''}`}
+          aria-label="Abas"
+        >
           {state.tabs.map((tab, index) => (
             <TabMenu
               key={tab.key}
@@ -296,6 +349,8 @@ export function App() {
             </TabMenu>
           ))}
         </TabsList>
+        <span className="flex-1" />
+        {layout.diffBadge && <GitDiff git={activeInfo.git} colors={diffColors} className="px-1" />}
         <div className="flex gap-1">
           {/* Os atalhos são ligados em actionFor; o shortcut do Tooltip só mostra e anuncia. */}
           <Tooltip shortcut="mod+shift+t">
@@ -329,49 +384,102 @@ export function App() {
             settings={settings}
             onChange={updateSettings}
             onOpenThemes={openThemes}
+            onOpenShortcuts={() => {
+              setShowSettings(false)
+              setShowShortcuts(true)
+            }}
           />
         </div>
       </header>
 
-      <main className="relative min-h-0 flex-1">
-        {state.tabs.map((tab) => (
-          <TabsPanel key={tab.key} value={String(tab.key)} keepMounted className="absolute inset-0">
-            <TerminalMenu
-              actions={() => terminalActions.current.get(tab.key)}
-              onAction={(action) => runTerminalAction(tab.key, action)}
-            >
-              <TerminalView
-                kind={tab.kind}
-                active={tab.key === state.active}
-                settings={settings}
-                terminalTheme={theme.terminal}
-                cwd={cwd}
-                onTitle={(title) => dispatch({ type: 'update', key: tab.key, patch: { title } })}
-                onKind={(kind) =>
-                  dispatch({
-                    type: 'update',
-                    key: tab.key,
-                    patch: { kind, title: kind === 'claude' ? 'Claude Code' : shellName },
-                  })
-                }
-                onClose={() => dispatch({ type: 'close', key: tab.key })}
-                onSeverity={(severity) => onSeverity(tab.key, severity)}
-                onActions={(actions) =>
-                  actions ? terminalActions.current.set(tab.key, actions) : terminalActions.current.delete(tab.key)
-                }
-              />
-            </TerminalMenu>
-          </TabsPanel>
-        ))}
-        {showThemes && (
-          <ThemesPage
-            value={settings.theme}
-            onChange={(id) => updateSettings({ theme: id })}
-            onPreview={setPreviewTheme}
-            onClose={closeThemes}
+      <div className="flex min-h-0 flex-1">
+        {layout.sidebar && (
+          <TabSidebar
+            tabs={state.tabs}
+            active={state.active}
+            info={workspace.info}
+            colors={diffColors}
+            onActivate={(key) => dispatch({ type: 'activate', key })}
+            onClose={closeTab}
+            onNew={() => openTab('shell')}
+            renderAlert={(key) => <TabAlert alert={alerts.get(key)} colors={theme.terminal} />}
           />
         )}
-      </main>
+        <main className="relative min-h-0 flex-1">
+          {state.tabs.map((tab) => (
+            <TabsPanel key={tab.key} value={String(tab.key)} keepMounted className="absolute inset-0">
+              <TerminalMenu
+                actions={() => terminalActions.current.get(tab.key)}
+                onAction={(action) => runTerminalAction(tab.key, action)}
+              >
+                <TerminalView
+                  kind={tab.kind}
+                  active={tab.key === state.active}
+                  settings={settings}
+                  terminalTheme={theme.terminal}
+                  cwd={cwd}
+                  onTitle={(title) => dispatch({ type: 'update', key: tab.key, patch: { title } })}
+                  onKind={(kind) =>
+                    dispatch({
+                      type: 'update',
+                      key: tab.key,
+                      patch: { kind, title: kind === 'claude' ? 'Claude Code' : shellName },
+                    })
+                  }
+                  onClose={() => dispatch({ type: 'close', key: tab.key })}
+                  onSeverity={(severity) => onSeverity(tab.key, severity)}
+                  onActions={(actions) =>
+                    actions ? terminalActions.current.set(tab.key, actions) : terminalActions.current.delete(tab.key)
+                  }
+                  onCwd={(dir) => workspace.reportCwd(tab.key, dir)}
+                  onPrompt={() => workspace.reportPrompt(tab.key)}
+                />
+              </TerminalMenu>
+            </TabsPanel>
+          ))}
+          {showThemes && (
+            <ThemesPage
+              value={settings.theme}
+              onChange={(id) => updateSettings({ theme: id })}
+              onPreview={setPreviewTheme}
+              onClose={closeThemes}
+            />
+          )}
+        </main>
+      </div>
+      {layout.statusBar && (
+        <StatusBar
+          info={activeInfo}
+          kind={state.tabs.find((t) => t.key === state.active)?.kind}
+          shellName={shellName}
+          colors={diffColors}
+          onSearch={() => setShowPalette(true)}
+          searchKeys="Ctrl+Shift+P"
+        />
+      )}
+      <ShortcutsDialog open={showShortcuts} onOpenChange={setShowShortcuts} />
+      <CommandPalette
+        open={showPalette}
+        onOpenChange={setShowPalette}
+        tabs={state.tabs}
+        active={state.active}
+        info={workspace.info}
+        actions={[
+          { id: 'new-shell', label: 'Nova aba', keys: 'mod+shift+t', run: () => openTab('shell') },
+          { id: 'new-claude', label: 'Nova aba com Claude Code', keys: 'mod+shift+k', run: () => openTab('claude') },
+          { id: 'themes', label: 'Temas', keys: 'mod+shift+,', run: openThemes },
+          { id: 'settings', label: 'Configurações', keys: 'mod+,', run: () => setShowSettings(true) },
+          {
+            id: 'sidebar',
+            label: layout.sidebar ? 'Ocultar abas na lateral' : 'Mostrar abas na lateral',
+            keys: 'mod+shift+b',
+            run: () => updateSettings({ layout: { ...layout, sidebar: !layout.sidebar } }),
+          },
+          { id: 'shortcuts', label: 'Atalhos de teclado', keys: 'f1', run: () => setShowShortcuts(true) },
+        ]}
+        onActivateTab={(key) => dispatch({ type: 'activate', key })}
+        onGoToFolder={(dir) => void ipc.writeClipboard(`cd '${dir.replace(/'/g, "''")}'`)}
+      />
     </Tabs>
   )
 }

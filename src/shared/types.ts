@@ -13,6 +13,37 @@ export interface Settings {
   theme: string
   /** Destaques na saída do terminal. */
   highlights: HighlightSettings
+  /** Partes da janela: abas na lateral, barra de status e diff do git no topo. */
+  layout: LayoutSettings
+}
+
+export interface LayoutSettings {
+  /** Abas numa lista na lateral (com pasta, branch e +/-) no lugar da barra de abas. */
+  sidebar: boolean
+  /** Barra de status embaixo: pasta, branch e alterações da aba ativa. */
+  statusBar: boolean
+  /** Contador +linhas/-linhas da aba ativa na barra do topo. */
+  diffBadge: boolean
+}
+
+export interface GitInfo {
+  /** `null` com HEAD destacado (aí vale `commit`). */
+  branch: string | null
+  commit: string | null
+  ahead: number
+  behind: number
+  /** Linhas adicionadas/removidas em relação ao HEAD, ainda não commitadas. */
+  added: number
+  removed: number
+  changed: number
+  untracked: number
+  conflicts: number
+}
+
+export interface FileHit {
+  /** Relativo à pasta, com `/`. */
+  path: string
+  score: number
 }
 
 export interface HighlightRule {

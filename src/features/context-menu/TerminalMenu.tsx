@@ -61,7 +61,7 @@ export function TerminalMenu({ children, actions, onAction }: Props) {
         <MenuItem className={menuItem} value="themes" shortcut="mod+shift+,">
           Temas…
         </MenuItem>
-        <MenuItem className={menuItem} value="settings">
+        <MenuItem className={menuItem} value="settings" shortcut="mod+,">
           Configurações…
         </MenuItem>
         <MenuSeparator className={menuSeparator} />

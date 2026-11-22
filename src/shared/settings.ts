@@ -18,6 +18,7 @@ export const DEFAULT_SETTINGS: Settings = {
     network: true,
     rules: [{ pattern: String.raw`\b(TODO|FIXME|HACK)\b`, color: '#e0af68' }],
   },
+  layout: { sidebar: false, statusBar: true, diffBadge: true },
 }
 
 /** Mesmos limites do Rust (MAX_RULES / MAX_PATTERN em src-tauri/src/settings.rs). */

@@ -24,6 +24,22 @@ pub struct Settings {
     pub theme: String,
     /// Destaques na saída do terminal.
     pub highlights: HighlightSettings,
+    /// Partes da janela: abas na lateral, barra de status e diff do git no topo.
+    pub layout: LayoutSettings,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LayoutSettings {
+    pub sidebar: bool,
+    pub status_bar: bool,
+    pub diff_badge: bool,
+}
+
+impl Default for LayoutSettings {
+    fn default() -> Self {
+        Self { sidebar: false, status_bar: true, diff_badge: true }
+    }
 }
 
 pub const MAX_RULES: usize = 20;
@@ -92,6 +108,7 @@ impl Default for Settings {
             shell_predictions: true,
             theme: "system".into(),
             highlights: HighlightSettings::default(),
+            layout: LayoutSettings::default(),
         }
     }
 }
@@ -107,6 +124,7 @@ pub struct SettingsPatch {
     pub theme: Option<String>,
     /// Substitui todos os destaques de uma vez (já validados no apply).
     pub highlights: Option<HighlightSettings>,
+    pub layout: Option<LayoutSettings>,
 }
 
 /// Ids de tema: letras minúsculas, números e hífen, até 40 caracteres.
@@ -142,6 +160,9 @@ impl Settings {
         }
         if let Some(v) = patch.highlights {
             self.highlights = v.sanitized();
+        }
+        if let Some(v) = patch.layout {
+            self.layout = v;
         }
     }
 }
