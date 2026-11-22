@@ -18,8 +18,18 @@ export const DEFAULT_SETTINGS: Settings = {
     network: true,
     rules: [{ pattern: String.raw`\b(TODO|FIXME|HACK)\b`, color: '#e0af68' }],
   },
-  layout: { sidebar: false, statusBar: true, diffBadge: true },
+  layout: { sidebar: true, statusBar: true, diffBadge: true },
+  profiles: [
+    { id: 'trabalho', name: 'Trabalho', color: 'green', cwd: '', pinned: [] },
+    { id: 'pessoal', name: 'Pessoal', color: 'yellow', cwd: '', pinned: [] },
+  ],
+  linkTarget: 'panel',
+  interfaceSize: 'medium',
 }
+
+/** Mesmos limites do Rust (MAX_PROFILES / MAX_PINNED em src-tauri/src/settings.rs). */
+export const MAX_PROFILES = 9
+export const MAX_PINNED = 12
 
 /** Mesmos limites do Rust (MAX_RULES / MAX_PATTERN em src-tauri/src/settings.rs). */
 export const MAX_RULES = 20

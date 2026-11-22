@@ -10,10 +10,14 @@ interface Props {
   first: boolean
   last: boolean
   alone: boolean
+  /** Rótulos na vertical (lateral): "acima/abaixo" no lugar de "esquerda/direita". */
+  vertical?: boolean
+  /** A aba tem pasta conhecida e ela ainda não está fixada no perfil. */
+  canPin?: boolean
   onAction: (action: TabMenuAction) => void
 }
 
-export function TabMenu({ trigger, children, first, last, alone, onAction }: Props) {
+export function TabMenu({ trigger, children, first, last, alone, vertical, canPin, onAction }: Props) {
   return (
     <Menu onAction={(value) => onAction(value as TabMenuAction)}>
       <MenuContextTrigger render={trigger}>{children}</MenuContextTrigger>
@@ -29,11 +33,16 @@ export function TabMenu({ trigger, children, first, last, alone, onAction }: Pro
         </MenuItem>
         <MenuSeparator className={menuSeparator} />
         <MenuItem className={menuItem} value="move-left" shortcut="ctrl+shift+pageup" disabled={first}>
-          Mover para a esquerda
+          {vertical ? 'Mover para cima' : 'Mover para a esquerda'}
         </MenuItem>
         <MenuItem className={menuItem} value="move-right" shortcut="ctrl+shift+pagedown" disabled={last}>
-          Mover para a direita
+          {vertical ? 'Mover para baixo' : 'Mover para a direita'}
         </MenuItem>
+        {canPin && (
+          <MenuItem className={menuItem} value="pin-folder">
+            Fixar a pasta desta aba
+          </MenuItem>
+        )}
         <MenuSeparator className={menuSeparator} />
         <MenuItem className={menuItem} value="close" shortcut="mod+shift+w">
           Fechar aba
@@ -42,7 +51,7 @@ export function TabMenu({ trigger, children, first, last, alone, onAction }: Pro
           Fechar as outras abas
         </MenuItem>
         <MenuItem className={menuItem} value="close-right" disabled={last} destructive>
-          Fechar as abas à direita
+          {vertical ? 'Fechar as abas abaixo' : 'Fechar as abas à direita'}
         </MenuItem>
       </MenuContent>
     </Menu>

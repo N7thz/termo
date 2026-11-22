@@ -18,6 +18,7 @@ export type TabMenuAction =
   | 'duplicate'
   | 'move-left'
   | 'move-right'
+  | 'pin-folder'
   | 'close'
   | 'close-others'
   | 'close-right'

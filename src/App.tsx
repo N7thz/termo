@@ -2,19 +2,25 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Button } from '@ui-sdk/react/button'
 import { Tabs, TabsList, TabsPanel, TabsTab, TabsTabIcon } from '@ui-sdk/react/tabs'
 import { Tooltip, TooltipContent, TooltipShortcut, TooltipTrigger } from '@ui-sdk/react/tooltip'
+import { Plus, X } from 'lucide-react'
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
+import { BrowserPanel } from './features/browser/BrowserPanel'
 import { TabMenu } from './features/context-menu/TabMenu'
 import { TerminalMenu } from './features/context-menu/TerminalMenu'
 import type { TabMenuAction, TerminalActions, TerminalMenuAction } from './features/context-menu/types'
 import type { Severity } from './features/highlights/matchers'
 import { CommandPalette } from './features/palette/CommandPalette'
+import { createProfile, PROFILE_COLORS, pinFolder, profileColorCss } from './features/profiles/profiles'
 import { SettingsPanel } from './features/settings/SettingsPanel'
 import { ShortcutsDialog } from './features/shortcuts/ShortcutsDialog'
+import { ClaudeIcon } from './features/tabs/ClaudeIcon'
 import { actionFor } from './features/tabs/shortcuts'
-import { initialTabs, type Tab, tabsReducer, tabsToClose } from './features/tabs/tabs'
+import { TabKindIcon } from './features/tabs/TabKindIcon'
+import { initialTabs, type Tab, tabsReducer, tabsToClose, visibleTabs } from './features/tabs/tabs'
 import { TerminalView } from './features/terminal/TerminalView'
 import { ThemesPage } from './features/theme/ThemesPage'
 import { useTheme } from './features/theme/useTheme'
+import { WindowControls } from './features/window/WindowControls'
 import { GitDiff } from './features/workspace/GitDiff'
 import { StatusBar } from './features/workspace/StatusBar'
 import { TabSidebar } from './features/workspace/TabSidebar'
@@ -22,14 +28,14 @@ import { useWorkspace } from './features/workspace/useWorkspace'
 import { ipc } from './lib/ipc'
 import { actionButton, tooltip, tooltipKbd } from './lib/ui'
 import { clampFontSize, DEFAULT_SETTINGS } from './shared/settings'
-import type { SessionKind, Settings } from './shared/types'
+import type { Profile, SessionKind, Settings } from './shared/types'
 
 // Feedback no pointer-down (active:), sem esperar o click. Ao fechar, a aba encolhe até sumir.
 const TAB =
   'group/tab flex h-7 min-w-27.5 max-w-50 animate-tab-in cursor-default items-center gap-1.5 rounded-lg pr-1.5 pl-2.5 text-[12.5px] tracking-[0.005em] text-muted [transition:background-color_160ms_ease-out,color_160ms_ease-out,box-shadow_200ms_ease-out,scale_400ms_var(--spring)] hover:bg-surface-hover hover:text-text active:scale-[0.97] active:duration-60 has-focus-visible:outline-2 has-focus-visible:outline-offset-1 has-focus-visible:outline-accent data-active:bg-surface data-active:font-[560] data-active:text-text data-active:shadow-tab data-closing:pointer-events-none data-closing:-mx-px data-closing:max-w-0 data-closing:min-w-0 data-closing:overflow-hidden data-closing:px-0 data-closing:opacity-0 data-closing:[transition:max-width_180ms_var(--spring-soft),padding_180ms_var(--spring-soft),opacity_120ms_ease-out] motion-reduce:animate-none motion-reduce:[transition:background-color_120ms,color_120ms,opacity_120ms] motion-reduce:active:scale-100'
 
 const TAB_CLOSE =
-  'size-5 rounded-[5px] text-[15px] leading-none opacity-0 [transition:opacity_120ms_ease-out,background-color_120ms_ease-out,scale_300ms_var(--spring)] group-hover/tab:opacity-70 group-data-active/tab:opacity-70 hover:bg-border hover:opacity-100 active:scale-[0.88] active:duration-50 motion-reduce:active:scale-100'
+  'grid size-5 place-items-center rounded-[5px] text-[15px] leading-none opacity-0 [transition:opacity_120ms_ease-out,background-color_120ms_ease-out,scale_300ms_var(--spring)] group-hover/tab:opacity-70 group-data-active/tab:opacity-70 hover:bg-border hover:opacity-100 active:scale-[0.88] active:duration-50 motion-reduce:active:scale-100'
 
 /** Contador de erros (vermelho) ou ponto de aviso (amarelo) numa aba em segundo plano. */
 function TabAlert({
@@ -120,9 +126,17 @@ export function App() {
     )
   }, [])
 
+  // Sem `profile`, abre no perfil atual; `cwd` é a pasta (fixada ou da aba duplicada).
   const openTab = useCallback(
-    (kind: SessionKind, shell = shellName) =>
-      dispatch({ type: 'open', kind, title: kind === 'claude' ? 'Claude Code' : shell }),
+    (kind: SessionKind, opts: { shell?: string; cwd?: string; profile?: string; after?: number } = {}) =>
+      dispatch({
+        type: 'open',
+        kind,
+        title: kind === 'claude' ? 'Claude Code' : (opts.shell ?? shellName),
+        cwd: opts.cwd,
+        profile: opts.profile,
+        after: opts.after,
+      }),
     [shellName],
   )
 
@@ -134,7 +148,9 @@ export function App() {
         setSettings(s)
         setShellName(info.shellName)
         setCwd(info.cwd ?? undefined)
-        openTab(info.openClaudeFirst ? 'claude' : 'shell', info.shellName)
+        const first = s.profiles?.[0]?.id
+        if (first) dispatch({ type: 'switch-profile', profile: first })
+        openTab(info.openClaudeFirst ? 'claude' : 'shell', { shell: info.shellName })
       })
       .catch((err) => {
         console.error('[termo] falha ao iniciar', err)
@@ -143,7 +159,55 @@ export function App() {
       .finally(() => setReady(true))
   }, [])
 
-  // Sem abas: fecha a janela, como os outros terminais.
+  // Perfis: o atual (ou o primeiro, se o atual sumiu da lista) e as abas dele.
+  const profiles = settings.profiles?.length ? settings.profiles : DEFAULT_SETTINGS.profiles
+  const profile = profiles.find((p) => p.id === state.profile) ?? profiles[0]
+  const tabs = visibleTabs(state)
+  const profileOf = (tab: Tab) => profiles.find((p) => p.id === tab.profile)
+
+  useEffect(() => {
+    if (ready && profile.id !== state.profile) dispatch({ type: 'switch-profile', profile: profile.id })
+  }, [ready, profile.id, state.profile])
+
+  // Os tons dos perfis vêm do tema ativo (--tone-green... a partir das ANSI do terminal).
+  useEffect(() => {
+    const root = document.documentElement.style
+    const ansi = theme.terminal as Record<string, string | undefined>
+    for (const tone of PROFILE_COLORS) {
+      const value = ansi[tone]
+      if (value) root.setProperty(`--tone-${tone}`, value)
+    }
+  }, [theme])
+
+  const saveProfiles = useCallback(
+    (next: Profile[]) =>
+      ipc
+        .setSettings({ profiles: next })
+        .then(setSettings)
+        .catch((err) => console.error('[termo] falha ao salvar os perfis', err)),
+    [],
+  )
+  const editProfile = (patch: Partial<Profile>) =>
+    void saveProfiles(profiles.map((p) => (p.id === profile.id ? { ...p, ...patch } : p)))
+
+  // Perfil sem abas abre uma de cara, como o Dia abre uma aba nova.
+  const switchProfile = (id: string) => {
+    if (id === state.profile) return
+    dispatch({ type: 'switch-profile', profile: id })
+    if (!state.tabs.some((t) => t.profile === id)) openTab('shell', { profile: id })
+  }
+  const addProfile = () => {
+    const created = createProfile(profiles)
+    void saveProfiles([...profiles, created]).then(() => openTab('shell', { profile: created.id }))
+  }
+  const deleteProfile = () => {
+    const to = profiles.find((p) => p.id !== profile.id)
+    if (!to) return
+    dispatch({ type: 'remove-profile', profile: profile.id, to: to.id })
+    void saveProfiles(profiles.filter((p) => p.id !== profile.id))
+  }
+
+  // Sem abas em nenhum perfil: fecha a janela, como os outros terminais.
   useEffect(() => {
     if (ready && state.tabs.length === 0) void getCurrentWindow().close()
   }, [ready, state.tabs.length])
@@ -185,12 +249,11 @@ export function App() {
       case 'new-claude':
         return openTab('claude')
       case 'duplicate':
-        return dispatch({
-          type: 'open',
-          kind: tab.kind,
-          title: tab.kind === 'claude' ? 'Claude Code' : shellName,
-          after: tab.key,
-        })
+        return openTab(tab.kind, { after: tab.key, cwd: workspace.info(tab.key).cwd ?? tab.cwd })
+      case 'pin-folder': {
+        const dir = workspace.info(tab.key).cwd
+        return dir && editProfile({ pinned: pinFolder(profile, dir).pinned })
+      }
       case 'move-left':
         return dispatch({ type: 'move', key: tab.key, delta: -1 })
       case 'move-right':
@@ -243,7 +306,7 @@ export function App() {
       if (!action) return
       e.preventDefault()
       const size = settingsRef.current.fontSize
-      const activeTab = state.tabs.find((t) => t.key === state.active)
+      const activeTab = tabs.find((t) => t.key === state.active)
       switch (action) {
         case 'new-shell':
           return openTab('shell')
@@ -262,7 +325,7 @@ export function App() {
         case 'move-tab-right':
           return activeTab && runTabAction(activeTab, 'move-right')
         case 'last-tab': {
-          const last = state.tabs.at(-1)
+          const last = tabs.at(-1)
           return last && dispatch({ type: 'activate', key: last.key })
         }
         case 'font-up':
@@ -286,7 +349,7 @@ export function App() {
         case 'toggle-sidebar':
           return updateSettings({ layout: { ...layout, sidebar: !layout.sidebar } })
         default: {
-          const tab = state.tabs[Number(action.slice('tab-'.length)) - 1]
+          const tab = tabs[Number(action.slice('tab-'.length)) - 1]
           return tab && dispatch({ type: 'activate', key: tab.key })
         }
       }
@@ -297,166 +360,218 @@ export function App() {
 
   return (
     <Tabs
-      className="flex h-full flex-col"
+      className="flex h-full bg-frame"
       activation="manual"
       value={state.active == null ? null : String(state.active)}
       onValueChange={(value) => value != null && dispatch({ type: 'activate', key: Number(value) })}
     >
-      {/* Barra de título nativa fica por fora; esta barra é só a de abas. */}
-      <header className="relative z-5 flex h-10 items-center gap-2 bg-linear-to-b from-material-thick to-material px-2 shadow-titlebar backdrop-blur-[24px] backdrop-saturate-160 select-none reduced-transparency:bg-surface reduced-transparency:bg-none reduced-transparency:backdrop-blur-none">
-        <TabsList
-          className={`flex min-w-0 gap-0.5 overflow-x-auto py-0.5 [scrollbar-width:none] ${layout.sidebar ? 'hidden' : ''}`}
-          aria-label="Abas"
-        >
-          {state.tabs.map((tab, index) => (
-            <TabMenu
-              key={tab.key}
-              first={index === 0}
-              last={index === state.tabs.length - 1}
-              alone={state.tabs.length === 1}
-              onAction={(action) => runTabAction(tab, action)}
-              trigger={
-                <div
-                  data-active={tab.key === state.active || undefined}
-                  data-closing={closing.has(tab.key) || undefined}
-                  className={TAB}
-                  onAuxClick={(e) => e.button === 1 && closeTab(tab.key)}
-                  title={tab.title}
-                />
-              }
-            >
-              <TabsTab
-                className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-start outline-none"
-                value={String(tab.key)}
+      {/* Como no Dia: a lateral ocupa a altura toda, e ela, a barra e o rodapé ficam direto sobre a moldura;
+          só o terminal tem cartão. Fica sempre montada e abre/fecha pela largura (o que sobra fechada, 6px,
+          é a margem esquerda), para a animação partir de onde estiver se o atalho for apertado no meio. */}
+      <div
+        className={`flex-none overflow-hidden [transition:width_380ms_var(--spring-soft),opacity_200ms_ease-out] motion-reduce:[transition:opacity_150ms_ease] ${layout.sidebar ? 'w-56' : 'w-2.5 opacity-0'}`}
+        inert={!layout.sidebar}
+      >
+        <TabSidebar
+          profiles={profiles}
+          profile={profile}
+          tabs={tabs}
+          active={state.active}
+          info={workspace.info}
+          colors={diffColors}
+          onActivate={(key) => dispatch({ type: 'activate', key })}
+          onClose={closeTab}
+          onNew={(kind, dir) => openTab(kind, { cwd: dir })}
+          onTabAction={runTabAction}
+          onSwitchProfile={switchProfile}
+          onAddProfile={addProfile}
+          onEditProfile={editProfile}
+          onDeleteProfile={deleteProfile}
+          onUnpin={(dir) => editProfile({ pinned: profile.pinned.filter((d) => d !== dir) })}
+          closing={closing}
+          renderAlert={(key) => <TabAlert alert={alerts.get(key)} colors={theme.terminal} />}
+        />
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* Sem a barra nativa: esta é a barra de título. Arrasta pelo fundo e pelo espaço vazio; duplo clique maximiza. */}
+        <header data-tauri-drag-region className="relative z-5 flex h-10 flex-none items-center gap-2 px-2 select-none">
+          {!layout.sidebar && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    className={`${actionButton} flex-none gap-1.5 text-[12px] font-[600] text-text`}
+                    aria-label={`Perfil ${profile.name}: trocar`}
+                    onClick={() => switchProfile(profiles[(profiles.indexOf(profile) + 1) % profiles.length].id)}
+                  />
+                }
               >
-                <TabsTabIcon
-                  className={`font-mono text-[11px] font-semibold ${tab.kind === 'claude' ? 'text-claude' : 'text-accent'}`}
+                <span className="size-2 rounded-full" style={{ background: profileColorCss(profile.color) }} />
+                {profile.name}
+              </TooltipTrigger>
+              <TooltipContent className={tooltip} sideOffset={6}>
+                Trocar de perfil
+              </TooltipContent>
+            </Tooltip>
+          )}
+          <TabsList
+            className={`flex min-w-0 gap-0.5 overflow-x-auto py-0.5 [scrollbar-width:none] ${layout.sidebar ? 'hidden' : ''}`}
+            aria-label="Abas"
+          >
+            {tabs.map((tab, index) => (
+              <TabMenu
+                key={tab.key}
+                first={index === 0}
+                last={index === tabs.length - 1}
+                alone={tabs.length === 1}
+                onAction={(action) => runTabAction(tab, action)}
+                trigger={
+                  <div
+                    data-active={tab.key === state.active || undefined}
+                    data-closing={closing.has(tab.key) || undefined}
+                    className={TAB}
+                    onAuxClick={(e) => e.button === 1 && closeTab(tab.key)}
+                    title={tab.title}
+                  />
+                }
+              >
+                <TabsTab
+                  className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-start outline-none"
+                  value={String(tab.key)}
                 >
-                  {tab.kind === 'claude' ? '✦' : '›_'}
-                </TabsTabIcon>
-                <span className="flex-1 truncate">{tab.title}</span>
-                <TabAlert alert={alerts.get(tab.key)} colors={theme.terminal} />
-              </TabsTab>
-              {/* Fora do tab (botão dentro de botão é inválido) e fora da ordem de Tab: pelo teclado é Ctrl+Shift+W. */}
-              <Button
-                className={TAB_CLOSE}
-                tabIndex={-1}
-                aria-label={`Fechar ${tab.title}`}
-                onClick={() => closeTab(tab.key)}
-              >
-                ×
-              </Button>
-            </TabMenu>
-          ))}
-        </TabsList>
-        <span className="flex-1" />
-        {layout.diffBadge && <GitDiff git={activeInfo.git} colors={diffColors} className="px-1" />}
-        <div className="flex gap-1">
-          {/* Os atalhos são ligados em actionFor; o shortcut do Tooltip só mostra e anuncia. */}
-          <Tooltip shortcut="mod+shift+t">
-            <TooltipTrigger
-              render={<Button className={actionButton} aria-label="Nova aba" onClick={() => openTab('shell')} />}
-            >
-              +
-            </TooltipTrigger>
-            <TooltipContent className={tooltip} sideOffset={6}>
-              Nova aba <TooltipShortcut className={tooltipKbd} />
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip shortcut="mod+shift+k">
-            <TooltipTrigger
-              render={
+                  <TabsTabIcon className="flex">
+                    <TabKindIcon kind={tab.kind} />
+                  </TabsTabIcon>
+                  <span className="flex-1 truncate">{tab.title}</span>
+                  <TabAlert alert={alerts.get(tab.key)} colors={theme.terminal} />
+                </TabsTab>
+                {/* Fora do tab (botão dentro de botão é inválido) e fora da ordem de Tab: pelo teclado é Ctrl+Shift+W. */}
                 <Button
-                  className={`${actionButton} text-[12px] font-[560] tracking-[0.01em] text-claude`}
-                  onClick={() => openTab('claude')}
-                />
-              }
-            >
-              ✦ Claude
-            </TooltipTrigger>
-            <TooltipContent className={tooltip} sideOffset={6}>
-              Nova aba com Claude Code <TooltipShortcut className={tooltipKbd} />
-            </TooltipContent>
-          </Tooltip>
-          <SettingsPanel
-            open={showSettings}
-            onOpenChange={setShowSettings}
-            settings={settings}
-            onChange={updateSettings}
-            onOpenThemes={openThemes}
-            onOpenShortcuts={() => {
-              setShowSettings(false)
-              setShowShortcuts(true)
-            }}
-          />
-        </div>
-      </header>
+                  className={TAB_CLOSE}
+                  tabIndex={-1}
+                  aria-label={`Fechar ${tab.title}`}
+                  onClick={() => closeTab(tab.key)}
+                >
+                  <X size={12} />
+                </Button>
+              </TabMenu>
+            ))}
+          </TabsList>
+          <span data-tauri-drag-region className="flex-1 self-stretch" />
+          {layout.diffBadge && <GitDiff git={activeInfo.git} colors={diffColors} className="px-1" />}
+          <div className="flex gap-1">
+            {/* Os atalhos são ligados em actionFor; o shortcut do Tooltip só mostra e anuncia. */}
+            <Tooltip shortcut="mod+shift+t">
+              <TooltipTrigger
+                render={<Button className={actionButton} aria-label="Nova aba" onClick={() => openTab('shell')} />}
+              >
+                <Plus size={15} />
+              </TooltipTrigger>
+              <TooltipContent className={tooltip} sideOffset={6}>
+                Nova aba <TooltipShortcut className={tooltipKbd} />
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip shortcut="mod+shift+k">
+              <TooltipTrigger
+                render={
+                  <Button
+                    className={`${actionButton} text-[12px] font-[560] tracking-[0.01em] text-claude`}
+                    onClick={() => openTab('claude')}
+                  />
+                }
+              >
+                <ClaudeIcon size={13} /> Claude
+              </TooltipTrigger>
+              <TooltipContent className={tooltip} sideOffset={6}>
+                Nova aba com Claude Code <TooltipShortcut className={tooltipKbd} />
+              </TooltipContent>
+            </Tooltip>
+            <SettingsPanel
+              open={showSettings}
+              onOpenChange={setShowSettings}
+              settings={settings}
+              onChange={updateSettings}
+              onOpenThemes={openThemes}
+              onOpenShortcuts={() => {
+                setShowSettings(false)
+                setShowShortcuts(true)
+              }}
+            />
+          </div>
+          <WindowControls />
+        </header>
 
-      <div className="flex min-h-0 flex-1">
-        {layout.sidebar && (
-          <TabSidebar
-            tabs={state.tabs}
-            active={state.active}
-            info={workspace.info}
+        <div className={`flex min-h-0 flex-1 gap-2.5 pr-2.5 ${layout.statusBar ? '' : 'pb-2.5'}`}>
+          {/* O cartão: o terminal recuado da borda, com cantos arredondados e sombra suave. */}
+          <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-[10px] bg-bg shadow-card">
+            {state.tabs.map((tab) => (
+              <TabsPanel key={tab.key} value={String(tab.key)} keepMounted className="absolute inset-0">
+                <TerminalMenu
+                  actions={() => terminalActions.current.get(tab.key)}
+                  onAction={(action) => runTerminalAction(tab.key, action)}
+                >
+                  <TerminalView
+                    kind={tab.kind}
+                    active={tab.key === state.active}
+                    settings={settings}
+                    terminalTheme={theme.terminal}
+                    cwd={tab.cwd || profileOf(tab)?.cwd || cwd}
+                    onTitle={(title) => dispatch({ type: 'update', key: tab.key, patch: { title } })}
+                    onKind={(kind) =>
+                      dispatch({
+                        type: 'update',
+                        key: tab.key,
+                        patch: { kind, title: kind === 'claude' ? 'Claude Code' : shellName },
+                      })
+                    }
+                    onClose={() => dispatch({ type: 'close', key: tab.key })}
+                    onSeverity={(severity) => onSeverity(tab.key, severity)}
+                    onActions={(actions) =>
+                      actions ? terminalActions.current.set(tab.key, actions) : terminalActions.current.delete(tab.key)
+                    }
+                    onCwd={(dir) => workspace.reportCwd(tab.key, dir)}
+                    onPrompt={() => workspace.reportPrompt(tab.key)}
+                  />
+                </TerminalMenu>
+              </TabsPanel>
+            ))}
+            {tabs.length === 0 && (
+              <div className="absolute inset-0 grid animate-fade-in place-items-center motion-reduce:animate-none">
+                <div className="flex flex-col items-center gap-3 text-[13px] text-muted">
+                  <span>Nenhuma aba no perfil {profile.name}.</span>
+                  <div className="flex gap-2">
+                    <Button className={actionButton} onClick={() => openTab('shell')}>
+                      <Plus size={14} /> Nova aba
+                    </Button>
+                    <Button className={`${actionButton} text-claude`} onClick={() => openTab('claude')}>
+                      <ClaudeIcon size={13} /> Claude Code
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {showThemes && (
+              <ThemesPage
+                value={settings.theme}
+                onChange={(id) => updateSettings({ theme: id })}
+                onPreview={setPreviewTheme}
+                onClose={closeThemes}
+              />
+            )}
+          </main>
+          <BrowserPanel linkTarget={settings.linkTarget} />
+        </div>
+        {layout.statusBar && (
+          <StatusBar
+            info={activeInfo}
+            kind={tabs.find((t) => t.key === state.active)?.kind}
+            shellName={shellName}
             colors={diffColors}
-            onActivate={(key) => dispatch({ type: 'activate', key })}
-            onClose={closeTab}
-            onNew={() => openTab('shell')}
-            renderAlert={(key) => <TabAlert alert={alerts.get(key)} colors={theme.terminal} />}
+            onSearch={() => setShowPalette(true)}
+            searchKeys="Ctrl+Shift+P"
           />
         )}
-        <main className="relative min-h-0 flex-1">
-          {state.tabs.map((tab) => (
-            <TabsPanel key={tab.key} value={String(tab.key)} keepMounted className="absolute inset-0">
-              <TerminalMenu
-                actions={() => terminalActions.current.get(tab.key)}
-                onAction={(action) => runTerminalAction(tab.key, action)}
-              >
-                <TerminalView
-                  kind={tab.kind}
-                  active={tab.key === state.active}
-                  settings={settings}
-                  terminalTheme={theme.terminal}
-                  cwd={cwd}
-                  onTitle={(title) => dispatch({ type: 'update', key: tab.key, patch: { title } })}
-                  onKind={(kind) =>
-                    dispatch({
-                      type: 'update',
-                      key: tab.key,
-                      patch: { kind, title: kind === 'claude' ? 'Claude Code' : shellName },
-                    })
-                  }
-                  onClose={() => dispatch({ type: 'close', key: tab.key })}
-                  onSeverity={(severity) => onSeverity(tab.key, severity)}
-                  onActions={(actions) =>
-                    actions ? terminalActions.current.set(tab.key, actions) : terminalActions.current.delete(tab.key)
-                  }
-                  onCwd={(dir) => workspace.reportCwd(tab.key, dir)}
-                  onPrompt={() => workspace.reportPrompt(tab.key)}
-                />
-              </TerminalMenu>
-            </TabsPanel>
-          ))}
-          {showThemes && (
-            <ThemesPage
-              value={settings.theme}
-              onChange={(id) => updateSettings({ theme: id })}
-              onPreview={setPreviewTheme}
-              onClose={closeThemes}
-            />
-          )}
-        </main>
       </div>
-      {layout.statusBar && (
-        <StatusBar
-          info={activeInfo}
-          kind={state.tabs.find((t) => t.key === state.active)?.kind}
-          shellName={shellName}
-          colors={diffColors}
-          onSearch={() => setShowPalette(true)}
-          searchKeys="Ctrl+Shift+P"
-        />
-      )}
       <ShortcutsDialog open={showShortcuts} onOpenChange={setShowShortcuts} />
       <CommandPalette
         open={showPalette}
@@ -476,6 +591,14 @@ export function App() {
             run: () => updateSettings({ layout: { ...layout, sidebar: !layout.sidebar } }),
           },
           { id: 'shortcuts', label: 'Atalhos de teclado', keys: 'f1', run: () => setShowShortcuts(true) },
+          ...profiles
+            .filter((p) => p.id !== profile.id)
+            .map((p) => ({
+              id: `profile-${p.id}`,
+              label: `Trocar para o perfil ${p.name}`,
+              run: () => switchProfile(p.id),
+            })),
+          { id: 'new-profile', label: 'Novo perfil', run: addProfile },
         ]}
         onActivateTab={(key) => dispatch({ type: 'activate', key })}
         onGoToFolder={(dir) => void ipc.writeClipboard(`cd '${dir.replace(/'/g, "''")}'`)}

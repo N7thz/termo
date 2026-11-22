@@ -15,6 +15,25 @@ export interface Settings {
   highlights: HighlightSettings
   /** Partes da janela: abas na lateral, barra de status e diff do git no topo. */
   layout: LayoutSettings
+  /** Perfis (como no Dia): cada um com as suas abas, cor de moldura, pasta inicial e pastas fixadas. */
+  profiles: Profile[]
+  /** Onde os links do terminal abrem: painel ao lado ou navegador do sistema (Ctrl+clique faz o contrário). */
+  linkTarget: 'panel' | 'browser'
+  /** Tamanho da interface (zoom do webview, com a fonte do terminal compensada). */
+  interfaceSize: 'small' | 'medium' | 'large'
+}
+
+export interface Profile {
+  /** Letras minúsculas, números e hífen; único. */
+  id: string
+  /** 1 a 30 caracteres. */
+  name: string
+  /** Tom do tema (`green`, `accent`...; ver PROFILE_COLORS) que tinge a moldura. */
+  color: string
+  /** Pasta inicial das abas deste perfil. Vazio = a pasta inicial geral. */
+  cwd: string
+  /** Pastas fixadas na lateral (até 12). */
+  pinned: string[]
 }
 
 export interface LayoutSettings {
