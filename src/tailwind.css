@@ -37,6 +37,9 @@
   --highlight: rgb(255 255 255 / 7%);
   --field: rgb(15 17 23 / 70%);
   --on-accent: #0f1117;
+  /* Moldura da janela (estilo Dia): só cores do tema, entre o fundo do terminal e a superfície.
+     A cor do perfil não tinge a moldura; ela aparece só nos pontos e no nome do perfil. */
+  --frame: color-mix(in oklab, var(--bg) 55%, var(--surface));
   /* Multiplica a opacidade das sombras: 1 no escuro, menos no claro. */
   --shadow-strength: 1;
   /* Molas aproximadas com linear(): sem JS, e o CSS retoma do valor atual se interrompido. */
@@ -61,6 +64,7 @@
   --color-highlight: var(--highlight);
   --color-material: var(--material);
   --color-material-thick: var(--material-thick);
+  --color-frame: var(--frame);
 
   --font-sans: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", monospace;
@@ -69,6 +73,9 @@
   --ease-spring-soft: var(--spring-soft);
 
   --shadow-titlebar: inset 0 -1px 0 var(--hairline), 0 1px 12px rgb(0 0 0 / calc(0.25 * var(--shadow-strength)));
+  --shadow-card:
+    0 0 0 1px var(--hairline), 0 1px 2px rgb(0 0 0 / calc(0.18 * var(--shadow-strength))),
+    0 6px 20px rgb(0 0 0 / calc(0.22 * var(--shadow-strength)));
   --shadow-tab:
     inset 0 0 0 1px var(--border), inset 0 1px 0 var(--highlight),
     0 1px 3px rgb(0 0 0 / calc(0.35 * var(--shadow-strength)));
@@ -80,6 +87,38 @@
 
   --animate-tab-in: tab-in 420ms var(--spring) both;
   --animate-pop-in: pop-in 120ms ease-out;
+  /* Lateral: linha de aba entrando; conteúdo do perfil deslizando no sentido da troca (como no Dia). */
+  --animate-row-in: row-in 360ms var(--spring) both;
+  --animate-slide-next: slide-next 320ms var(--spring-soft) both;
+  --animate-slide-prev: slide-prev 320ms var(--spring-soft) both;
+  --animate-fade-in: fade-in 180ms ease-out both;
+
+  @keyframes row-in {
+    from {
+      opacity: 0;
+      transform: translateX(-10px) scale(0.98);
+    }
+  }
+
+  @keyframes slide-next {
+    from {
+      opacity: 0;
+      transform: translateX(28px);
+    }
+  }
+
+  @keyframes slide-prev {
+    from {
+      opacity: 0;
+      transform: translateX(-28px);
+    }
+  }
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
 
   @keyframes tab-in {
     from {
@@ -111,12 +150,22 @@
     height: 100%;
     margin: 0;
     overflow: hidden;
-    background: var(--bg);
+    background: var(--frame);
     color: var(--text);
-    font: 13px / 1.4 var(--font-sans);
     transition:
       background-color 200ms ease-out,
       color 200ms ease-out;
+  }
+
+  /* O html fica em 16px: o espaçamento do Tailwind é em rem (h-10 = 2.5rem), e com 13px no html tudo
+     saía 81% do tamanho escrito. Os 13px da interface valem só a partir do body. */
+  html {
+    font-size: 16px;
+  }
+
+  body,
+  #root {
+    font: 13px / 1.4 var(--font-sans);
   }
 
   .xterm-viewport {
