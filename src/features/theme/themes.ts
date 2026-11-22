@@ -435,6 +435,54 @@ const oneDark: ThemeDefinition = {
   }),
 }
 
+/**
+ * Vesper++: o Vesper de Rauno Freiberg (github.com/raunofreiberg/vesper), fundo quase preto com laranja e
+ * menta, com a paleta ANSI do port para terminais (mbadolato/iTerm2-Color-Schemes, "Vesper"). O "++" é a
+ * interface feita à mão (superfícies em cinza neutro, acento laranja, Claude em salmão), cursor laranja e
+ * uma seleção âmbar mais discreta que a original (#988049), para o texto branco continuar legível.
+ */
+const vesperPlusPlus: ThemeDefinition = {
+  id: 'vesper-plus-plus',
+  name: 'Vesper++',
+  scheme: 'dark',
+  credit: { author: 'Rauno Freiberg', source: 'https://github.com/raunofreiberg/vesper' },
+  ui: {
+    bg: '#101010',
+    surface: '#171717',
+    surfaceHover: '#1f1f1f',
+    border: '#2a2a2a',
+    text: '#ffffff',
+    muted: '#8b8b8b',
+    accent: '#ffc799',
+    claude: '#f5a191',
+    material: 'rgb(16 16 16 / 64%)',
+    materialThick: 'rgb(23 23 23 / 80%)',
+    hairline: 'rgb(255 255 255 / 8%)',
+    highlight: 'rgb(255 255 255 / 5%)',
+    field: 'rgb(10 10 10 / 80%)',
+    onAccent: '#101010',
+    shadowStrength: 1,
+  },
+  terminal: term('#101010', '#ffffff', '#ffc799', '#4a3d2b', {
+    black: '#101010',
+    red: '#f5a191',
+    green: '#90b99f',
+    yellow: '#e6b99d',
+    blue: '#aca1cf',
+    magenta: '#e29eca',
+    cyan: '#ea83a5',
+    white: '#a0a0a0',
+    brightBlack: '#7e7e7e',
+    brightRed: '#ff8080',
+    brightGreen: '#99ffe4',
+    brightYellow: '#ffc799',
+    brightBlue: '#b9aeda',
+    brightMagenta: '#ecaad6',
+    brightCyan: '#f591b2',
+    brightWhite: '#ffffff',
+  }),
+}
+
 export const THEMES: readonly ThemeDefinition[] = [
   termoDark,
   termoLight,
@@ -445,6 +493,7 @@ export const THEMES: readonly ThemeDefinition[] = [
   gruvboxDark,
   solarizedLight,
   oneDark,
+  vesperPlusPlus,
 ]
 
 /** `system` segue o claro/escuro do Windows. */
