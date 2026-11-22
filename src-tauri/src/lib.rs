@@ -5,6 +5,7 @@ mod coord;
 mod editor;
 mod files;
 mod git;
+mod images;
 mod node;
 mod paths;
 mod pty;
@@ -194,6 +195,25 @@ async fn node_info(cache: State<'_, node::VersionCache>, node: Option<String>, c
 #[tauri::command]
 async fn node_versions() -> node::NodeVersions {
     node::node_versions()
+}
+
+/// Dos nomes citados na saída de um comando, as imagens que existem (caminhos absolutos).
+#[tauri::command]
+async fn image_existing(cwd: Option<String>, candidates: Vec<String>) -> Vec<String> {
+    images::existing(cwd.as_deref(), &candidates)
+}
+
+/// A imagem como `data:` para a prévia do bloco.
+#[tauri::command]
+async fn image_preview(path: String) -> Result<images::Preview, String> {
+    images::preview(&path)
+}
+
+/// Abre a imagem no visualizador padrão do sistema (só arquivos de imagem).
+#[tauri::command]
+fn image_open(app: AppHandle, path: String) -> Result<(), String> {
+    images::check_openable(&path)?;
+    app.opener().open_path(path, None::<&str>).map_err(|e| e.to_string())
 }
 
 /// Arquivos da pasta que combinam com a busca (correspondência difusa), para a busca geral.
@@ -419,6 +439,9 @@ pub fn run() {
             git_create_branch,
             node_info,
             node_versions,
+            image_existing,
+            image_preview,
+            image_open,
             search_files,
             settings_get,
             settings_set,

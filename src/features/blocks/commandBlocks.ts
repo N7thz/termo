@@ -1,5 +1,5 @@
 import type { IDecoration, IDisposable, IMarker, Terminal } from '@xterm/xterm'
-import { decodeCommand, formatDuration, joinRows, tail } from './blocks'
+import { decodeCommand, findImagePaths, formatDuration, joinRows, tail } from './blocks'
 import './commandBlocks.css'
 
 /**
@@ -23,6 +23,10 @@ export interface CommandBlock {
   output: IMarker
   /** Linha logo depois da saída (o próximo prompt). */
   end: IMarker | null
+  /** Pasta em que o comando rodou (para achar as imagens citadas com caminho relativo). */
+  cwd: string | null
+  /** Imagens citadas no comando ou na saída que existem (caminhos absolutos). */
+  images: string[]
 }
 
 export interface BlockCallbacks {
@@ -31,6 +35,12 @@ export interface BlockCallbacks {
   explain?: (block: { command: string; output: string; exitCode: number }) => void
   /** Cor real (não variável CSS) para a régua: o vermelho do tema do terminal. */
   failColor: () => string
+  /** Pasta atual do shell (vem do prompt). */
+  cwd?: () => string | null
+  /** Dos nomes citados, as imagens que existem (o backend confere). */
+  findImages?: (cwd: string | null, candidates: string[]) => Promise<string[]>
+  /** Abre a prévia das imagens do bloco junto do botão que foi clicado. */
+  showImages?: (paths: string[], anchor: HTMLElement) => void
 }
 
 /** Quantos blocos guardar com decorações (os mais antigos perdem os botões, a saída fica). */
@@ -44,6 +54,8 @@ const ICON = {
     '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M3 4h10M3 8h10M3 12h6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
   spark:
     '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M8 1.5l1.6 4.9 4.9 1.6-4.9 1.6L8 14.5l-1.6-4.9L1.5 8l4.9-1.6z" fill="currentColor"/></svg>',
+  image:
+    '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="6" cy="6.3" r="1.2" fill="currentColor"/><path d="M2.8 12l3.6-3.4 2.4 2.2 1.8-1.6 2.6 2.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
 }
 
 export class CommandBlocks implements IDisposable {
@@ -104,8 +116,25 @@ export class CommandBlocks implements IDisposable {
       prompt,
       output,
       end: null,
+      cwd: this.cb.cwd?.() ?? null,
+      images: [],
     }
     this.pendingCommand = ''
+  }
+
+  /** Imagens citadas no comando ou na saída: se alguma existir, o bloco ganha o botão da prévia. */
+  private lookForImages(b: CommandBlock) {
+    const find = this.cb.findImages
+    if (!find || !this.cb.showImages) return
+    const candidates = findImagePaths(`${b.command}\n${this.outputOf(b)}`)
+    if (candidates.length === 0) return
+    void find(b.cwd, candidates)
+      .then((paths) => {
+        if (paths.length === 0 || !this.blocks.includes(b)) return
+        b.images = paths
+        this.render(b)
+      })
+      .catch(() => undefined)
   }
 
   private onCommandEnd(data: string) {
@@ -127,6 +156,7 @@ export class CommandBlocks implements IDisposable {
       if (old) this.disposeBlock(old)
     }
     this.render(block)
+    this.lookForImages(block)
   }
 
   private outputOf(b: CommandBlock): string {
@@ -166,7 +196,8 @@ export class CommandBlocks implements IDisposable {
     if (bar) list.push(bar)
 
     // Status, duração e botões, à direita da linha do prompt.
-    const width = Math.min(this.term.cols, failed && this.cb.explain ? 30 : 20)
+    const images = b.images.length > 0 && this.cb.showImages ? 6 : 0
+    const width = Math.min(this.term.cols, (failed && this.cb.explain ? 30 : 20) + images)
     const tools = this.term.registerDecoration({
       marker: b.prompt,
       anchor: 'right',
@@ -199,6 +230,27 @@ export class CommandBlocks implements IDisposable {
     label.textContent = failed ? `${b.exitCode} · ${duration}` : duration
     status.append(label)
     status.title = failed ? `Saiu com o código ${b.exitCode} em ${duration}` : `Concluído em ${duration}`
+
+    // Imagens citadas: o botão fica sempre à vista (os outros só aparecem com o mouse em cima).
+    const show = this.cb.showImages
+    if (b.images.length > 0 && show) {
+      const el = document.createElement('button')
+      el.type = 'button'
+      el.className = 'termo-block-button termo-block-images'
+      el.innerHTML = ICON.image
+      const count = document.createElement('span')
+      count.textContent = String(b.images.length)
+      el.append(count)
+      const label =
+        b.images.length === 1 ? 'Ver a imagem deste comando' : `Ver as ${b.images.length} imagens deste comando`
+      el.title = label
+      el.setAttribute('aria-label', label)
+      el.addEventListener('click', (e) => {
+        e.stopPropagation()
+        show(b.images, el)
+      })
+      box.append(el)
+    }
     box.append(status)
 
     const button = (icon: string, label: string, run: () => void) => {

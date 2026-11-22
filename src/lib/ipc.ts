@@ -53,6 +53,12 @@ export const ipc = {
   nodeInfo: (node: string | null, cwd: string | null) => invoke<NodeInfo>('node_info', { node, cwd }),
   /** Gerenciador de versões do Node (fnm, nvm-windows, Volta) e as versões instaladas. */
   nodeVersions: () => invoke<NodeVersions>('node_versions'),
+  /** Dos nomes citados na saída de um comando, as imagens que existem (absolutas, até 24). */
+  imageExisting: (cwd: string | null, candidates: string[]) => invoke<string[]>('image_existing', { cwd, candidates }),
+  /** A imagem como `data:` para a prévia (até 12 MB). */
+  imagePreview: (path: string) => invoke<{ dataUrl: string; bytes: number }>('image_preview', { path }),
+  /** Abre a imagem no visualizador padrão do sistema. */
+  imageOpen: (path: string) => invoke<void>('image_open', { path }),
   /** Arquivos da pasta que combinam com a busca (correspondência difusa). */
   searchFiles: (cwd: string, query: string, limit?: number) =>
     invoke<FileHit[]>('search_files', { cwd, query, limit: limit ?? null }),

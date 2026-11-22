@@ -78,3 +78,14 @@
 .termo-block-toolbar:not(:hover):not(:focus-within) .termo-block-button {
   display: none;
 }
+
+/* Botão das imagens citadas: sempre visível, com a contagem. */
+.termo-block-toolbar .termo-block-images,
+.termo-block-toolbar:not(:hover):not(:focus-within) .termo-block-images {
+  display: inline-flex;
+  gap: 3px;
+  width: auto;
+  padding: 0 5px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}

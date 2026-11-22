@@ -43,6 +43,8 @@ src-tauri/           backend (Rust)
   src/usage.rs       limites do Claude lidos do `statusLine` das abas do Claude
   src/coord.rs       leitura do painel do coord (127.0.0.1:4747)
   src/window.rs      várias janelas (`termo-<n>`), cada uma com abas e painel próprios
+  src/node.rs        versão do Node da aba e versões do fnm/nvm-windows/Volta
+  src/images.rs      imagens citadas na saída dos blocos (prévia em `data:`, só arquivos de imagem)
   resources/         conpty.dll e OpenConsole.exe (ConPTY moderno, copiados ao lado do .exe)
 ```
 
@@ -57,6 +59,10 @@ src-tauri/           backend (Rust)
 - Controle de vazão: saídas enormes não travam a interface
 - Sem shells órfãos: recarregar ou fechar a janela encerra os processos dela
 - Blocos por comando: barra verde ou vermelha na margem, duração, copiar o comando ou a saída e "explicar o erro" com o Claude, que sugere a correção pronta para rodar
+- Prévia de imagem nos blocos: se o comando ou a saída citam imagens que existem (`ls` numa pasta com PNGs, `magick a.jpg b.png`), o bloco ganha o botão com as miniaturas; o clique abre no visualizador do Windows
+- Linha de contexto acima da entrada, como a do Warp: versão do Node (em projetos com `package.json`, avisando quando o `.nvmrc`/`.node-version` pede outra), pasta e branch. A versão troca pelo fnm (por aba), nvm-windows ou Volta; o Termo ativa o fnm sozinho se o $PROFILE não fizer isso
+- Branches: trocar e criar (`git switch -c`, a partir da atual) pelo botão da branch
+- Abas na lateral: arrastar muda a ordem (as outras abrem espaço, como no Chrome) e entra ou sai de grupos; soltar sobre o terminal divide a tela. O menu da aba tem "Dividir a tela com" para juntar duas abas já abertas
 - Caixa de comando com highlight; `# o que você quer fazer` + Enter vira um comando do PowerShell (não executa sozinho)
 - Painéis divididos (Ctrl+Shift+E) e várias janelas (Ctrl+Shift+N)
 - Bateria do uso do Claude na barra de título, com mascote em pixel art. Os limites vêm do `statusLine` das abas do Claude (quem já tem um `statusLine` próprio continua com ele, e a bateria fica sem dados)
@@ -68,6 +74,6 @@ src-tauri/           backend (Rust)
 0. ~~Infraestrutura: Tauri, contrato de IPC, vazão, Biome, testes, CI, instalador~~
 1. ~~Blocos por comando: integração OSC 133/633 com o PowerShell, cards com status, duração e copiar~~
 2. ~~Editor de entrada com highlight e autocomplete~~
-3. Highlights na saída (caminhos, erros) e temas já existem; falta a prévia de imagem nos blocos
+3. ~~Highlights na saída (caminhos, erros), temas e prévia de imagem nos blocos~~
 4. ~~IA: linguagem natural vira comando, botão "explicar erro"~~
 5. ~~Painéis divididos e várias janelas~~

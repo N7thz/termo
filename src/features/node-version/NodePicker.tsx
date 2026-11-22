@@ -56,7 +56,8 @@ export function NodePicker({ info, color, className = '', canRun, onRun }: Props
         <ChevronDown aria-hidden size={12} className="flex-none opacity-60" />
       </MenuTrigger>
       <MenuContent
-        className={`${menuContent} max-h-[min(420px,70vh)] max-w-[min(380px,90vw)] overflow-y-auto`}
+        // font-sans: o menu herda a fonte do terminal da linha de contexto; os menus usam a da interface.
+        className={`${menuContent} max-h-[min(420px,70vh)] max-w-[min(380px,90vw)] overflow-y-auto font-sans`}
         side="top"
         align="start"
         sideOffset={6}

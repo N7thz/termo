@@ -15,6 +15,7 @@ import { PathSuggestions, type SuggestionsPosition } from '../autocomplete/PathS
 import { extractQuery } from '../autocomplete/query'
 import { ShellIntegration } from '../autocomplete/shellIntegration'
 import { CommandBlocks } from '../blocks/commandBlocks'
+import { ImagePreview, type ImagePreviewAnchor } from '../blocks/ImagePreview'
 import { openLink } from '../browser/links'
 import type { TerminalActions } from '../context-menu/types'
 import type { Severity } from '../highlights/matchers'
@@ -116,6 +117,8 @@ export function TerminalView({
   const [idle, setIdle] = useState(false)
   /** Explicação de erro pedida ao Claude pelo botão do bloco (null: painel fechado). */
   const [ai, setAi] = useState<AiPanelState | null>(null)
+  /** Prévia das imagens citadas por um bloco (botão da imagem na barra do bloco). */
+  const [images, setImages] = useState<{ paths: string[]; anchor: ImagePreviewAnchor } | null>(null)
   const aiSeq = useRef(0)
   const [altBuffer, setAltBuffer] = useState(false)
   const [dead, setDead] = useState(false)
@@ -194,6 +197,13 @@ export function TerminalView({
     const blocks = new CommandBlocks(term, {
       copy: (text) => void ipc.writeClipboard(text),
       failColor: () => term.options.theme?.red ?? term.options.theme?.foreground ?? 'red',
+      cwd: () => shell.cwd,
+      findImages: (dir, candidates) => ipc.imageExisting(dir, candidates),
+      showImages: (paths, button) => {
+        const b = button.getBoundingClientRect()
+        const w = wrap.getBoundingClientRect()
+        setImages({ paths, anchor: { right: Math.max(8, w.right - b.right), top: b.bottom - w.top + 6 } })
+      },
       explain: ({ command, output, exitCode }) => {
         const seq = ++aiSeq.current
         setAi({ command, status: 'loading', text: '' })
@@ -551,6 +561,16 @@ export function TerminalView({
           onRun={(command) => {
             setAi(null)
             runRef.current(command)
+          }}
+        />
+      )}
+      {images && (
+        <ImagePreview
+          paths={images.paths}
+          anchor={images.anchor}
+          onClose={() => {
+            setImages(null)
+            termRef.current?.focus()
           }}
         />
       )}

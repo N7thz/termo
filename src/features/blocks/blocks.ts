@@ -42,3 +42,35 @@ export function joinRows(rows: readonly BufferRow[]): string {
 export function tail(text: string, maxChars: number): string {
   return text.length <= maxChars ? text : `…\n${text.slice(text.length - maxChars)}`
 }
+
+const IMAGE_EXT = String.raw`\.(?:png|jpe?g|gif|webp|bmp|ico|svg|avif)`
+/** Entre aspas: o nome pode ter espaços. */
+const QUOTED = new RegExp(String.raw`["']([^"'\r\n]+?${IMAGE_EXT})["']`, 'gi')
+/** Solto: até um espaço, aspas ou pontuação que não faz parte de caminho. */
+const BARE = new RegExp(
+  String.raw`(?:^|[\s(=,\[>])((?:[A-Za-z]:)?[^\s"'<>|*?(),\[\]]*${IMAGE_EXT})(?=$|[\s),;:\]])`,
+  'gim',
+)
+/** Linha do `ls`/Get-ChildItem do PowerShell: o nome é o resto da linha depois da hora e do tamanho. */
+const LS_ROW = /^[-dlarhs]{5,6}\s+.*?\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AP]M)?\s+(?:\d+\s+)?(.+?)\s*$/i
+const ENDS_IMAGE = new RegExp(`${IMAGE_EXT}$`, 'i')
+
+/**
+ * Nomes de imagem citados no comando ou na saída (`ls` de uma pasta com PNGs, `magick a.jpg b.png`...).
+ * São só candidatos: o backend confere quais existem (src-tauri/src/images.rs).
+ */
+export function findImagePaths(text: string, limit = 200): string[] {
+  const found = new Set<string>()
+  const add = (s: string | undefined) => {
+    const name = s?.trim()
+    if (name && found.size < limit) found.add(name)
+  }
+  for (const line of text.split(/\r?\n/)) {
+    const ls = LS_ROW.exec(line)
+    if (ls && ENDS_IMAGE.test(ls[1])) add(ls[1])
+  }
+  for (const m of text.matchAll(QUOTED)) add(m[1])
+  // Um nome solto que é só o fim de um nome já achado ("inicio.png" de "tela de inicio.png") não conta.
+  for (const m of text.matchAll(BARE)) if (![...found].some((f) => f !== m[1] && f.endsWith(` ${m[1]}`))) add(m[1])
+  return [...found]
+}
