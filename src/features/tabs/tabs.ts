@@ -71,6 +71,11 @@ export type TabsAction =
   | { type: 'cycle'; delta: 1 | -1 }
   | { type: 'update'; key: number; patch: Partial<Omit<Tab, 'key' | 'profile' | 'cwd' | 'group'>> }
   | { type: 'move'; key: number; delta: 1 | -1 }
+  /**
+   * Arrastar: põe a aba logo antes de `before` (e no grupo dela). Sem `before`, vai para o fim do
+   * grupo `group` (ou das soltas, com `group: null`).
+   */
+  | { type: 'reorder'; key: number; before: number | null; group: string | null }
   | { type: 'switch-profile'; profile: string }
   /** O perfil foi excluído: as abas dele passam para `to`. */
   | { type: 'remove-profile'; profile: string; to: string }
@@ -196,6 +201,34 @@ export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
       const tabs = [...state.tabs]
       ;[tabs[a], tabs[b]] = [tabs[b], tabs[a]]
       return { ...state, tabs }
+    }
+    case 'reorder': {
+      const tab = state.tabs.find((t) => t.key === action.key)
+      if (!tab || action.before === action.key) return state
+      const target = action.before == null ? undefined : state.tabs.find((t) => t.key === action.before)
+      if (action.before != null && (!target || target.profile !== tab.profile)) return state
+      // O grupo vem da aba de referência; sem ela, do destino pedido (que precisa existir no perfil).
+      const groupId = target ? target.group : (action.group ?? undefined)
+      if (groupId && !state.groups.some((g) => g.id === groupId && g.profile === tab.profile)) return state
+      const moved = { ...tab, group: groupId }
+      const rest = state.tabs.filter((t) => t.key !== tab.key)
+      let at: number
+      if (target) {
+        at = rest.indexOf(target)
+      } else {
+        // Fim do grupo (ou das soltas) no perfil: logo depois da última aba de lá; vazio, no fim da lista.
+        const known = new Set(state.groups.filter((g) => g.profile === tab.profile).map((g) => g.id))
+        const same = (t: Tab) =>
+          t.profile === tab.profile && (groupId ? t.group === groupId : !t.group || !known.has(t.group))
+        let lastIdx = -1
+        rest.forEach((t, i) => {
+          if (same(t)) lastIdx = i
+        })
+        at = lastIdx < 0 ? rest.length : lastIdx + 1
+      }
+      const tabs = [...rest.slice(0, at), moved, ...rest.slice(at)]
+      const unchanged = tab.group === groupId && tabs.every((t, i) => t.key === state.tabs[i].key)
+      return unchanged ? state : { ...state, tabs }
     }
     case 'switch-profile': {
       if (action.profile === state.profile) return state

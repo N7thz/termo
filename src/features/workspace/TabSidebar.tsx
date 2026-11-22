@@ -14,6 +14,7 @@ import { TabKindIcon } from '../tabs/TabKindIcon'
 import { MAX_GROUP_NAME, type Tab, type TabGroup } from '../tabs/tabs'
 import { folderName, shortPath } from './format'
 import { type DiffColors, GitBranch, GitDiff } from './GitDiff'
+import { type DropTarget, useFlip, useTabDrag } from './useTabDrag'
 import type { TabInfo } from './useWorkspace'
 
 interface Props {
@@ -48,6 +49,10 @@ interface Props {
   partnerOf: (key: number) => number | undefined
   /** Estado do Claude Code de cada aba (avatar no lugar do ícone). */
   agents?: ReadonlyMap<number, AgentState>
+  /** Arrastar: põe a aba antes de `before` (ou no fim do grupo `group`; `null` = soltas). */
+  onReorder: (key: number, before: number | null, group: string | null) => void
+  /** Aba solta sobre o terminal: abre ao lado da aba ativa. */
+  onSplitWith: (key: number) => void
 }
 
 /** Cabeçalho do grupo: recolhe/abre no clique, renomeia no duplo clique, desfaz no X. */
@@ -174,6 +179,31 @@ export function TabSidebar(props: Props) {
   }
   const slide = last.current.slide
 
+  // Ordem da tela (grupos e depois as soltas), para traduzir "embaixo de X" em "antes da próxima".
+  const knownGroups = new Set(props.groups.map((g) => g.id))
+  const groupOf = (t: Tab) => (t.group && knownGroups.has(t.group) ? t.group : null)
+  const order = [
+    ...props.groups.flatMap((g) => tabs.filter((t) => t.group === g.id)),
+    ...tabs.filter((t) => !groupOf(t)),
+  ]
+  const { dragKey, handlers } = useTabDrag({ onMove: moveTo, onSplit: props.onSplitWith })
+  const navRef = useRef<HTMLElement>(null)
+  // Muda a ordem (ou o grupo de uma aba): as abas deslizam até o lugar novo.
+  useFlip(navRef, order.map((t) => `${t.key}:${groupOf(t) ?? ''}`).join(','), dragKey)
+
+  function moveTo(key: number, target: DropTarget) {
+    if (target.kind === 'split') return
+    if (target.kind === 'group') return props.onReorder(key, null, target.group)
+    if (target.kind === 'loose') return props.onReorder(key, null, null)
+    if (target.kind === 'before') return props.onReorder(key, target.key, null)
+    // Embaixo de X: antes da aba seguinte do mesmo grupo de X (pulando a arrastada), ou no fim desse grupo.
+    const ref = order.find((t) => t.key === target.key)
+    if (!ref) return
+    const group = groupOf(ref)
+    const next = order.slice(order.indexOf(ref) + 1).find((t) => t.key !== key && groupOf(t) === group)
+    props.onReorder(key, next?.key ?? null, group)
+  }
+
   const renderTab = (tab: Tab) => {
     const index = tabs.indexOf(tab)
     const { cwd, git } = info(tab.key)
@@ -191,13 +221,18 @@ export function TabSidebar(props: Props) {
         inGroup={!!tab.group}
         split={partner != null}
         canSplitWithActive={active != null && tab.key !== active && partner !== active}
+        splitTargets={tabs
+          .filter((t) => t.key !== tab.key && t.key !== partner)
+          .map((t) => ({ key: t.key, title: t.title }))}
         onAction={(action) => onTabAction(tab, action)}
         trigger={
           <div
-            className="group/row relative flex max-h-28 animate-row-in flex-col gap-1 overflow-hidden rounded-[10px] p-2.5 text-[12px] text-muted [transition:background-color_140ms_ease-out,color_140ms_ease-out,box-shadow_200ms_ease-out,scale_300ms_var(--spring)] hover:bg-surface-hover active:scale-[0.98] active:duration-60 data-active:bg-bg data-active:text-text data-active:shadow-tab data-closing:pointer-events-none data-closing:max-h-0 data-closing:py-0 data-closing:opacity-0 data-closing:[transition:max-height_180ms_var(--spring-soft),padding_180ms_var(--spring-soft),opacity_120ms_ease-out,translate_180ms_var(--spring-soft)] data-closing:-translate-x-2 motion-reduce:animate-none motion-reduce:active:scale-100 motion-reduce:data-closing:translate-x-0"
+            className="group/row relative flex max-h-28 animate-row-in flex-col gap-1 overflow-hidden rounded-[10px] p-2.5 text-[12px] text-muted [transition:background-color_140ms_ease-out,color_140ms_ease-out,box-shadow_200ms_ease-out,scale_300ms_var(--spring)] hover:bg-surface-hover active:scale-[0.98] active:duration-60 data-active:bg-bg data-active:text-text data-active:shadow-tab data-closing:pointer-events-none data-closing:max-h-0 data-closing:py-0 data-closing:opacity-0 data-closing:[transition:max-height_180ms_var(--spring-soft),padding_180ms_var(--spring-soft),opacity_120ms_ease-out,translate_180ms_var(--spring-soft)] data-closing:-translate-x-2 motion-reduce:animate-none motion-reduce:active:scale-100 motion-reduce:data-closing:translate-x-0 data-dragging:pointer-events-none data-dragging:z-10 data-dragging:bg-bg data-dragging:text-text data-dragging:shadow-pop data-dragging:[transition:box-shadow_200ms_ease-out] data-dragging:animate-none"
             data-active={isActive || undefined}
             data-closing={closing.has(tab.key) || undefined}
+            data-dragging={dragKey === tab.key || undefined}
             onAuxClick={(e) => e.button === 1 && onClose(tab.key)}
+            {...handlers(tab.key)}
           />
         }
       >
@@ -230,6 +265,7 @@ export function TabSidebar(props: Props) {
         )}
         <Button
           className={CARD_CLOSE}
+          data-no-drag
           tabIndex={-1}
           aria-label={`Fechar ${tab.title}`}
           onClick={() => onClose(tab.key)}
@@ -272,7 +308,11 @@ export function TabSidebar(props: Props) {
         />
       </div>
 
-      <nav className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto pb-2" aria-label="Abas do perfil">
+      <nav
+        ref={navRef}
+        className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto pb-2"
+        aria-label="Abas do perfil"
+      >
         {/* key no perfil: a troca remonta o conteúdo, que entra deslizando no sentido da troca. */}
         <div key={profile.id} className={`flex flex-col ${slide} motion-reduce:animate-none`}>
           {profile.pinned.length > 0 && (
@@ -310,13 +350,15 @@ export function TabSidebar(props: Props) {
               const inside = tabs.filter((t) => t.group === group.id)
               return (
                 <section key={group.id} className="flex flex-col gap-1.5" aria-label={`Grupo ${group.name}`}>
-                  <GroupHeader
-                    group={group}
-                    count={inside.length}
-                    onToggle={() => props.onGroupToggle(group.id)}
-                    onRename={(name) => props.onGroupRename(group.id, name)}
-                    onDelete={() => props.onGroupDelete(group.id)}
-                  />
+                  <div data-drop-group={group.id}>
+                    <GroupHeader
+                      group={group}
+                      count={inside.length}
+                      onToggle={() => props.onGroupToggle(group.id)}
+                      onRename={(name) => props.onGroupRename(group.id, name)}
+                      onDelete={() => props.onGroupDelete(group.id)}
+                    />
+                  </div>
                   {/* Abas do grupo recuadas, com um fio à esquerda ligando ao cabeçalho. */}
                   {!group.collapsed && inside.length > 0 && (
                     <div className="ml-3 flex flex-col gap-1.5 border-l border-hairline pl-1.5">
@@ -327,12 +369,15 @@ export function TabSidebar(props: Props) {
               )
             })}
             {tabs.filter((t) => !t.group || !props.groups.some((g) => g.id === t.group)).map((tab) => renderTab(tab))}
-            <Button
-              className={`${ROW} focus-visible:outline-2 focus-visible:outline-accent`}
-              onClick={() => onNew('shell')}
-            >
-              <Plus aria-hidden size={14} /> Nova aba
-            </Button>
+            {/* Soltar aqui (ou no vão até ele) leva a aba para o fim das soltas, fora de qualquer grupo. */}
+            <div data-drop-loose className="flex flex-col">
+              <Button
+                className={`${ROW} focus-visible:outline-2 focus-visible:outline-accent`}
+                onClick={() => onNew('shell')}
+              >
+                <Plus aria-hidden size={14} /> Nova aba
+              </Button>
+            </div>
           </div>
         </div>
       </nav>

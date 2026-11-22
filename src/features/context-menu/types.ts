@@ -31,6 +31,8 @@ export type TabMenuAction =
   | 'split-new'
   /** Tela dividida: esta aba ao lado da aba ativa. */
   | 'split-with-active'
+  /** Tela dividida: esta aba ao lado da aba `key`, já aberta. */
+  | `split-with:${number}`
   | 'unsplit'
 
 export type TerminalMenuAction =

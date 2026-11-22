@@ -30,6 +30,8 @@ interface Props {
   split?: boolean
   /** Dá para pôr esta aba ao lado da ativa (ela não é a ativa nem já está com ela). */
   canSplitWithActive?: boolean
+  /** Outras abas do perfil com que dá para dividir a tela (sem a própria e sem a que já está ao lado). */
+  splitTargets?: readonly { key: number; title: string }[]
   onAction: (action: TabMenuAction) => void
 }
 
@@ -37,7 +39,7 @@ const groupLabel = 'px-2.5 pt-1.5 pb-1 text-[11px] font-semibold tracking-[0.04e
 
 export function TabMenu(props: Props) {
   const { trigger, children, first, last, alone, vertical, canPin, onAction } = props
-  const { groups = [], inGroup, split, canSplitWithActive } = props
+  const { groups = [], inGroup, split, canSplitWithActive, splitTargets = [] } = props
   return (
     <Menu onAction={(value) => onAction(value as TabMenuAction)}>
       <MenuContextTrigger render={trigger}>{children}</MenuContextTrigger>
@@ -71,6 +73,16 @@ export function TabMenu(props: Props) {
           <MenuItem className={menuItem} value="split-with-active">
             Abrir ao lado da aba atual
           </MenuItem>
+        )}
+        {splitTargets.length > 0 && (
+          <MenuGroup>
+            <MenuGroupLabel className={groupLabel}>Dividir a tela com</MenuGroupLabel>
+            {splitTargets.map((t) => (
+              <MenuItem key={t.key} className={menuItem} value={`split-with:${t.key}`}>
+                <span className="max-w-60 truncate">{t.title}</span>
+              </MenuItem>
+            ))}
+          </MenuGroup>
         )}
         {split && (
           <MenuItem className={menuItem} value="unsplit">

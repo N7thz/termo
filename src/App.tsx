@@ -355,6 +355,8 @@ export function App() {
       case 'close-right':
         return tabsToClose(state, tab.key, 'right').forEach(closeTab)
       default:
+        if (action.startsWith('split-with:'))
+          return dispatch({ type: 'split', key: tab.key, with: Number(action.slice('split-with:'.length)) })
         if (action.startsWith('move-to-group:'))
           return dispatch({ type: 'set-group', key: tab.key, group: action.slice('move-to-group:'.length) })
     }
@@ -508,6 +510,10 @@ export function App() {
           onGroupDelete={(id) => dispatch({ type: 'group-delete', id })}
           partnerOf={partnerOf}
           agents={agents}
+          onReorder={(key, before, group) => dispatch({ type: 'reorder', key, before, group })}
+          onSplitWith={(key) =>
+            state.active != null && key !== state.active && dispatch({ type: 'split', key: state.active, with: key })
+          }
         />
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
@@ -628,7 +634,11 @@ export function App() {
 
         <div className={`flex min-h-0 flex-1 gap-2.5 pr-2.5 ${layout.statusBar ? '' : 'pb-2.5'}`}>
           {/* O cartão: o terminal recuado da borda, com cantos arredondados e sombra suave. */}
-          <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-[10px] bg-bg shadow-card">
+          {/* Aba arrastada da lateral e solta aqui: abre ao lado da ativa (ver useTabDrag). */}
+          <main
+            data-drop-split
+            className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-[10px] bg-bg shadow-card outline-accent [transition:outline-color_140ms_ease-out] data-drop-active:outline-2 data-drop-active:-outline-offset-2"
+          >
             {state.tabs.map((tab) => (
               // Painel próprio (não o TabsPanel): na tela dividida duas abas ficam visíveis ao mesmo tempo.
               <div
