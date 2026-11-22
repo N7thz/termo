@@ -1,16 +1,17 @@
 import { Button } from '@ui-sdk/react/button'
 import { Tooltip, TooltipContent, TooltipShortcut, TooltipTrigger } from '@ui-sdk/react/tooltip'
-import { Folder, Plus, X } from 'lucide-react'
-import { type ReactNode, useRef } from 'react'
+import { ChevronRight, Columns2, Folder, Plus, X } from 'lucide-react'
+import { type ReactNode, useRef, useState } from 'react'
 import { tooltip, tooltipKbd } from '../../lib/ui'
 import { MAX_PROFILES } from '../../shared/settings'
 import type { Profile, SessionKind } from '../../shared/types'
+import type { AgentState } from '../agent-status/agentState'
 import { TabMenu } from '../context-menu/TabMenu'
 import type { TabMenuAction } from '../context-menu/types'
 import { ProfileEditor } from '../profiles/ProfileEditor'
 import { isPinned, profileColorCss } from '../profiles/profiles'
 import { TabKindIcon } from '../tabs/TabKindIcon'
-import type { Tab } from '../tabs/tabs'
+import { MAX_GROUP_NAME, type Tab, type TabGroup } from '../tabs/tabs'
 import { folderName, shortPath } from './format'
 import { type DiffColors, GitBranch, GitDiff } from './GitDiff'
 import type { TabInfo } from './useWorkspace'
@@ -37,6 +38,76 @@ interface Props {
   closing: ReadonlySet<number>
   /** Alertas de erro/aviso por aba (o mesmo contador da barra de abas). */
   renderAlert?: (key: number) => ReactNode
+  /** Grupos do perfil atual. */
+  groups: readonly TabGroup[]
+  onGroupToggle: (id: string) => void
+  onGroupRename: (id: string, name: string) => void
+  /** Desfaz o grupo (as abas ficam soltas). */
+  onGroupDelete: (id: string) => void
+  /** Aba → a outra metade da tela dividida, para o indicador e o menu. */
+  partnerOf: (key: number) => number | undefined
+  /** Estado do Claude Code de cada aba (avatar no lugar do ícone). */
+  agents?: ReadonlyMap<number, AgentState>
+}
+
+/** Cabeçalho do grupo: recolhe/abre no clique, renomeia no duplo clique, desfaz no X. */
+function GroupHeader({
+  group,
+  count,
+  onToggle,
+  onRename,
+  onDelete,
+}: {
+  group: TabGroup
+  count: number
+  onToggle: () => void
+  onRename: (name: string) => void
+  onDelete: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  if (editing) {
+    return (
+      <input
+        // biome-ignore lint/a11y/noAutofocus: o campo só aparece depois do duplo clique em "renomear".
+        autoFocus
+        aria-label="Nome do grupo"
+        maxLength={MAX_GROUP_NAME}
+        defaultValue={group.name}
+        className="mx-0.5 h-8 rounded-[8px] border border-accent bg-field px-2 text-[12px] font-semibold text-text outline-none"
+        onBlur={(e) => {
+          onRename(e.currentTarget.value)
+          setEditing(false)
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.currentTarget.blur()
+          if (e.key === 'Escape') setEditing(false)
+        }}
+      />
+    )
+  }
+  return (
+    <div className={`${ROW} h-8 gap-1.5 font-semibold`}>
+      <button
+        type="button"
+        className="absolute inset-0 rounded-lg outline-none focus-visible:outline-2 focus-visible:outline-accent"
+        aria-expanded={!group.collapsed}
+        aria-label={`Grupo ${group.name}, ${count} aba(s)`}
+        title="Clique para recolher · duplo clique para renomear"
+        onClick={onToggle}
+        onDoubleClick={() => setEditing(true)}
+      />
+      <ChevronRight
+        aria-hidden
+        size={13}
+        className={`pointer-events-none flex-none [transition:rotate_260ms_var(--spring)] motion-reduce:transition-none ${group.collapsed ? '' : 'rotate-90'}`}
+      />
+      <span className="pointer-events-none min-w-0 flex-1 truncate text-[12px] tracking-[0.01em]">{group.name}</span>
+      <span className="pointer-events-none pr-6 text-[11px] font-normal tabular-nums opacity-70">{count}</span>
+      <Button className={ROW_CLOSE} tabIndex={-1} aria-label={`Desfazer o grupo ${group.name}`} onClick={onDelete}>
+        <X size={12} />
+      </Button>
+    </div>
+  )
 }
 
 const ROW =
@@ -102,6 +173,72 @@ export function TabSidebar(props: Props) {
     last.current = { id: profile.id, index, slide: next }
   }
   const slide = last.current.slide
+
+  const renderTab = (tab: Tab) => {
+    const index = tabs.indexOf(tab)
+    const { cwd, git } = info(tab.key)
+    const isActive = tab.key === active
+    const partner = props.partnerOf(tab.key)
+    return (
+      <TabMenu
+        key={tab.key}
+        vertical
+        first={index === 0}
+        last={index === tabs.length - 1}
+        alone={tabs.length === 1}
+        canPin={!!cwd && !isPinned(profile, cwd)}
+        groups={props.groups.filter((g) => g.id !== tab.group)}
+        inGroup={!!tab.group}
+        split={partner != null}
+        canSplitWithActive={active != null && tab.key !== active && partner !== active}
+        onAction={(action) => onTabAction(tab, action)}
+        trigger={
+          <div
+            className="group/row relative flex max-h-28 animate-row-in flex-col gap-1 overflow-hidden rounded-[10px] p-2.5 text-[12px] text-muted [transition:background-color_140ms_ease-out,color_140ms_ease-out,box-shadow_200ms_ease-out,scale_300ms_var(--spring)] hover:bg-surface-hover active:scale-[0.98] active:duration-60 data-active:bg-bg data-active:text-text data-active:shadow-tab data-closing:pointer-events-none data-closing:max-h-0 data-closing:py-0 data-closing:opacity-0 data-closing:[transition:max-height_180ms_var(--spring-soft),padding_180ms_var(--spring-soft),opacity_120ms_ease-out,translate_180ms_var(--spring-soft)] data-closing:-translate-x-2 motion-reduce:animate-none motion-reduce:active:scale-100 motion-reduce:data-closing:translate-x-0"
+            data-active={isActive || undefined}
+            data-closing={closing.has(tab.key) || undefined}
+            onAuxClick={(e) => e.button === 1 && onClose(tab.key)}
+          />
+        }
+      >
+        <button
+          type="button"
+          className="absolute inset-0 rounded-lg outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+          aria-current={isActive ? 'page' : undefined}
+          aria-label={`${tab.title}${cwd ? `, ${cwd}` : ''}`}
+          onClick={() => onActivate(tab.key)}
+        />
+        {/* Cartão de três linhas, como no Warp: título, pasta e branch com o diff. */}
+        <span className="pointer-events-none flex items-center gap-2.5 pr-6">
+          <TabKindIcon kind={tab.kind} size={16} agent={props.agents?.get(tab.key)} />
+          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{tab.title}</span>
+          {partner != null && (
+            <Columns2 size={13} className="flex-none opacity-70" aria-label="Em tela dividida" role="img" />
+          )}
+          {renderAlert?.(tab.key)}
+        </span>
+        {cwd && (
+          <span className="pointer-events-none truncate pl-6.5 text-[11.5px]" title={cwd}>
+            {shortPath(cwd, 2)}
+          </span>
+        )}
+        {git && (
+          <span className="pointer-events-none flex items-center gap-2 pl-6.5 text-[11.5px]">
+            <GitBranch git={git} className="min-w-0" />
+            <GitDiff git={git} colors={colors} className="ml-auto" />
+          </span>
+        )}
+        <Button
+          className={CARD_CLOSE}
+          tabIndex={-1}
+          aria-label={`Fechar ${tab.title}`}
+          onClick={() => onClose(tab.key)}
+        >
+          <X size={12} />
+        </Button>
+      </TabMenu>
+    )
+  }
 
   return (
     // Grade de 4px com margem de 6px: a borda esquerda do nome do perfil, dos blocos e das abas é a mesma,
@@ -169,62 +306,27 @@ export function TabSidebar(props: Props) {
           <hr className="mx-1 my-2 h-px flex-none border-0 bg-hairline" />
 
           <div className="flex flex-col gap-1.5">
-            {tabs.map((tab, index) => {
-              const { cwd, git } = info(tab.key)
-              const isActive = tab.key === active
+            {props.groups.map((group) => {
+              const inside = tabs.filter((t) => t.group === group.id)
               return (
-                <TabMenu
-                  key={tab.key}
-                  vertical
-                  first={index === 0}
-                  last={index === tabs.length - 1}
-                  alone={tabs.length === 1}
-                  canPin={!!cwd && !isPinned(profile, cwd)}
-                  onAction={(action) => onTabAction(tab, action)}
-                  trigger={
-                    <div
-                      className="group/row relative flex max-h-28 animate-row-in flex-col gap-1 overflow-hidden rounded-[10px] p-2.5 text-[12px] text-muted [transition:background-color_140ms_ease-out,color_140ms_ease-out,box-shadow_200ms_ease-out,scale_300ms_var(--spring)] hover:bg-surface-hover active:scale-[0.98] active:duration-60 data-active:bg-bg data-active:text-text data-active:shadow-tab data-closing:pointer-events-none data-closing:max-h-0 data-closing:py-0 data-closing:opacity-0 data-closing:[transition:max-height_180ms_var(--spring-soft),padding_180ms_var(--spring-soft),opacity_120ms_ease-out,translate_180ms_var(--spring-soft)] data-closing:-translate-x-2 motion-reduce:animate-none motion-reduce:active:scale-100 motion-reduce:data-closing:translate-x-0"
-                      data-active={isActive || undefined}
-                      data-closing={closing.has(tab.key) || undefined}
-                      onAuxClick={(e) => e.button === 1 && onClose(tab.key)}
-                    />
-                  }
-                >
-                  <button
-                    type="button"
-                    className="absolute inset-0 rounded-lg outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
-                    aria-current={isActive ? 'page' : undefined}
-                    aria-label={`${tab.title}${cwd ? `, ${cwd}` : ''}`}
-                    onClick={() => onActivate(tab.key)}
+                <section key={group.id} className="flex flex-col gap-1.5" aria-label={`Grupo ${group.name}`}>
+                  <GroupHeader
+                    group={group}
+                    count={inside.length}
+                    onToggle={() => props.onGroupToggle(group.id)}
+                    onRename={(name) => props.onGroupRename(group.id, name)}
+                    onDelete={() => props.onGroupDelete(group.id)}
                   />
-                  {/* Cartão de três linhas, como no Warp: título, pasta e branch com o diff. */}
-                  <span className="pointer-events-none flex items-center gap-2.5 pr-6">
-                    <TabKindIcon kind={tab.kind} size={16} />
-                    <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{tab.title}</span>
-                    {renderAlert?.(tab.key)}
-                  </span>
-                  {cwd && (
-                    <span className="pointer-events-none truncate pl-6.5 text-[11.5px]" title={cwd}>
-                      {shortPath(cwd, 2)}
-                    </span>
+                  {/* Abas do grupo recuadas, com um fio à esquerda ligando ao cabeçalho. */}
+                  {!group.collapsed && inside.length > 0 && (
+                    <div className="ml-3 flex flex-col gap-1.5 border-l border-hairline pl-1.5">
+                      {inside.map((tab) => renderTab(tab))}
+                    </div>
                   )}
-                  {git && (
-                    <span className="pointer-events-none flex items-center gap-2 pl-6.5 text-[11.5px]">
-                      <GitBranch git={git} className="min-w-0" />
-                      <GitDiff git={git} colors={colors} className="ml-auto" />
-                    </span>
-                  )}
-                  <Button
-                    className={CARD_CLOSE}
-                    tabIndex={-1}
-                    aria-label={`Fechar ${tab.title}`}
-                    onClick={() => onClose(tab.key)}
-                  >
-                    <X size={12} />
-                  </Button>
-                </TabMenu>
+                </section>
               )
             })}
+            {tabs.filter((t) => !t.group || !props.groups.some((g) => g.id === t.group)).map((tab) => renderTab(tab))}
             <Button
               className={`${ROW} focus-visible:outline-2 focus-visible:outline-accent`}
               onClick={() => onNew('shell')}

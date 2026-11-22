@@ -8,21 +8,32 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { type ITheme, Terminal } from '@xterm/xterm'
 import { useEffect, useRef, useState } from 'react'
 import { ipc } from '../../lib/ipc'
-import type { PathSuggestion, SessionKind, Settings } from '../../shared/types'
+import type { GitInfo, PathSuggestion, SessionKind, Settings } from '../../shared/types'
+import type { AgentState } from '../agent-status/agentState'
+import { AiPanel, type AiPanelState } from '../ai/AiPanel'
 import { PathSuggestions, type SuggestionsPosition } from '../autocomplete/PathSuggestions'
 import { extractQuery } from '../autocomplete/query'
 import { ShellIntegration } from '../autocomplete/shellIntegration'
+import { CommandBlocks } from '../blocks/commandBlocks'
 import { openLink } from '../browser/links'
 import type { TerminalActions } from '../context-menu/types'
 import type { Severity } from '../highlights/matchers'
 import { SearchBar } from '../highlights/SearchBar'
 import { TerminalHighlights } from '../highlights/terminalHighlights'
+import { InputEditor } from '../input/InputEditor'
+import type { NodeInfo } from '../node-version/types'
 import { terminalFontSize } from '../settings/interfaceSize'
 import { isAppShortcut } from '../tabs/shortcuts'
+import { ContextBar } from './ContextBar'
 
 interface Props {
   kind: SessionKind
+  /** Aba com o foco (recebe o teclado). */
   active: boolean
+  /** Aparece na tela; na tela dividida, a outra metade aparece sem ser a ativa. Padrão: `active`. */
+  visible?: boolean
+  /** O terminal recebeu o foco (clique na metade da tela dividida). */
+  onFocus?: () => void
   settings: Settings
   /** Cores do terminal do tema ativo; trocam ao vivo. */
   terminalTheme: ITheme
@@ -39,6 +50,10 @@ interface Props {
   onCwd?: (cwd: string) => void
   /** Prompt novo: um comando terminou (bom momento para atualizar o git). */
   onPrompt?: () => void
+  /** Estado do Claude Code da aba, vindo dos hooks (pensando, trabalhando, esperando...). */
+  onAgent?: (state: AgentState) => void
+  /** Git da pasta da aba, para a linha de contexto (`null` fora de repositório). */
+  git?: GitInfo | null
 }
 
 const highlightColors = (t: ITheme) => ({
@@ -69,6 +84,8 @@ const ROOM_ABOVE = 140
 export function TerminalView({
   kind,
   active,
+  visible = active,
+  onFocus,
   settings,
   terminalTheme,
   cwd,
@@ -79,6 +96,8 @@ export function TerminalView({
   onActions,
   onCwd,
   onPrompt,
+  onAgent,
+  git = null,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
@@ -90,12 +109,31 @@ export function TerminalView({
   const [position, setPosition] = useState<SuggestionsPosition>({ left: 0, bottom: 0 })
   const suggestionsRef = useRef(suggestions)
   suggestionsRef.current = suggestions
+  const cwdRef = useRef<string | null>(null)
   const highlightsRef = useRef<TerminalHighlights | null>(null)
   const [search, setSearch] = useState<SearchAddon | null>(null)
+  // Editor de entrada: prompt ocioso (depois do 133;B), buffer alternativo (vim, less) e processo encerrado escondem a caixa.
+  const [idle, setIdle] = useState(false)
+  /** Explicação de erro pedida ao Claude pelo botão do bloco (null: painel fechado). */
+  const [ai, setAi] = useState<AiPanelState | null>(null)
+  const aiSeq = useRef(0)
+  const [altBuffer, setAltBuffer] = useState(false)
+  const [dead, setDead] = useState(false)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const historyRef = useRef<string[]>([])
+  const submitRef = useRef<(text: string) => void>(() => {})
+  const clearRef = useRef<() => void>(() => {})
+  // Linha de contexto (Node, pasta, branch): pasta e node vêm do prompt.
+  const [shellCwd, setShellCwd] = useState<string | null>(null)
+  const [node, setNode] = useState<NodeInfo | null>(null)
+  const runRef = useRef<(command: string) => void>(() => {})
+  const showEditor = settings.inputEditor && kind === 'shell' && idle && !altBuffer && !dead
+  const showEditorRef = useRef(showEditor)
+  showEditorRef.current = showEditor
   const openSearchRef = useRef<() => void>(() => {})
   // Callbacks mudam a cada render; a ref evita recriar o terminal.
-  const cbRef = useRef({ onTitle, onKind, onClose, onSeverity, onActions, onCwd, onPrompt })
-  cbRef.current = { onTitle, onKind, onClose, onSeverity, onActions, onCwd, onPrompt }
+  const cbRef = useRef({ onTitle, onKind, onClose, onSeverity, onActions, onCwd, onPrompt, onAgent })
+  cbRef.current = { onTitle, onKind, onClose, onSeverity, onActions, onCwd, onPrompt, onAgent }
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: o terminal é criado uma vez por aba; a fonte é tratada no efeito abaixo
   useEffect(() => {
@@ -137,11 +175,36 @@ export function TerminalView({
     const shell = new ShellIntegration(
       term,
       (dir) => {
+        cwdRef.current = dir
+        setShellCwd(dir)
         void ipc.recordDir(dir).catch(() => undefined)
         cbRef.current.onCwd?.(dir)
       },
-      () => cbRef.current.onPrompt?.(),
+      () => {
+        cbRef.current.onPrompt?.()
+        // A cada prompt: a versão pode ter mudado (fnm use, cd com --use-on-cd) sem o caminho mudar.
+        void ipc
+          .nodeInfo(shell.node || null, shell.cwd)
+          .then((info) => !disposed && setNode((cur) => (JSON.stringify(cur) === JSON.stringify(info) ? cur : info)))
+          .catch(() => undefined)
+      },
+      setIdle,
     )
+    // Blocos por comando: barra de status na margem, duração e copiar/explicar na linha do prompt.
+    const blocks = new CommandBlocks(term, {
+      copy: (text) => void ipc.writeClipboard(text),
+      failColor: () => term.options.theme?.red ?? term.options.theme?.foreground ?? 'red',
+      explain: ({ command, output, exitCode }) => {
+        const seq = ++aiSeq.current
+        setAi({ command, status: 'loading', text: '' })
+        const input = [`Comando: ${command}`, `Código de saída: ${exitCode}`, 'Saída:', output].join('\n')
+        ipc
+          .aiAsk('explain', input, shell.cwd)
+          .then((text) => seq === aiSeq.current && setAi({ command, status: 'done', text }))
+          .catch((err) => seq === aiSeq.current && setAi({ command, status: 'error', text: String(err) }))
+      },
+    })
+    term.buffer.onBufferChange((b) => setAltBuffer(b.type === 'alternate'))
     const highlights = new TerminalHighlights(term, {
       settings: settings.highlights,
       colors: highlightColors(terminalTheme),
@@ -261,6 +324,25 @@ export function TerminalView({
       term.focus()
     }
 
+    // Editor de entrada: manda a caixa para o pty pelo mesmo caminho do teclado do xterm.
+    // Várias linhas vão uma por vez, cada uma com Enter: o PSReadLine continua sozinho blocos e strings abertas.
+    submitRef.current = (text) => {
+      send(`${text.split(/\r?\n/).join('\r')}\r`)
+      shell.commandSubmitted()
+      hide()
+      term.focus()
+    }
+    clearRef.current = () => send('\x0c')
+    // Comando vindo da linha de contexto (trocar o Node): apaga o que estiver digitado no prompt e executa.
+    runRef.current = (command) => {
+      const typed = shell.readInput() ?? ''
+      send(`\x1b[F${'\x7f'.repeat(typed.length)}${command}\r`)
+      shell.commandSubmitted()
+      hide()
+      if (showEditorRef.current) inputRef.current?.focus()
+      else term.focus()
+    }
+
     // Copiar/colar pela área de transferência do sistema (via Rust); atalhos do app não vão ao shell.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true
@@ -338,8 +420,11 @@ export function TerminalView({
             term.write(ev.data, () => {
               if (sessionId != null) void ipc.ack(sessionId, ev.bytes)
             })
+          } else if (ev.kind === 'agent') {
+            cbRef.current.onAgent?.(ev.state)
           } else {
             exited = true
+            setDead(true)
             hide()
             const code = ev.code == null ? '' : ` (código ${ev.code})`
             term.write(`\r\n${dim(`[processo encerrado${code}: pressione qualquer tecla para fechar a aba]`)}\r\n`)
@@ -366,6 +451,7 @@ export function TerminalView({
       highlights.dispose()
       highlightsRef.current = null
       cbRef.current.onActions?.(null)
+      blocks.dispose()
       shell.dispose()
       term.dispose()
     }
@@ -388,27 +474,86 @@ export function TerminalView({
     if (termRef.current) termRef.current.options.theme = withRuler(terminalTheme)
   }, [terminalTheme])
 
+  // Foco vindo de dentro do xterm (clique na metade da tela dividida): avisa quem controla a aba ativa.
+  const onFocusRef = useRef(onFocus)
+  onFocusRef.current = onFocus
+  useEffect(() => {
+    const wrap = wrapRef.current
+    if (!wrap) return
+    const handler = () => onFocusRef.current?.()
+    wrap.addEventListener('focusin', handler)
+    return () => wrap.removeEventListener('focusin', handler)
+  }, [])
+
   useEffect(() => {
     if (!active) return
     requestAnimationFrame(() => {
       fitRef.current?.fit()
-      termRef.current?.focus()
+      if (showEditorRef.current) inputRef.current?.focus()
+      else termRef.current?.focus()
     })
   }, [active])
 
+  // A caixa aparece (prompt ocioso): ela recebe o teclado. Quando some, o foco já foi para o xterm no Enter.
+  useEffect(() => {
+    if (showEditor && active) inputRef.current?.focus()
+  }, [showEditor, active])
+
   return (
     <div
-      className={`absolute inset-0 pt-3 pr-2 pb-3 pl-5 ${active ? 'visible' : 'invisible'}`}
+      className={`absolute inset-0 flex flex-col pt-3 pr-2 pb-3 pl-5 ${visible ? 'visible' : 'invisible'}`}
       data-terminal-active={active || undefined}
       ref={wrapRef}
     >
-      <div className="size-full" ref={hostRef} />
+      <div className="min-h-0 w-full flex-1" ref={hostRef} />
       <PathSuggestions
         items={suggestions}
         position={position}
         onPick={(item) => pickRef.current(item)}
         onDismiss={() => dismissRef.current()}
       />
+      {kind === 'shell' && !altBuffer && !dead && (
+        <ContextBar
+          cwd={shellCwd}
+          git={git}
+          node={node}
+          theme={terminalTheme}
+          fontFamily={settings.fontFamily}
+          fontSize={terminalFontSize(settings.fontSize, settings.interfaceSize)}
+          idle={idle}
+          onRun={(command) => runRef.current(command)}
+        />
+      )}
+      {settings.inputEditor && kind === 'shell' && (
+        <InputEditor
+          open={showEditor}
+          theme={terminalTheme}
+          fontFamily={settings.fontFamily}
+          fontSize={terminalFontSize(settings.fontSize, settings.interfaceSize)}
+          inputRef={inputRef}
+          history={historyRef}
+          cwd={() => cwdRef.current}
+          onSubmit={(text) => submitRef.current(text)}
+          onEscape={() => termRef.current?.focus()}
+          onClear={() => clearRef.current()}
+        />
+      )}
+      {ai && (
+        <AiPanel
+          state={ai}
+          fontFamily={settings.fontFamily}
+          onClose={() => {
+            aiSeq.current++
+            setAi(null)
+            termRef.current?.focus()
+          }}
+          onCopy={(text) => void ipc.writeClipboard(text)}
+          onRun={(command) => {
+            setAi(null)
+            runRef.current(command)
+          }}
+        />
+      )}
       {search && active && (
         <SearchBar
           search={search}

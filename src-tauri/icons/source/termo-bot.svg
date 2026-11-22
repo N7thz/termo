@@ -1,0 +1,12 @@
+<!-- Ícone do Termo: o robô do AgentAvatar (corpo "Terminal" do open-bot-avatar, MIT) nas cores do tema Termo Escuro.
+     Para regerar os ícones: bunx tauri icon src-tauri/icons/source/termo-bot.svg -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>Termo</title>
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="#0f1117"/>
+  <rect x="64.5" y="64.5" width="895" height="895" rx="199.5" fill="none" stroke="#252b38" stroke-width="8"/>
+  <g transform="translate(152 140) scale(7.2)">
+    <path d="M16 16 H84 A6 6 0 0 1 90 22 V26 A4 4 0 0 1 86 30 V74 A8 8 0 0 1 78 82 H22 A8 8 0 0 1 14 74 V30 A4 4 0 0 1 10 26 V22 A6 6 0 0 1 16 16 Z" fill="#e8916a"/>
+    <circle cx="37" cy="54" r="8.5" fill="#0f1117"/>
+    <circle cx="63" cy="54" r="8.5" fill="#0f1117"/>
+  </g>
+</svg>

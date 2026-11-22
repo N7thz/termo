@@ -147,3 +147,84 @@ export function isValidRulePattern(pattern: string) {
     return false
   }
 }
+
+export type TokenKind = 'level-error' | 'level-warning' | 'level-info' | 'level-debug' | 'timestamp' | 'uuid'
+
+export interface TokenMatch {
+  kind: TokenKind
+  start: number
+  end: number
+}
+
+export interface TokenToggles {
+  logLevels: boolean
+  timestamps: boolean
+  uuids: boolean
+}
+
+// Nível de log em maiúsculas (INFO, WARN...) ou entre colchetes em qualquer caixa ([info], [Error]).
+// Exigir maiúsculas fora dos colchetes evita colorir "info" e "error" no meio de frases.
+const LEVEL_RE =
+  /(?<![\w-])(?:\[(fatal|crit(?:ical)?|error|err|warn(?:ing)?|info|notice|debug|trace)\]|(FATAL|CRIT(?:ICAL)?|ERROR|ERR|WARN(?:ING)?|INFO|NOTICE|DEBUG|TRACE))(?![\w-])/gi
+
+const LEVEL_KIND: Record<string, TokenKind> = {
+  fatal: 'level-error',
+  crit: 'level-error',
+  critical: 'level-error',
+  error: 'level-error',
+  err: 'level-error',
+  warn: 'level-warning',
+  warning: 'level-warning',
+  info: 'level-info',
+  notice: 'level-info',
+  debug: 'level-debug',
+  trace: 'level-debug',
+}
+
+// ISO 8601 (2026-11-22T14:05:09.123Z, 2026-11-22 14:05), data dd/mm/aaaa e hora solta (14:05:09).
+const TIMESTAMP_RE =
+  /(?<![\w:.-])(?:\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?|\d{2}\/\d{2}\/\d{4}(?: \d{2}:\d{2}(?::\d{2})?)?|\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)(?![\w:])/g
+
+const UUID_RE = /(?<![\w-])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\w-])/gi
+
+/** Níveis de log, datas/horas e UUIDs da linha, sem sobreposição (nesta prioridade). */
+export function findTokens(line: string, on: TokenToggles): TokenMatch[] {
+  const out: TokenMatch[] = []
+  const push = (m: TokenMatch) => {
+    if (!out.some((o) => m.start < o.end && o.start < m.end)) out.push(m)
+  }
+  if (on.logLevels) {
+    for (const m of line.matchAll(LEVEL_RE)) {
+      // Fora dos colchetes, só vale em maiúsculas (a flag `i` é para o caso entre colchetes).
+      if (m[2] && m[2] !== m[2].toUpperCase()) continue
+      const word = (m[1] ?? m[2]).toLowerCase()
+      push({ kind: LEVEL_KIND[word], start: m.index, end: m.index + m[0].length })
+    }
+  }
+  if (on.timestamps) {
+    for (const m of line.matchAll(TIMESTAMP_RE)) push({ kind: 'timestamp', start: m.index, end: m.index + m[0].length })
+  }
+  if (on.uuids) {
+    for (const m of line.matchAll(UUID_RE)) push({ kind: 'uuid', start: m.index, end: m.index + m[0].length })
+  }
+  return out.sort((a, b) => a.start - b.start).slice(0, 50)
+}
+
+export type DiffKind = 'added' | 'removed' | 'hunk'
+
+/**
+ * Linha de diff unificado (git diff, patch). `inDiff` diz se a saída está dentro de um diff:
+ * fora dele, "- item" de uma lista não vira linha removida. Devolve o tipo e se o diff continua.
+ */
+export function diffLine(line: string, inDiff: boolean): { kind: DiffKind | null; inDiff: boolean } {
+  if (/^(diff --git |index [0-9a-f]+\.\.|--- (a\/|\/dev\/null)|\+\+\+ (b\/|\/dev\/null))/.test(line)) {
+    return { kind: null, inDiff: true }
+  }
+  if (/^@@ -\d+(,\d+)? \+\d+(,\d+)? @@/.test(line)) return { kind: 'hunk', inDiff: true }
+  if (!inDiff) return { kind: null, inDiff: false }
+  if (line.startsWith('+')) return { kind: 'added', inDiff: true }
+  if (line.startsWith('-')) return { kind: 'removed', inDiff: true }
+  // Contexto do diff começa com espaço; qualquer outra coisa encerra o diff.
+  if (line.startsWith(' ') || line.startsWith(' No newline')) return { kind: null, inDiff: true }
+  return { kind: null, inDiff: false }
+}

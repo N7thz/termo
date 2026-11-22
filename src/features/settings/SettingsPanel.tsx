@@ -93,6 +93,16 @@ function SettingsFields({
         </Switch>
       </Field>
       <Field className="flex items-center justify-between gap-2.5 text-[13px] tracking-[0.005em]">
+        <FieldLabel>Reabrir as abas, grupos e divisões ao abrir</FieldLabel>
+        <Switch
+          className={SWITCH}
+          checked={settings.restoreSession}
+          onCheckedChange={(checked) => onChange({ restoreSession: checked })}
+        >
+          <SwitchThumb className={THUMB} />
+        </Switch>
+      </Field>
+      <Field className="flex items-center justify-between gap-2.5 text-[13px] tracking-[0.005em]">
         <FieldLabel>Sugestões do histórico ao digitar (abas novas)</FieldLabel>
         <Switch
           className={SWITCH}
@@ -101,6 +111,21 @@ function SettingsFields({
         >
           <SwitchThumb className={THUMB} />
         </Switch>
+      </Field>
+      <Field className="flex flex-col gap-1.5 text-[13px] tracking-[0.005em]">
+        <span className="flex items-center justify-between gap-2.5">
+          <FieldLabel>Editor de entrada (estilo Warp)</FieldLabel>
+          <Switch
+            className={SWITCH}
+            checked={settings.inputEditor}
+            onCheckedChange={(checked) => onChange({ inputEditor: checked })}
+          >
+            <SwitchThumb className={THUMB} />
+          </Switch>
+        </span>
+        <FieldDescription className="m-0 text-[11px] text-muted">
+          Caixa de comando com cores por token, histórico e Tab para caminhos (abas de PowerShell).
+        </FieldDescription>
       </Field>
       <Field className="flex flex-col gap-1.5 text-[13px] tracking-[0.005em]">
         <span className="flex items-center justify-between gap-2.5">

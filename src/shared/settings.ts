@@ -16,6 +16,10 @@ export const DEFAULT_SETTINGS: Settings = {
     severity: true,
     gitHashes: true,
     network: true,
+    logLevels: true,
+    diffs: true,
+    timestamps: true,
+    uuids: true,
     rules: [{ pattern: String.raw`\b(TODO|FIXME|HACK)\b`, color: '#e0af68' }],
   },
   layout: { sidebar: true, statusBar: true, diffBadge: true },
@@ -25,6 +29,8 @@ export const DEFAULT_SETTINGS: Settings = {
   ],
   linkTarget: 'panel',
   interfaceSize: 'medium',
+  restoreSession: true,
+  inputEditor: false,
 }
 
 /** Mesmos limites do Rust (MAX_PROFILES / MAX_PINNED em src-tauri/src/settings.rs). */

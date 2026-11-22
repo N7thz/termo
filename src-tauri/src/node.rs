@@ -1,0 +1,280 @@
+//! Node da aba: a versão do `node` que o shell resolve, se a pasta é um projeto Node e quais
+//! versões o gerenciador (fnm, nvm-windows ou Volta) tem instaladas para trocar.
+//!
+//! O caminho do `node` vem do prompt (`OSC 633;P;Node=`, ver shell.rs), porque é o PATH do shell
+//! que vale: o fnm, por exemplo, troca a versão por aba. A versão sai do próprio caminho quando dá
+//! (as pastas dos gerenciadores têm o número) e, senão, de `node --version`, guardado por caminho.
+
+use serde::Serialize;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::Mutex;
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeInfo {
+    /// Sem o `v` (ex.: `24.14.0`); `None` sem node no PATH do shell.
+    pub version: Option<String>,
+    /// A pasta (ou uma acima dela) tem `package.json`.
+    pub project: bool,
+    /// Versão pedida pelo projeto em `.nvmrc` ou `.node-version` (como está escrita, sem o `v`).
+    pub wanted: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Manager {
+    Fnm,
+    Nvm,
+    Volta,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeVersions {
+    /// `None`: nenhum gerenciador encontrado.
+    pub manager: Option<Manager>,
+    /// Instaladas, da mais nova para a mais antiga, sem o `v`.
+    pub versions: Vec<String>,
+}
+
+/// `node --version` por caminho real do executável (o caminho real muda quando a versão muda).
+#[derive(Default)]
+pub struct VersionCache(Mutex<HashMap<PathBuf, Option<String>>>);
+
+pub fn node_info(cache: &VersionCache, node: Option<&str>, cwd: Option<&str>) -> NodeInfo {
+    let version = node
+        .filter(|n| !n.is_empty())
+        .and_then(|n| version_of(cache, Path::new(n)));
+    let root = cwd.map(Path::new).and_then(project_root);
+    let wanted = root.as_deref().and_then(wanted_version);
+    NodeInfo {
+        version,
+        project: root.is_some(),
+        wanted,
+    }
+}
+
+fn version_of(cache: &VersionCache, node: &Path) -> Option<String> {
+    let real = std::fs::canonicalize(node).ok()?;
+    if let Some(v) = version_in_path(&real) {
+        return Some(v);
+    }
+    // O shim do Volta é sempre o mesmo arquivo e troca de versão por baixo: esse não vai para o cache.
+    let shim = real
+        .to_string_lossy()
+        .to_ascii_lowercase()
+        .contains("volta");
+    if !shim {
+        if let Some(hit) = cache.0.lock().ok()?.get(&real) {
+            return hit.clone();
+        }
+    }
+    let v = run(&real, &["--version"]).and_then(|out| parse_version(out.trim()));
+    if !shim {
+        if let Ok(mut map) = cache.0.lock() {
+            map.insert(real, v.clone());
+        }
+    }
+    v
+}
+
+/// `20.11.0` a partir de `v20.11.0` (ou já sem o `v`); `None` se não for uma versão.
+pub fn parse_version(s: &str) -> Option<String> {
+    let s = s.strip_prefix('v').unwrap_or(s);
+    let parts: Vec<&str> = s.split('.').collect();
+    (parts.len() == 3
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())))
+    .then(|| s.to_string())
+}
+
+/// Os gerenciadores guardam cada versão numa pasta com o número (`.../node-versions/v20.11.0/installation/node.exe`).
+fn version_in_path(path: &Path) -> Option<String> {
+    path.ancestors()
+        .skip(1)
+        .filter_map(|p| p.file_name()?.to_str())
+        .find_map(parse_version)
+}
+
+fn project_root(cwd: &Path) -> Option<PathBuf> {
+    cwd.ancestors()
+        .find(|d| d.join("package.json").is_file())
+        .map(Path::to_path_buf)
+}
+
+fn wanted_version(root: &Path) -> Option<String> {
+    [".nvmrc", ".node-version"].iter().find_map(|f| {
+        let text = std::fs::read_to_string(root.join(f)).ok()?;
+        let line = text
+            .lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty() && !l.starts_with('#'))?;
+        Some(line.strip_prefix('v').unwrap_or(line).to_string())
+    })
+}
+
+fn run(exe: &Path, args: &[&str]) -> Option<String> {
+    let mut cmd = Command::new(exe);
+    cmd.args(args);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let out = cmd.output().ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Lugares onde o executável do gerenciador costuma ficar, além do PATH do app (que pode estar
+/// desatualizado: instalar pelo winget com o Termo aberto não muda o PATH do processo).
+fn manager_exe(name: &str, extra: &[Option<PathBuf>]) -> Option<PathBuf> {
+    which::which(name).ok().or_else(|| {
+        extra
+            .iter()
+            .flatten()
+            .map(|d| d.join(format!("{name}.exe")))
+            .find(|p| p.is_file())
+    })
+}
+
+fn env_dir(key: &str) -> Option<PathBuf> {
+    std::env::var_os(key)
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+}
+
+/// Pasta de versões do fnm: `FNM_DIR`, senão `%APPDATA%\fnm` (ou o antigo `~/.fnm`).
+fn fnm_versions_dir() -> Option<PathBuf> {
+    let candidates = [
+        env_dir("FNM_DIR"),
+        dirs::data_dir().map(|d| d.join("fnm")),
+        dirs::home_dir().map(|d| d.join(".fnm")),
+    ];
+    candidates
+        .into_iter()
+        .flatten()
+        .map(|d| d.join("node-versions"))
+        .find(|d| d.is_dir())
+}
+
+/// Nomes de subpastas que são versões.
+fn versions_in(dir: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|e| parse_version(e.file_name().to_str()?))
+        .collect()
+}
+
+/// Da mais nova para a mais antiga, comparando os números (e não o texto).
+pub fn sort_desc(versions: &mut Vec<String>) {
+    let key = |v: &String| {
+        v.split('.')
+            .map(|p| p.parse::<u64>().unwrap_or(0))
+            .collect::<Vec<_>>()
+    };
+    versions.sort_by_key(|v| std::cmp::Reverse(key(v)));
+    versions.dedup();
+}
+
+/// Gerenciador encontrado (nesta ordem: fnm, nvm-windows, Volta) e as versões que ele tem.
+pub fn node_versions() -> NodeVersions {
+    let local = dirs::data_local_dir();
+    let winget = local.as_ref().map(|d| d.join(r"Microsoft\WinGet\Links"));
+    let scoop = dirs::home_dir().map(|d| d.join(r"scoop\shims"));
+    let cargo = dirs::home_dir().map(|d| d.join(r".cargo\bin"));
+
+    let (manager, mut versions) =
+        if manager_exe("fnm", &[winget.clone(), scoop.clone(), cargo]).is_some() {
+            (
+                Some(Manager::Fnm),
+                fnm_versions_dir()
+                    .map(|d| versions_in(&d))
+                    .unwrap_or_default(),
+            )
+        } else if let Some(nvm) = manager_exe(
+            "nvm",
+            &[env_dir("NVM_HOME"), dirs::data_dir().map(|d| d.join("nvm"))],
+        ) {
+            let home = env_dir("NVM_HOME").or_else(|| nvm.parent().map(Path::to_path_buf));
+            (
+                Some(Manager::Nvm),
+                home.map(|d| versions_in(&d)).unwrap_or_default(),
+            )
+        } else if manager_exe(
+            "volta",
+            &[
+                local.as_ref().map(|d| d.join(r"Volta\bin")),
+                env_dir("ProgramFiles").map(|d| d.join("Volta")),
+            ],
+        )
+        .is_some()
+        {
+            let home = env_dir("VOLTA_HOME").or_else(|| local.map(|d| d.join("Volta")));
+            (
+                Some(Manager::Volta),
+                home.map(|d| versions_in(&d.join(r"tools\image\node")))
+                    .unwrap_or_default(),
+            )
+        } else {
+            (None, Vec::new())
+        };
+    sort_desc(&mut versions);
+    NodeVersions { manager, versions }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_versions() {
+        assert_eq!(parse_version("v24.14.0").as_deref(), Some("24.14.0"));
+        assert_eq!(parse_version("20.11.1").as_deref(), Some("20.11.1"));
+        assert_eq!(parse_version("installation"), None);
+        assert_eq!(parse_version("v20"), None);
+        assert_eq!(parse_version("v20.1.x"), None);
+    }
+
+    #[test]
+    fn version_from_manager_folder() {
+        let p = Path::new(
+            r"C:\Users\x\AppData\Roaming\fnm\node-versions\v20.11.0\installation\node.exe",
+        );
+        assert_eq!(version_in_path(p).as_deref(), Some("20.11.0"));
+        assert_eq!(version_in_path(Path::new(r"D:\node\node.exe")), None);
+    }
+
+    #[test]
+    fn sorts_numerically() {
+        let mut v = vec![
+            "9.0.0".to_string(),
+            "20.11.0".into(),
+            "20.2.0".into(),
+            "20.11.0".into(),
+        ];
+        sort_desc(&mut v);
+        assert_eq!(v, ["20.11.0", "20.2.0", "9.0.0"]);
+    }
+
+    #[test]
+    fn finds_project_and_wanted_version() {
+        let root = std::env::temp_dir().join(format!("termo-node-{}", std::process::id()));
+        let sub = root.join("src").join("deep");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(root.join("package.json"), "{}").unwrap();
+        std::fs::write(root.join(".nvmrc"), "# comentário\nv20.11.0\n").unwrap();
+        let info = node_info(&VersionCache::default(), None, sub.to_str());
+        assert!(info.project);
+        assert_eq!(info.wanted.as_deref(), Some("20.11.0"));
+        assert_eq!(info.version, None);
+        std::fs::remove_dir_all(&root).ok();
+    }
+}

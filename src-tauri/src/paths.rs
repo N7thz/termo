@@ -9,7 +9,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-pub const MAX_SUGGESTIONS: usize = 8;
+/// Poucas por vez: a lista é um atalho e não pode cobrir o terminal.
+pub const MAX_SUGGESTIONS: usize = 5;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -153,8 +154,9 @@ pub fn suggest(cwd: &Path, query: &str, recent: &[PathBuf]) -> Vec<PathSuggestio
 
     // Garante espaço para recentes e vizinhas mesmo quando a pasta atual tem muitas opções.
     let (children, parents): (Vec<_>, Vec<_>) = out.into_iter().partition(|s| s.scope == "child");
-    let recent_slots = recents.len().min(3);
-    let parent_slots = parents.len().min(3);
+    // Uma vaga garantida para cada; as filhas ficam com pelo menos 3 das 5.
+    let recent_slots = recents.len().min(1);
+    let parent_slots = parents.len().min(1);
     let mut result: Vec<_> = children.into_iter().take(MAX_SUGGESTIONS - parent_slots - recent_slots).collect();
     let room = MAX_SUGGESTIONS - result.len() - parent_slots;
     result.extend(recents.into_iter().take(room));

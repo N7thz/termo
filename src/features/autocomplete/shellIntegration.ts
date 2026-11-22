@@ -3,6 +3,7 @@ import type { IDisposable, IMarker, Terminal } from '@xterm/xterm'
 /**
  * Lê as marcas que o prompt do PowerShell emite (src-tauri/src/shell.rs, PWSH_INTEGRATION):
  * - `OSC 633;P;Cwd=<pasta>`: pasta atual;
+ * - `OSC 633;P;Node=<caminho>`: o `node` que o PATH do shell resolve (vazio sem node);
  * - `OSC 133;B`: fim do prompt, ou seja, onde começa a linha que a pessoa digita.
  *
  * Sem essas marcas (outro shell, ou com o Claude Code rodando) `atPrompt` fica falso e nada
@@ -10,6 +11,8 @@ import type { IDisposable, IMarker, Terminal } from '@xterm/xterm'
  */
 export class ShellIntegration implements IDisposable {
   cwd: string | null = null
+  /** Caminho do `node` no PATH do shell, atualizado a cada prompt (`null` antes do primeiro). */
+  node: string | null = null
   private inputStart: { marker: IMarker; x: number } | null = null
   private running = true
   private disposables: IDisposable[] = []
@@ -22,6 +25,8 @@ export class ShellIntegration implements IDisposable {
     private term: Terminal,
     onCwd?: (cwd: string) => void,
     onPrompt?: () => void,
+    /** Prompt ocioso (`true`, depois do `133;B`) ou comando rodando (`false`): mostra e esconde o editor de entrada. */
+    private onIdle?: (idle: boolean) => void,
   ) {
     this.disposables.push(
       term.parser.registerOscHandler(633, (data) => {
@@ -31,6 +36,8 @@ export class ShellIntegration implements IDisposable {
             this.cwd = cwd
             onCwd?.(cwd)
           }
+        } else if (data.startsWith('P;Node=')) {
+          this.node = data.slice('P;Node='.length)
         }
         return true
       }),
@@ -40,8 +47,10 @@ export class ShellIntegration implements IDisposable {
           this.inputStart = { marker: term.registerMarker(0), x: term.buffer.active.cursorX }
           this.running = false
           onPrompt?.()
-        } else if (data.startsWith('A')) {
+          onIdle?.(true)
+        } else if (data.startsWith('A') || data.startsWith('C')) {
           this.running = true
+          onIdle?.(false)
         }
         return true
       }),
@@ -56,6 +65,7 @@ export class ShellIntegration implements IDisposable {
   /** Chamado quando a pessoa aperta Enter: até o próximo prompt, um comando está rodando. */
   commandSubmitted() {
     this.running = true
+    this.onIdle?.(false)
   }
 
   /** O que já foi digitado depois do prompt (juntando linhas quebradas). */

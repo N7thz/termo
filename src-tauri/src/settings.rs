@@ -32,6 +32,10 @@ pub struct Settings {
     pub link_target: String,
     /// Tamanho da interface: `small`, `medium` ou `large` (zoom do webview).
     pub interface_size: String,
+    /// Reabre as abas, grupos e divisões de cada perfil ao abrir o app.
+    pub restore_session: bool,
+    /// Editor de entrada no estilo do Warp (experimental).
+    pub input_editor: bool,
 }
 
 const INTERFACE_SIZES: [&str; 3] = ["small", "medium", "large"];
@@ -173,6 +177,14 @@ pub struct HighlightSettings {
     pub git_hashes: bool,
     /// `localhost:porta` e IPs clicáveis.
     pub network: bool,
+    /// Níveis de log (INFO, WARN, DEBUG...).
+    pub log_levels: bool,
+    /// Linhas de diff (+/-).
+    pub diffs: bool,
+    /// Datas e horários.
+    pub timestamps: bool,
+    /// UUIDs.
+    pub uuids: bool,
     /// Regras próprias: regex + cor.
     pub rules: Vec<HighlightRule>,
 }
@@ -184,6 +196,10 @@ impl Default for HighlightSettings {
             severity: true,
             git_hashes: true,
             network: true,
+            log_levels: true,
+            diffs: true,
+            timestamps: true,
+            uuids: true,
             rules: vec![HighlightRule {
                 pattern: r"\b(TODO|FIXME|HACK)\b".into(),
                 color: "#e0af68".into(),
@@ -232,6 +248,8 @@ impl Default for Settings {
             profiles: default_profiles(),
             link_target: "panel".into(),
             interface_size: "medium".into(),
+            restore_session: true,
+            input_editor: false,
         }
     }
 }
@@ -252,6 +270,8 @@ pub struct SettingsPatch {
     pub profiles: Option<Vec<Profile>>,
     pub link_target: Option<String>,
     pub interface_size: Option<String>,
+    pub restore_session: Option<bool>,
+    pub input_editor: Option<bool>,
 }
 
 /// Ids de tema: letras minúsculas, números e hífen, até 40 caracteres.
@@ -307,6 +327,12 @@ impl Settings {
             if v == "panel" || v == "browser" {
                 self.link_target = v;
             }
+        }
+        if let Some(v) = patch.restore_session {
+            self.restore_session = v;
+        }
+        if let Some(v) = patch.input_editor {
+            self.input_editor = v;
         }
     }
 }
@@ -455,6 +481,17 @@ mod tests {
     fn old_settings_file_gets_default_highlights() {
         let s: Settings = serde_json::from_str(r#"{"theme":"dracula"}"#).unwrap();
         assert_eq!(s.highlights, HighlightSettings::default());
+    }
+
+    #[test]
+    fn old_highlights_get_new_toggles_and_session_defaults() {
+        let s: Settings =
+            serde_json::from_str(r#"{"highlights":{"fileLinks":false,"rules":[]}}"#).unwrap();
+        assert!(!s.highlights.file_links);
+        assert!(s.highlights.log_levels && s.highlights.diffs);
+        assert!(s.highlights.timestamps && s.highlights.uuids);
+        assert!(s.restore_session);
+        assert!(!s.input_editor);
     }
 
     #[test]

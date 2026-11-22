@@ -30,10 +30,19 @@ src/                 frontend (React + xterm.js)
   features/tabs      abas (reducer testado) e atalhos
   features/terminal  TerminalView: xterm, addons, copiar/colar, vazão
   features/settings  painel de configurações
+  features/blocks    blocos por comando (OSC 133/633): status, duração, copiar e explicar erro
+  features/input     caixa de comando com highlight, histórico e Tab
+  features/ai        IA pelo `claude -p`: explicar erro e `#` linguagem natural → comando
+  features/sessions  sessões do Claude Code (painel do coord)
+  features/usage-battery  bateria do uso do Claude (5 h e semana)
 src-tauri/           backend (Rust)
   src/pty.rs         sessões ConPTY, saída em lotes, controle de vazão por ack
   src/shell.rs       shell, Claude Code, pasta inicial e linha de comando
   src/settings.rs    configurações validadas, com gravação atômica
+  src/ai.rs          `claude -p` sem ferramentas, prompt pela entrada padrão
+  src/usage.rs       limites do Claude lidos do `statusLine` das abas do Claude
+  src/coord.rs       leitura do painel do coord (127.0.0.1:4747)
+  src/window.rs      várias janelas (`termo-<n>`), cada uma com abas e painel próprios
   resources/         conpty.dll e OpenConsole.exe (ConPTY moderno, copiados ao lado do .exe)
 ```
 
@@ -47,17 +56,18 @@ src-tauri/           backend (Rust)
 - Copiar e colar pela área de transferência do sistema. Ctrl+V com imagem copiada é repassado ao Claude Code
 - Controle de vazão: saídas enormes não travam a interface
 - Sem shells órfãos: recarregar ou fechar a janela encerra os processos dela
+- Blocos por comando: barra verde ou vermelha na margem, duração, copiar o comando ou a saída e "explicar o erro" com o Claude, que sugere a correção pronta para rodar
+- Caixa de comando com highlight; `# o que você quer fazer` + Enter vira um comando do PowerShell (não executa sozinho)
+- Painéis divididos (Ctrl+Shift+E) e várias janelas (Ctrl+Shift+N)
+- Bateria do uso do Claude na barra de título, com mascote em pixel art. Os limites vêm do `statusLine` das abas do Claude (quem já tem um `statusLine` próprio continua com ele, e a bateria fica sem dados)
+- Avatar de estado por aba do Claude (pensando, trabalhando, esperando, bloqueado, pronto), pelos hooks do Claude Code
+- Sessões do Claude Code (Ctrl+Shift+A): quem está trabalhando ou esperando, plano, progresso e reservas, lidos do painel do coord
 
 ## Roadmap
 
 0. ~~Infraestrutura: Tauri, contrato de IPC, vazão, Biome, testes, CI, instalador~~
-1. Blocos por comando: integração OSC 133/633 com o PowerShell, cards com status, duração e copiar
-2. Editor de entrada com highlight e autocomplete
-3. Highlights na saída (caminhos, erros), prévia de imagem nos blocos e temas
-4. IA: linguagem natural vira comando, botão "explicar erro"
-5. Painéis divididos e várias janelas
-
-### Ideias registradas
-
-- **Bateria do uso semanal do Claude:** uma bateria em pixel art com o limite semanal e a janela de 5h, com um mascote que muda de estado conforme o nível. Referência: plugin usage-battery. Fonte de dados a verificar: o JSON do statusLine do Claude Code (`rate_limits`) ou os logs em `~/.claude/projects`
-- **Avatar de estado por aba:** com a biblioteca open-bot-avatar (MIT), mostrar thinking, working, waiting, blocked ou done para o Claude Code de cada aba, alimentado pelos hooks do Claude Code (UserPromptSubmit, PreToolUse, PostToolUse, Notification, Stop) escrevendo num arquivo ou socket que o app observa
+1. ~~Blocos por comando: integração OSC 133/633 com o PowerShell, cards com status, duração e copiar~~
+2. ~~Editor de entrada com highlight e autocomplete~~
+3. Highlights na saída (caminhos, erros) e temas já existem; falta a prévia de imagem nos blocos
+4. ~~IA: linguagem natural vira comando, botão "explicar erro"~~
+5. ~~Painéis divididos e várias janelas~~

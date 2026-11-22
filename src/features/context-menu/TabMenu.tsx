@@ -1,4 +1,12 @@
-import { Menu, MenuContent, MenuContextTrigger, MenuItem, MenuSeparator } from '@ui-sdk/react/menu'
+import {
+  Menu,
+  MenuContent,
+  MenuContextTrigger,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuSeparator,
+} from '@ui-sdk/react/menu'
 import type { ReactElement, ReactNode } from 'react'
 import { menuContent, menuItem, menuSeparator } from '../../lib/ui'
 import type { TabMenuAction } from './types'
@@ -14,10 +22,22 @@ interface Props {
   vertical?: boolean
   /** A aba tem pasta conhecida e ela ainda não está fixada no perfil. */
   canPin?: boolean
+  /** Grupos do perfil para onde a aba pode ir (sem o dela). */
+  groups?: readonly { id: string; name: string }[]
+  /** A aba está num grupo. */
+  inGroup?: boolean
+  /** A aba está numa tela dividida. */
+  split?: boolean
+  /** Dá para pôr esta aba ao lado da ativa (ela não é a ativa nem já está com ela). */
+  canSplitWithActive?: boolean
   onAction: (action: TabMenuAction) => void
 }
 
-export function TabMenu({ trigger, children, first, last, alone, vertical, canPin, onAction }: Props) {
+const groupLabel = 'px-2.5 pt-1.5 pb-1 text-[11px] font-semibold tracking-[0.04em] text-muted uppercase'
+
+export function TabMenu(props: Props) {
+  const { trigger, children, first, last, alone, vertical, canPin, onAction } = props
+  const { groups = [], inGroup, split, canSplitWithActive } = props
   return (
     <Menu onAction={(value) => onAction(value as TabMenuAction)}>
       <MenuContextTrigger render={trigger}>{children}</MenuContextTrigger>
@@ -41,6 +61,39 @@ export function TabMenu({ trigger, children, first, last, alone, vertical, canPi
         {canPin && (
           <MenuItem className={menuItem} value="pin-folder">
             Fixar a pasta desta aba
+          </MenuItem>
+        )}
+        <MenuSeparator className={menuSeparator} />
+        <MenuItem className={menuItem} value="split-new" shortcut="mod+shift+e">
+          Dividir com uma aba nova
+        </MenuItem>
+        {canSplitWithActive && (
+          <MenuItem className={menuItem} value="split-with-active">
+            Abrir ao lado da aba atual
+          </MenuItem>
+        )}
+        {split && (
+          <MenuItem className={menuItem} value="unsplit">
+            Desfazer a divisão
+          </MenuItem>
+        )}
+        <MenuSeparator className={menuSeparator} />
+        <MenuItem className={menuItem} value="new-group">
+          Novo grupo com esta aba
+        </MenuItem>
+        {groups.length > 0 && (
+          <MenuGroup>
+            <MenuGroupLabel className={groupLabel}>Mover para o grupo</MenuGroupLabel>
+            {groups.map((g) => (
+              <MenuItem key={g.id} className={menuItem} value={`move-to-group:${g.id}`}>
+                {g.name}
+              </MenuItem>
+            ))}
+          </MenuGroup>
+        )}
+        {inGroup && (
+          <MenuItem className={menuItem} value="ungroup">
+            Tirar do grupo
           </MenuItem>
         )}
         <MenuSeparator className={menuSeparator} />

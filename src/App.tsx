@@ -1,9 +1,10 @@
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Button } from '@ui-sdk/react/button'
-import { Tabs, TabsList, TabsPanel, TabsTab, TabsTabIcon } from '@ui-sdk/react/tabs'
+import { Tabs, TabsList, TabsTab, TabsTabIcon } from '@ui-sdk/react/tabs'
 import { Tooltip, TooltipContent, TooltipShortcut, TooltipTrigger } from '@ui-sdk/react/tooltip'
 import { Plus, X } from 'lucide-react'
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
+import { type CSSProperties, useCallback, useEffect, useReducer, useRef, useState } from 'react'
+import { type AgentState, withAgentState } from './features/agent-status/agentState'
 import { BrowserPanel } from './features/browser/BrowserPanel'
 import { TabMenu } from './features/context-menu/TabMenu'
 import { TerminalMenu } from './features/context-menu/TerminalMenu'
@@ -11,15 +12,28 @@ import type { TabMenuAction, TerminalActions, TerminalMenuAction } from './featu
 import type { Severity } from './features/highlights/matchers'
 import { CommandPalette } from './features/palette/CommandPalette'
 import { createProfile, PROFILE_COLORS, pinFolder, profileColorCss } from './features/profiles/profiles'
+import { SessionsPage } from './features/sessions/SessionsPage'
 import { SettingsPanel } from './features/settings/SettingsPanel'
 import { ShortcutsDialog } from './features/shortcuts/ShortcutsDialog'
 import { ClaudeIcon } from './features/tabs/ClaudeIcon'
+import { SplitDivider } from './features/tabs/SplitDivider'
 import { actionFor } from './features/tabs/shortcuts'
 import { TabKindIcon } from './features/tabs/TabKindIcon'
-import { initialTabs, type Tab, tabsReducer, tabsToClose, visibleTabs } from './features/tabs/tabs'
+import {
+  initialTabs,
+  pairOf,
+  restore,
+  snapshot,
+  type Tab,
+  tabsReducer,
+  tabsToClose,
+  visibleGroups,
+  visibleTabs,
+} from './features/tabs/tabs'
 import { TerminalView } from './features/terminal/TerminalView'
 import { ThemesPage } from './features/theme/ThemesPage'
 import { useTheme } from './features/theme/useTheme'
+import { UsageBattery } from './features/usage-battery/UsageBattery'
 import { WindowControls } from './features/window/WindowControls'
 import { GitDiff } from './features/workspace/GitDiff'
 import { StatusBar } from './features/workspace/StatusBar'
@@ -77,8 +91,14 @@ async function toggleFullscreen() {
   }
 }
 
+/** A janela principal (`main`) salva e reabre a sessão; as de "Nova janela" (`termo-<n>`) não. */
+const IS_MAIN_WINDOW = getCurrentWindow().label === 'main'
+/** Pasta pedida para a primeira aba de uma janela nova (`?cwd=`, src-tauri/src/window.rs). */
+const WINDOW_CWD = new URLSearchParams(window.location.search).get('cwd')
+
 export function App() {
   const [state, dispatch] = useReducer(tabsReducer, initialTabs)
+  const workspace = useWorkspace(state.active)
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
   const [shellName, setShellName] = useState('shell')
   const [cwd, setCwd] = useState<string>()
@@ -92,6 +112,7 @@ export function App() {
   const [previewTheme, setPreviewTheme] = useState<string | null>(null)
   const theme = useTheme(previewTheme ?? settings.theme)
   const [showThemes, setShowThemes] = useState(false)
+  const [showSessions, setShowSessions] = useState(false)
   // Erros/avisos novos em abas em segundo plano; some ao abrir a aba.
   const [alerts, setAlerts] = useState<ReadonlyMap<number, { errors: number; warnings: number }>>(new Map())
   const activeRef = useRef(state.active)
@@ -106,6 +127,23 @@ export function App() {
       return next
     })
   }, [])
+
+  // Estado do Claude Code de cada aba (avatar). "Terminou" vira "pronto" quando a pessoa abre a aba.
+  const [agents, setAgents] = useState<ReadonlyMap<number, AgentState>>(new Map())
+  useEffect(() => {
+    const key = state.active
+    if (key == null) return
+    setAgents((m) => (m.get(key) === 'done' ? withAgentState(m, key, 'idle') : m))
+  }, [state.active])
+  // Aba fechada: o estado dela sai do mapa.
+  useEffect(() => {
+    setAgents((m) => {
+      const keys = new Set(state.tabs.map((t) => t.key))
+      let next: ReadonlyMap<number, AgentState> = m
+      for (const key of m.keys()) if (!keys.has(key)) next = withAgentState(next, key, 'off')
+      return next
+    })
+  }, [state.tabs])
 
   useEffect(() => {
     const key = state.active
@@ -128,7 +166,10 @@ export function App() {
 
   // Sem `profile`, abre no perfil atual; `cwd` é a pasta (fixada ou da aba duplicada).
   const openTab = useCallback(
-    (kind: SessionKind, opts: { shell?: string; cwd?: string; profile?: string; after?: number } = {}) =>
+    (
+      kind: SessionKind,
+      opts: { shell?: string; cwd?: string; profile?: string; after?: number; group?: string; splitWith?: number } = {},
+    ) =>
       dispatch({
         type: 'open',
         kind,
@@ -136,21 +177,34 @@ export function App() {
         cwd: opts.cwd,
         profile: opts.profile,
         after: opts.after,
+        group: opts.group,
+        splitWith: opts.splitWith,
       }),
     [shellName],
   )
 
-  // Primeira aba: Claude se veio --claude ou a configuração pede; senão o shell.
+  // Abertura: reabre as abas da última vez (se a configuração pedir e houver o que reabrir);
+  // senão, a primeira aba é o Claude se veio --claude ou a configuração pede, ou o shell.
   // biome-ignore lint/correctness/useExhaustiveDependencies: roda só na abertura
   useEffect(() => {
-    Promise.all([ipc.getSettings(), ipc.launchInfo()])
-      .then(([s, info]) => {
+    // Só a janela principal reabre a sessão; as outras (Nova janela) começam com uma aba na pasta pedida.
+    const extra = !IS_MAIN_WINDOW
+    Promise.all([ipc.getSettings(), ipc.launchInfo(), extra ? null : ipc.loadSession().catch(() => null)])
+      .then(([s, info, saved]) => {
         setSettings(s)
         setShellName(info.shellName)
-        setCwd(info.cwd ?? undefined)
+        setCwd((extra ? WINDOW_CWD : info.cwd) ?? undefined)
+        const ids = (s.profiles?.length ? s.profiles : DEFAULT_SETTINGS.profiles).map((p) => p.id)
+        if (!extra && s.restoreSession && restore(saved, initialTabs, new Set(ids)).tabs.length > 0) {
+          dispatch({ type: 'restore', snapshot: saved, profiles: ids })
+          return
+        }
         const first = s.profiles?.[0]?.id
         if (first) dispatch({ type: 'switch-profile', profile: first })
-        openTab(info.openClaudeFirst ? 'claude' : 'shell', { shell: info.shellName })
+        openTab(!extra && info.openClaudeFirst ? 'claude' : 'shell', {
+          shell: info.shellName,
+          cwd: extra ? (WINDOW_CWD ?? undefined) : undefined,
+        })
       })
       .catch((err) => {
         console.error('[termo] falha ao iniciar', err)
@@ -207,9 +261,23 @@ export function App() {
     void saveProfiles(profiles.filter((p) => p.id !== profile.id))
   }
 
-  // Sem abas em nenhum perfil: fecha a janela, como os outros terminais.
+  // Salva abas, grupos e divisões (com a pasta atual de cada aba) logo depois de cada mudança.
+  const session = ready ? JSON.stringify(snapshot(state, (t) => workspace.info(t.key).cwd ?? t.cwd)) : ''
   useEffect(() => {
-    if (ready && state.tabs.length === 0) void getCurrentWindow().close()
+    if (!session || !settings.restoreSession || !IS_MAIN_WINDOW) return
+    const timer = window.setTimeout(() => {
+      ipc.saveSession(JSON.parse(session)).catch((err) => console.error('[termo] falha ao salvar a sessão', err))
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [session, settings.restoreSession])
+
+  // Sem abas em nenhum perfil: fecha a janela, como os outros terminais (salvando a sessão vazia antes,
+  // para a próxima abertura não reabrir o que foi fechado de propósito).
+  useEffect(() => {
+    if (!ready || state.tabs.length > 0) return
+    void (IS_MAIN_WINDOW ? ipc.saveSession(snapshot(initialTabs, () => undefined)) : Promise.resolve())
+      .catch(() => {})
+      .finally(() => void getCurrentWindow().close())
   }, [ready, state.tabs.length])
 
   // Fecha com uma saída curta (a aba encolhe); sem movimento reduzido, fecha direto.
@@ -229,10 +297,22 @@ export function App() {
 
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [showPalette, setShowPalette] = useState(false)
-  const workspace = useWorkspace(state.active)
   const activeInfo = workspace.info(state.active)
   const diffColors = { added: theme.terminal.green as string, removed: theme.terminal.red as string }
   const layout = settings.layout ?? DEFAULT_SETTINGS.layout
+
+  // Tela dividida: o par da aba ativa aparece lado a lado no cartão; as outras abas ficam escondidas.
+  const split = pairOf(state, state.active)
+  const partnerOf = (key: number) => {
+    const p = pairOf(state, key)
+    return p && (p.left === key ? p.right : p.left)
+  }
+  const paneStyle = (key: number): CSSProperties | undefined => {
+    if (!split) return undefined
+    if (key === split.left) return { left: 0, width: `${split.ratio * 100}%` }
+    if (key === split.right) return { left: `${split.ratio * 100}%`, right: 0 }
+    return undefined
+  }
 
   // Ações do xterm de cada aba, para o menu do botão direito.
   const terminalActions = useRef(new Map<number, TerminalActions>())
@@ -249,7 +329,17 @@ export function App() {
       case 'new-claude':
         return openTab('claude')
       case 'duplicate':
-        return openTab(tab.kind, { after: tab.key, cwd: workspace.info(tab.key).cwd ?? tab.cwd })
+        return openTab(tab.kind, { after: tab.key, cwd: workspace.info(tab.key).cwd ?? tab.cwd, group: tab.group })
+      case 'split-new':
+        return openTab('shell', { splitWith: tab.key, cwd: workspace.info(tab.key).cwd ?? tab.cwd })
+      case 'split-with-active':
+        return state.active != null && dispatch({ type: 'split', key: state.active, with: tab.key })
+      case 'unsplit':
+        return dispatch({ type: 'unsplit', key: tab.key })
+      case 'new-group':
+        return dispatch({ type: 'group-create', key: tab.key, name: '' })
+      case 'ungroup':
+        return dispatch({ type: 'set-group', key: tab.key, group: null })
       case 'pin-folder': {
         const dir = workspace.info(tab.key).cwd
         return dir && editProfile({ pinned: pinFolder(profile, dir).pinned })
@@ -264,6 +354,9 @@ export function App() {
         return tabsToClose(state, tab.key, 'others').forEach(closeTab)
       case 'close-right':
         return tabsToClose(state, tab.key, 'right').forEach(closeTab)
+      default:
+        if (action.startsWith('move-to-group:'))
+          return dispatch({ type: 'set-group', key: tab.key, group: action.slice('move-to-group:'.length) })
     }
   }
 
@@ -314,6 +407,8 @@ export function App() {
           return openTab('claude')
         case 'duplicate-tab':
           return activeTab && runTabAction(activeTab, 'duplicate')
+        case 'split-tab':
+          return activeTab && runTabAction(activeTab, pairOf(state, activeTab.key) ? 'unsplit' : 'split-new')
         case 'close-tab':
           return state.active != null && closeTab(state.active)
         case 'next-tab':
@@ -340,6 +435,13 @@ export function App() {
         case 'settings':
           setShowThemes(false)
           return setShowSettings((v) => !v)
+        case 'new-window':
+          return void ipc
+            .newWindow(activeTab ? (workspace.info(activeTab.key).cwd ?? activeTab.cwd) : cwd)
+            .catch((err) => console.error('[termo] falha ao abrir a janela', err))
+        case 'sessions':
+          setShowThemes(false)
+          return setShowSessions((v) => !v)
         case 'fullscreen':
           return void toggleFullscreen()
         case 'shortcuts':
@@ -348,7 +450,17 @@ export function App() {
           return setShowPalette((v) => !v)
         case 'toggle-sidebar':
           return updateSettings({ layout: { ...layout, sidebar: !layout.sidebar } })
+        case 'next-profile':
+        case 'prev-profile': {
+          const step = action === 'next-profile' ? 1 : -1
+          const at = profiles.indexOf(profile)
+          return switchProfile(profiles[(at + step + profiles.length) % profiles.length].id)
+        }
         default: {
+          if (action.startsWith('profile-')) {
+            const target = profiles[Number(action.slice('profile-'.length)) - 1]
+            return target && switchProfile(target.id)
+          }
           const tab = tabs[Number(action.slice('tab-'.length)) - 1]
           return tab && dispatch({ type: 'activate', key: tab.key })
         }
@@ -390,6 +502,12 @@ export function App() {
           onUnpin={(dir) => editProfile({ pinned: profile.pinned.filter((d) => d !== dir) })}
           closing={closing}
           renderAlert={(key) => <TabAlert alert={alerts.get(key)} colors={theme.terminal} />}
+          groups={visibleGroups(state)}
+          onGroupToggle={(id) => dispatch({ type: 'group-toggle', id })}
+          onGroupRename={(id, name) => dispatch({ type: 'group-rename', id, name })}
+          onGroupDelete={(id) => dispatch({ type: 'group-delete', id })}
+          partnerOf={partnerOf}
+          agents={agents}
         />
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
@@ -424,6 +542,12 @@ export function App() {
                 first={index === 0}
                 last={index === tabs.length - 1}
                 alone={tabs.length === 1}
+                groups={visibleGroups(state).filter((g) => g.id !== tab.group)}
+                inGroup={!!tab.group}
+                split={partnerOf(tab.key) != null}
+                canSplitWithActive={
+                  state.active != null && tab.key !== state.active && partnerOf(tab.key) !== state.active
+                }
                 onAction={(action) => runTabAction(tab, action)}
                 trigger={
                   <div
@@ -440,7 +564,7 @@ export function App() {
                   value={String(tab.key)}
                 >
                   <TabsTabIcon className="flex">
-                    <TabKindIcon kind={tab.kind} />
+                    <TabKindIcon kind={tab.kind} agent={agents.get(tab.key)} />
                   </TabsTabIcon>
                   <span className="flex-1 truncate">{tab.title}</span>
                   <TabAlert alert={alerts.get(tab.key)} colors={theme.terminal} />
@@ -471,6 +595,7 @@ export function App() {
                 Nova aba <TooltipShortcut className={tooltipKbd} />
               </TooltipContent>
             </Tooltip>
+            <UsageBattery />
             <Tooltip shortcut="mod+shift+k">
               <TooltipTrigger
                 render={
@@ -505,7 +630,14 @@ export function App() {
           {/* O cartão: o terminal recuado da borda, com cantos arredondados e sombra suave. */}
           <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-[10px] bg-bg shadow-card">
             {state.tabs.map((tab) => (
-              <TabsPanel key={tab.key} value={String(tab.key)} keepMounted className="absolute inset-0">
+              // Painel próprio (não o TabsPanel): na tela dividida duas abas ficam visíveis ao mesmo tempo.
+              <div
+                key={tab.key}
+                role="tabpanel"
+                aria-label={tab.title}
+                className={`absolute inset-y-0 ${paneStyle(tab.key) ? '' : 'inset-x-0'} ${split && paneStyle(tab.key) && tab.key !== state.active ? 'opacity-80' : ''} [transition:opacity_160ms_ease-out]`}
+                style={paneStyle(tab.key)}
+              >
                 <TerminalMenu
                   actions={() => terminalActions.current.get(tab.key)}
                   onAction={(action) => runTerminalAction(tab.key, action)}
@@ -513,6 +645,8 @@ export function App() {
                   <TerminalView
                     kind={tab.kind}
                     active={tab.key === state.active}
+                    visible={tab.key === state.active || paneStyle(tab.key) != null}
+                    onFocus={() => tab.key !== state.active && dispatch({ type: 'activate', key: tab.key })}
                     settings={settings}
                     terminalTheme={theme.terminal}
                     cwd={tab.cwd || profileOf(tab)?.cwd || cwd}
@@ -526,15 +660,23 @@ export function App() {
                     }
                     onClose={() => dispatch({ type: 'close', key: tab.key })}
                     onSeverity={(severity) => onSeverity(tab.key, severity)}
+                    onAgent={(s) => setAgents((m) => withAgentState(m, tab.key, s))}
                     onActions={(actions) =>
                       actions ? terminalActions.current.set(tab.key, actions) : terminalActions.current.delete(tab.key)
                     }
                     onCwd={(dir) => workspace.reportCwd(tab.key, dir)}
                     onPrompt={() => workspace.reportPrompt(tab.key)}
+                    git={workspace.info(tab.key).git}
                   />
                 </TerminalMenu>
-              </TabsPanel>
+              </div>
             ))}
+            {split && (
+              <SplitDivider
+                ratio={split.ratio}
+                onRatio={(ratio) => dispatch({ type: 'split-ratio', key: split.left, ratio })}
+              />
+            )}
             {tabs.length === 0 && (
               <div className="absolute inset-0 grid animate-fade-in place-items-center motion-reduce:animate-none">
                 <div className="flex flex-col items-center gap-3 text-[13px] text-muted">
@@ -549,6 +691,13 @@ export function App() {
                   </div>
                 </div>
               </div>
+            )}
+            {showSessions && (
+              <SessionsPage
+                active
+                cwd={state.active != null ? workspace.info(state.active).cwd : null}
+                onClose={() => setShowSessions(false)}
+              />
             )}
             {showThemes && (
               <ThemesPage
@@ -584,6 +733,13 @@ export function App() {
           { id: 'new-claude', label: 'Nova aba com Claude Code', keys: 'mod+shift+k', run: () => openTab('claude') },
           { id: 'themes', label: 'Temas', keys: 'mod+shift+,', run: openThemes },
           { id: 'settings', label: 'Configurações', keys: 'mod+,', run: () => setShowSettings(true) },
+          {
+            id: 'new-window',
+            label: 'Nova janela',
+            keys: 'mod+shift+n',
+            run: () => void ipc.newWindow(state.active != null ? workspace.info(state.active).cwd : cwd),
+          },
+          { id: 'sessions', label: 'Sessões do Claude Code', keys: 'mod+shift+a', run: () => setShowSessions(true) },
           {
             id: 'sidebar',
             label: layout.sidebar ? 'Ocultar abas na lateral' : 'Mostrar abas na lateral',

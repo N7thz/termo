@@ -22,6 +22,16 @@ export type TabMenuAction =
   | 'close'
   | 'close-others'
   | 'close-right'
+  /** Cria um grupo novo com esta aba. */
+  | 'new-group'
+  /** Põe a aba no grupo `id`. */
+  | `move-to-group:${string}`
+  | 'ungroup'
+  /** Tela dividida: abre uma aba nova ao lado desta. */
+  | 'split-new'
+  /** Tela dividida: esta aba ao lado da aba ativa. */
+  | 'split-with-active'
+  | 'unsplit'
 
 export type TerminalMenuAction =
   | 'copy'

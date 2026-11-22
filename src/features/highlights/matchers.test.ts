@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { classifyLine, compileRules, findCustom, findLinks, isValidRulePattern } from './matchers'
+import { classifyLine, compileRules, diffLine, findCustom, findLinks, findTokens, isValidRulePattern } from './matchers'
 
 const kinds = (line: string) => findLinks(line).map((m) => `${m.kind}:${m.text}`)
 
@@ -106,5 +106,66 @@ describe('regras próprias', () => {
     expect(isValidRulePattern('ab+c')).toBe(true)
     expect(isValidRulePattern('[')).toBe(false)
     expect(isValidRulePattern('')).toBe(false)
+  })
+})
+
+describe('findTokens', () => {
+  const all = { logLevels: true, timestamps: true, uuids: true }
+  const show = (line: string, on = all) => findTokens(line, on).map((t) => `${t.kind}:${line.slice(t.start, t.end)}`)
+
+  test('níveis de log em maiúsculas e entre colchetes', () => {
+    expect(show('2026-11-22T14:05:09Z INFO servidor pronto')).toEqual([
+      'timestamp:2026-11-22T14:05:09Z',
+      'level-info:INFO',
+    ])
+    expect(show('[warn] cache frio; [Error] falhou')).toEqual(['level-warning:[warn]', 'level-error:[Error]'])
+    expect(show('FATAL e DEBUG e TRACE')).toEqual(['level-error:FATAL', 'level-debug:DEBUG', 'level-debug:TRACE'])
+  })
+
+  test('palavras comuns em minúsculas não viram nível', () => {
+    expect(show('more info about the error here')).toEqual([])
+    expect(show('INFORMATION e ERRORS não contam')).toEqual([])
+  })
+
+  test('datas, horas e UUID', () => {
+    expect(show('em 22/11/2026 14:05 às 09:30:01.5')).toEqual(['timestamp:22/11/2026 14:05', 'timestamp:09:30:01.5'])
+    expect(show('id 3f2b8c1e-9a4d-4e7f-b1c2-0d9e8f7a6b5c ok')).toEqual(['uuid:3f2b8c1e-9a4d-4e7f-b1c2-0d9e8f7a6b5c'])
+  })
+
+  test('respeita as opções desligadas', () => {
+    expect(show('INFO 10:00:00', { logLevels: false, timestamps: true, uuids: true })).toEqual(['timestamp:10:00:00'])
+    expect(show('INFO 10:00:00', { logLevels: true, timestamps: false, uuids: false })).toEqual(['level-info:INFO'])
+  })
+
+  test('localhost:porta e versões não viram hora', () => {
+    expect(show('localhost:3000 v1.2.3 12:34')).toEqual([])
+  })
+})
+
+describe('diffLine', () => {
+  const run = (lines: string[]) => {
+    let inDiff = false
+    return lines.map((l) => {
+      const r = diffLine(l, inDiff)
+      inDiff = r.inDiff
+      return r.kind
+    })
+  }
+
+  test('marca + e - só dentro de um diff', () => {
+    expect(
+      run([
+        '- item de lista',
+        'diff --git a/x.ts b/x.ts',
+        '--- a/x.ts',
+        '+++ b/x.ts',
+        '@@ -1,2 +1,2 @@',
+        ' contexto',
+        '-velho',
+        '+novo',
+        'PS C:> ',
+        '- outra lista',
+      ]),
+    ).toEqual([null, null, null, null, 'hunk', null, 'removed', 'added', null, null])
   })
 })

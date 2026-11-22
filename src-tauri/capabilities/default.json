@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Janela principal: os eventos e o IPC do núcleo, o zoom do tamanho da interface e o controle da janela pela barra de título própria (arrastar, minimizar, maximizar, fechar) e a tela cheia (F11). Área de transferência e links passam por comandos próprios, validados no Rust.",
-  "windows": ["main"],
+  "description": "Janela principal e as abertas com Nova janela (termo-*): os eventos e o IPC do núcleo, o zoom do tamanho da interface e o controle da janela pela barra de título própria (arrastar, minimizar, maximizar, fechar) e a tela cheia (F11). Área de transferência e links passam por comandos próprios, validados no Rust.",
+  "windows": ["main", "termo-*"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",

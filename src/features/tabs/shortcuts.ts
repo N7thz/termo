@@ -1,9 +1,11 @@
 export type TabNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
+export type ProfileNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
 
 export type AppAction =
   | 'new-shell'
   | 'new-claude'
   | 'duplicate-tab'
+  | 'split-tab'
   | 'close-tab'
   | 'next-tab'
   | 'prev-tab'
@@ -16,12 +18,17 @@ export type AppAction =
   | 'font-reset'
   | 'themes'
   | 'settings'
+  | 'sessions'
+  | 'new-window'
   | 'fullscreen'
   | 'shortcuts'
   | 'palette'
   | 'toggle-sidebar'
+  | `profile-${ProfileNumber}`
+  | 'next-profile'
+  | 'prev-profile'
 
-export type ShortcutGroup = 'Abas' | 'Terminal' | 'Janela'
+export type ShortcutGroup = 'Abas' | 'Perfis' | 'Terminal' | 'Janela'
 
 export interface Shortcut {
   group: ShortcutGroup
@@ -39,6 +46,9 @@ const ctrl = (e: KeyboardEvent) => e.ctrlKey && !e.altKey && !e.metaKey
 const ctrlOnly = (e: KeyboardEvent) => ctrl(e) && !e.shiftKey
 const ctrlShift = (e: KeyboardEvent) => ctrl(e) && e.shiftKey
 const plain = (e: KeyboardEvent) => !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey
+// Ctrl+Alt de verdade. O AltGr do ABNT2 também chega como Ctrl+Alt (AltGr+2 = ²), mas com o estado AltGraph ligado.
+const altGr = (e: KeyboardEvent) => typeof e.getModifierState === 'function' && e.getModifierState('AltGraph')
+const ctrlAlt = (e: KeyboardEvent) => e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey && !altGr(e)
 // Dígitos pela tecla física: com Shift ou em AZERTY o `key` não é o número.
 const digit = (e: KeyboardEvent, n: number) => e.code === `Digit${n}` || e.code === `Numpad${n}` || e.key === String(n)
 
@@ -48,6 +58,14 @@ const goToTab = (n: TabNumber): Shortcut => ({
   keys: [`mod+${n}`],
   action: `tab-${n}`,
   match: (e) => ctrlOnly(e) && digit(e, n),
+})
+
+const goToProfile = (n: ProfileNumber): Shortcut => ({
+  group: 'Perfis',
+  label: `Ir para o perfil ${n}`,
+  keys: [`mod+alt+${n}`],
+  action: `profile-${n}`,
+  match: (e) => ctrlAlt(e) && (e.code === `Digit${n}` || e.code === `Numpad${n}`),
 })
 
 export const SHORTCUTS: readonly Shortcut[] = [
@@ -71,6 +89,13 @@ export const SHORTCUTS: readonly Shortcut[] = [
     keys: ['mod+shift+d'],
     action: 'duplicate-tab',
     match: (e) => ctrlShift(e) && key(e) === 'd',
+  },
+  {
+    group: 'Abas',
+    label: 'Dividir a tela com uma aba nova (ou desfazer)',
+    keys: ['mod+shift+e'],
+    action: 'split-tab',
+    match: (e) => ctrlShift(e) && key(e) === 'e',
   },
   {
     group: 'Abas',
@@ -115,6 +140,21 @@ export const SHORTCUTS: readonly Shortcut[] = [
     action: 'last-tab',
     match: (e) => ctrlOnly(e) && digit(e, 9),
   },
+  ...([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map(goToProfile),
+  {
+    group: 'Perfis',
+    label: 'Próximo perfil',
+    keys: ['mod+alt+arrowright'],
+    action: 'next-profile',
+    match: (e) => ctrlAlt(e) && e.key === 'ArrowRight',
+  },
+  {
+    group: 'Perfis',
+    label: 'Perfil anterior',
+    keys: ['mod+alt+arrowleft'],
+    action: 'prev-profile',
+    match: (e) => ctrlAlt(e) && e.key === 'ArrowLeft',
+  },
   { group: 'Terminal', label: 'Copiar a seleção', keys: ['mod+shift+c', 'mod+c'] },
   { group: 'Terminal', label: 'Colar', keys: ['mod+v'] },
   { group: 'Terminal', label: 'Buscar na saída', keys: ['mod+shift+f'] },
@@ -158,6 +198,20 @@ export const SHORTCUTS: readonly Shortcut[] = [
   },
   {
     group: 'Janela',
+    label: 'Sessões do Claude Code',
+    keys: ['mod+shift+a'],
+    action: 'sessions',
+    match: (e) => ctrlShift(e) && key(e) === 'a',
+  },
+  {
+    group: 'Janela',
+    label: 'Nova janela',
+    keys: ['mod+shift+n'],
+    action: 'new-window',
+    match: (e) => ctrlShift(e) && key(e) === 'n',
+  },
+  {
+    group: 'Janela',
     label: 'Busca geral (abas, pastas, arquivos)',
     keys: ['mod+shift+p'],
     action: 'palette',
@@ -188,7 +242,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   },
 ]
 
-export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = ['Abas', 'Terminal', 'Janela']
+export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = ['Abas', 'Perfis', 'Terminal', 'Janela']
 
 /** Atalhos do app, no estilo do Warp / Windows Terminal. */
 export function actionFor(e: KeyboardEvent): AppAction | null {

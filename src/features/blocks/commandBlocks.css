@@ -1,0 +1,80 @@
+/* Blocos por comando (commandBlocks.ts). Só cores do tema: --tone-* vêm da paleta ANSI do tema ativo. */
+
+.termo-block-bar {
+  pointer-events: none;
+  border-radius: 2px;
+  opacity: 0.75;
+}
+.termo-block-bar.is-ok {
+  background: var(--tone-green, var(--accent));
+}
+.termo-block-bar.is-failed {
+  background: var(--tone-red, var(--claude));
+}
+
+.termo-block-tools {
+  pointer-events: none;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.termo-block-toolbar {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 100%;
+  padding: 0 4px;
+  border-radius: 6px;
+  font-family: var(--font-sans, system-ui, sans-serif);
+  font-size: 11px;
+  line-height: 1;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  opacity: 0.6;
+  transition: opacity 120ms ease-out;
+}
+.termo-block-toolbar:hover,
+.termo-block-toolbar:focus-within {
+  opacity: 1;
+}
+
+.termo-block-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.termo-block-status.is-ok svg {
+  color: var(--tone-green, var(--accent));
+}
+.termo-block-status.is-failed {
+  color: var(--tone-red, var(--claude));
+}
+
+.termo-block-button {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.termo-block-button:hover {
+  color: var(--text);
+  background: var(--surface-hover, color-mix(in srgb, var(--text) 10%, transparent));
+}
+.termo-block-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.termo-block-toolbar:not(:hover):not(:focus-within) .termo-block-button {
+  display: none;
+}

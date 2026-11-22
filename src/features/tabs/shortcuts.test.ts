@@ -13,7 +13,10 @@ describe('actionFor', () => {
     expect(actionFor(key('T', ctrlShift))).toBe('new-shell')
     expect(actionFor(key('K', ctrlShift))).toBe('new-claude')
     expect(actionFor(key('D', ctrlShift))).toBe('duplicate-tab')
+    expect(actionFor(key('E', ctrlShift))).toBe('split-tab')
     expect(actionFor(key('W', ctrlShift))).toBe('close-tab')
+    expect(actionFor(key('A', ctrlShift))).toBe('sessions')
+    expect(actionFor(key('N', ctrlShift))).toBe('new-window')
     expect(actionFor(key('Tab', ctrl))).toBe('next-tab')
     expect(actionFor(key('Tab', ctrlShift))).toBe('prev-tab')
     expect(actionFor(key('PageDown', ctrl))).toBe('next-tab')
@@ -29,9 +32,20 @@ describe('actionFor', () => {
     expect(actionFor(key('9', { ...ctrl, code: 'Digit9' }))).toBe('last-tab')
   })
 
-  test('AltGr (Ctrl+Alt) não vira atalho', () => {
-    expect(actionFor(key('²', { ctrlKey: true, altKey: true, code: 'Digit2' }))).toBeNull()
+  test('AltGr (Ctrl+Alt com AltGraph ligado) não vira atalho', () => {
+    const altGr = { ctrlKey: true, altKey: true, getModifierState: (m: string) => m === 'AltGraph' }
+    expect(actionFor(key('²', { ...altGr, code: 'Digit2' }))).toBeNull()
+    expect(actionFor(key('ArrowRight', altGr))).toBeNull()
     expect(actionFor(key('T', { ...ctrlShift, altKey: true }))).toBeNull()
+  })
+
+  test('perfis: Ctrl+Alt+1..9 e Ctrl+Alt+setas', () => {
+    const ctrlAlt = { ctrlKey: true, altKey: true, getModifierState: () => false }
+    expect(actionFor(key('1', { ...ctrlAlt, code: 'Digit1' }))).toBe('profile-1')
+    expect(actionFor(key('9', { ...ctrlAlt, code: 'Numpad9' }))).toBe('profile-9')
+    expect(actionFor(key('ArrowRight', ctrlAlt))).toBe('next-profile')
+    expect(actionFor(key('ArrowLeft', ctrlAlt))).toBe('prev-profile')
+    expect(actionFor(key('1', { ...ctrlAlt, shiftKey: true, code: 'Digit1' }))).toBeNull()
   })
 
   test('fonte', () => {

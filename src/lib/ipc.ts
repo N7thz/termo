@@ -4,6 +4,10 @@
  */
 import { Channel, invoke } from '@tauri-apps/api/core'
 import type { BrowserBounds } from '../features/browser/types'
+import type { GitBranchInfo } from '../features/git-branch/types'
+import type { NodeInfo, NodeVersions } from '../features/node-version/types'
+import type { SessionSnapshot } from '../features/tabs/tabs'
+import type { ClaudeUsage } from '../features/usage-battery/usage'
 import type {
   ClipboardContent,
   CreateSessionOptions,
@@ -39,10 +43,36 @@ export const ipc = {
   recentDirs: (limit?: number) => invoke<string[]>('recent_dirs', { limit: limit ?? null }),
   /** Branch e alterações do git da pasta; `null` fora de repositório. */
   gitInfo: (cwd: string) => invoke<GitInfo | null>('git_info', { cwd }),
+  /** Branches locais (a atual primeiro) e as remotas sem cópia local; `null` fora de repositório. */
+  gitBranches: (cwd: string) => invoke<GitBranchInfo[] | null>('git_branches', { cwd }),
+  /** Troca de branch com `git switch`; rejeita com a mensagem do git (ex.: alterações não salvas). */
+  gitSwitch: (cwd: string, branch: string) => invoke<void>('git_switch', { cwd, branch }),
+  /** Cria a branch a partir do HEAD e troca para ela (`git switch -c`); rejeita com a mensagem do git. */
+  gitCreateBranch: (cwd: string, branch: string) => invoke<void>('git_create_branch', { cwd, branch }),
+  /** Versão do `node` que o shell da aba resolve (o caminho vem do prompt) e se a pasta é projeto Node. */
+  nodeInfo: (node: string | null, cwd: string | null) => invoke<NodeInfo>('node_info', { node, cwd }),
+  /** Gerenciador de versões do Node (fnm, nvm-windows, Volta) e as versões instaladas. */
+  nodeVersions: () => invoke<NodeVersions>('node_versions'),
   /** Arquivos da pasta que combinam com a busca (correspondência difusa). */
   searchFiles: (cwd: string, query: string, limit?: number) =>
     invoke<FileHit[]>('search_files', { cwd, query, limit: limit ?? null }),
   openFolder: (path: string) => invoke<void>('open_folder', { path }),
+
+  /** Sessões do Claude Code no painel do coord (`/agents`); o formato está em features/sessions/sessions.ts. */
+  coordAgents: () => invoke<unknown>('coord_agents'),
+  /** Histórico do coord (`/state`): sessões que já terminaram. */
+  coordState: () => invoke<unknown>('coord_state'),
+  /** Uso do plano do Claude (5 h e semana), do último `statusLine` das abas do Claude Code. */
+  claudeUsage: () => invoke<ClaudeUsage>('claude_usage'),
+  /** Abre outra janela do Termo; a primeira aba dela abre em `cwd`. */
+  newWindow: (cwd?: string | null) => invoke<void>('new_window', { cwd: cwd ?? null }),
+  /** IA pelo Claude Code: `explain` explica um erro; `command` converte um pedido em comando (sem executar). */
+  aiAsk: (mode: 'explain' | 'command', input: string, cwd?: string | null) =>
+    invoke<string>('ai_ask', { mode, input, cwd: cwd ?? null }),
+
+  /** Abas, grupos e divisões da última vez (validados em `restore`, em features/tabs/tabs.ts). */
+  loadSession: () => invoke<unknown>('session_load'),
+  saveSession: (session: SessionSnapshot) => invoke<void>('session_save', { session }),
 
   getSettings: () => invoke<Settings>('settings_get'),
   setSettings: (patch: Partial<Settings>) => invoke<Settings>('settings_set', { patch }),

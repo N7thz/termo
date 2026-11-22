@@ -8,8 +8,10 @@ use serde::{Deserialize, Serialize};
 use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Rect, Url, WebviewUrl};
 
-const LABEL: &str = "browser";
-const MAIN: &str = "main";
+/// Cada janela do Termo tem o seu painel: o webview filho se chama `browser-<janela>`.
+fn label(owner: &str) -> String {
+    format!("browser-{owner}")
+}
 
 /// Área do painel, em pixels lógicos (os mesmos do CSS com zoom 100%).
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -46,35 +48,36 @@ pub fn parse_web_url(raw: &str) -> Result<Url, String> {
     }
 }
 
-fn emit(app: &AppHandle, ev: BrowserEvent) {
-    let _ = app.emit_to(MAIN, "browser", ev);
+fn emit(app: &AppHandle, owner: &str, ev: BrowserEvent) {
+    let _ = app.emit_to(owner, "browser", ev);
 }
 
 /// Abre `url` no painel (cria o webview na primeira vez) e o posiciona em `bounds`.
-pub fn open(app: &AppHandle, url: Url, bounds: Bounds) -> Result<(), String> {
-    if let Some(view) = app.get_webview(LABEL) {
+pub fn open(app: &AppHandle, owner: &str, url: Url, bounds: Bounds) -> Result<(), String> {
+    let me = label(owner);
+    if let Some(view) = app.get_webview(&me) {
         view.navigate(url).map_err(|e| e.to_string())?;
         view.set_bounds(bounds.rect()).map_err(|e| e.to_string())?;
         return view.show().map_err(|e| e.to_string());
     }
 
-    let window = app.get_window(MAIN).ok_or("janela principal não encontrada")?;
-    let on_load = app.clone();
-    let on_title = app.clone();
-    let on_popup = app.clone();
-    let builder = WebviewBuilder::new(LABEL, WebviewUrl::External(url))
+    let window = app.get_window(owner).ok_or("janela não encontrada")?;
+    let (on_load, on_title, on_popup) = (app.clone(), app.clone(), app.clone());
+    let (load_owner, title_owner, popup_label) = (owner.to_string(), owner.to_string(), me.clone());
+    let builder = WebviewBuilder::new(&me, WebviewUrl::External(url))
         .on_navigation(|url| matches!(url.scheme(), "http" | "https" | "about"))
         .on_page_load(move |_, payload| {
             let loading = matches!(payload.event(), PageLoadEvent::Started);
-            emit(&on_load, BrowserEvent::Nav { url: payload.url().to_string(), loading });
+            emit(&on_load, &load_owner, BrowserEvent::Nav { url: payload.url().to_string(), loading });
         })
-        .on_document_title_changed(move |_, title| emit(&on_title, BrowserEvent::Title { title }))
+        .on_document_title_changed(move |_, title| emit(&on_title, &title_owner, BrowserEvent::Title { title }))
         // Links com target=_blank e window.open: abrem no próprio painel, sem janelas soltas.
         .on_new_window(move |url, _| {
             if matches!(url.scheme(), "http" | "https") {
                 let app = on_popup.clone();
+                let popup_label = popup_label.clone();
                 tauri::async_runtime::spawn(async move {
-                    if let Some(view) = app.get_webview(LABEL) {
+                    if let Some(view) = app.get_webview(&popup_label) {
                         let _ = view.navigate(url);
                     }
                 });
@@ -86,16 +89,16 @@ pub fn open(app: &AppHandle, url: Url, bounds: Bounds) -> Result<(), String> {
     Ok(())
 }
 
-pub fn set_bounds(app: &AppHandle, bounds: Bounds) -> Result<(), String> {
-    match app.get_webview(LABEL) {
+pub fn set_bounds(app: &AppHandle, owner: &str, bounds: Bounds) -> Result<(), String> {
+    match app.get_webview(&label(owner)) {
         Some(view) => view.set_bounds(bounds.rect()).map_err(|e| e.to_string()),
         None => Ok(()),
     }
 }
 
 /// Esconde o painel por baixo de menus e diálogos da interface (o webview nativo fica por cima do HTML).
-pub fn set_visible(app: &AppHandle, visible: bool) -> Result<(), String> {
-    match app.get_webview(LABEL) {
+pub fn set_visible(app: &AppHandle, owner: &str, visible: bool) -> Result<(), String> {
+    match app.get_webview(&label(owner)) {
         Some(view) if visible => view.show().map_err(|e| e.to_string()),
         Some(view) => view.hide().map_err(|e| e.to_string()),
         None => Ok(()),
@@ -103,8 +106,8 @@ pub fn set_visible(app: &AppHandle, visible: bool) -> Result<(), String> {
 }
 
 /// Voltar, avançar ou recarregar a página do painel.
-pub fn go(app: &AppHandle, action: &str) -> Result<(), String> {
-    let Some(view) = app.get_webview(LABEL) else { return Ok(()) };
+pub fn go(app: &AppHandle, owner: &str, action: &str) -> Result<(), String> {
+    let Some(view) = app.get_webview(&label(owner)) else { return Ok(()) };
     match action {
         "back" => view.eval("history.back()"),
         "forward" => view.eval("history.forward()"),
@@ -114,8 +117,8 @@ pub fn go(app: &AppHandle, action: &str) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
-pub fn close(app: &AppHandle) -> Result<(), String> {
-    match app.get_webview(LABEL) {
+pub fn close(app: &AppHandle, owner: &str) -> Result<(), String> {
+    match app.get_webview(&label(owner)) {
         Some(view) => view.close().map_err(|e| e.to_string()),
         None => Ok(()),
     }
@@ -132,6 +135,12 @@ mod tests {
         assert!(parse_web_url("file:///C:/Windows/win.ini").is_err());
         assert!(parse_web_url("javascript:alert(1)").is_err());
         assert!(parse_web_url("não é url").is_err());
+    }
+
+    #[test]
+    fn one_panel_per_window() {
+        assert_eq!(label("main"), "browser-main");
+        assert_ne!(label("main"), label("termo-2"));
     }
 
     #[test]

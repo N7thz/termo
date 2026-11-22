@@ -21,6 +21,10 @@ const TOGGLES: { key: keyof Omit<HighlightSettings, 'rules'>; label: string }[] 
   { key: 'severity', label: 'Marcar erros e avisos' },
   { key: 'gitHashes', label: 'Hashes do git (clique copia)' },
   { key: 'network', label: 'localhost:porta e IPs' },
+  { key: 'logLevels', label: 'Níveis de log (INFO, WARN, ERROR...)' },
+  { key: 'diffs', label: 'Linhas de diff (+ verde, − vermelho)' },
+  { key: 'timestamps', label: 'Datas e horas em tom discreto' },
+  { key: 'uuids', label: 'UUIDs' },
 ]
 
 const ROW = 'flex items-center justify-between gap-2.5 text-[13px] tracking-[0.005em]'

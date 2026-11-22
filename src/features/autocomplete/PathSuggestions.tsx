@@ -16,18 +16,22 @@ interface Props {
 }
 
 const SCOPE_LABEL: Record<PathSuggestion['scope'], string> = {
-  child: 'aqui',
-  parent: 'fora',
-  path: 'caminho',
-  recent: 'recente',
+  child: 'nesta pasta',
+  parent: 'pasta vizinha',
+  path: 'caminho digitado',
+  recent: 'pasta recente',
 }
+
+/** Poucas opções por vez: a lista é um atalho, não um navegador de pastas (o resto vem digitando). */
+const MAX_VISIBLE = 5
 
 /**
  * Lista de `cd` com o Listbox do UI SDK: clique, Enter/Espaço numa opção focada ou Alt+número
  * (tratado no TerminalView) executa o comando; Alt+↑/↓ no terminal leva o foco para a lista.
  * Nada fica "selecionado": escolher é executar.
  */
-export function PathSuggestions({ items, position, onPick, onDismiss }: Props) {
+export function PathSuggestions({ items: all, position, onPick, onDismiss }: Props) {
+  const items = all.slice(0, MAX_VISIBLE)
   if (items.length === 0) return null
   return (
     <Listbox
@@ -54,8 +58,8 @@ export function PathSuggestions({ items, position, onPick, onDismiss }: Props) {
           key={item.command}
           value={item.command}
           label={item.label}
-          className="flex cursor-pointer items-center gap-2 rounded-md border-0 bg-transparent px-2 py-[5px] text-left text-text hover:bg-surface-hover focus-visible:outline focus-visible:-outline-offset-1 focus-visible:outline-accent data-highlighted:bg-surface-hover"
-          title={`Executar: ${item.command}`}
+          className="group/item flex cursor-pointer items-center gap-2 rounded-md border-0 bg-transparent px-2 py-[5px] text-left text-text hover:bg-surface-hover focus-visible:outline focus-visible:-outline-offset-1 focus-visible:outline-accent data-highlighted:bg-surface-hover"
+          title={`${item.command} (${SCOPE_LABEL[item.scope]})${i < 9 ? ` · Alt+${i + 1}` : ''}`}
         >
           <ListboxItemIcon
             className={`flex w-3 ${item.scope === 'parent' ? 'text-claude' : item.scope === 'recent' ? 'text-muted' : 'text-accent'}`}
@@ -72,9 +76,10 @@ export function PathSuggestions({ items, position, onPick, onDismiss }: Props) {
             <span className="text-muted">cd </span>
             {item.label}
           </span>
-          <span className="text-[10px] tracking-[0.04em] text-muted uppercase">{SCOPE_LABEL[item.scope]}</span>
+          {/* O atalho só aparece na linha sob o mouse ou com foco: a lista fica limpa. O tipo da pasta
+              já vem no ícone (e no title). */}
           {i < 9 && (
-            <kbd className="rounded-sm border border-border px-1 py-px font-mono text-[10px] text-muted">
+            <kbd className="font-mono text-[10px] text-muted opacity-0 [transition:opacity_120ms_ease-out] group-hover/item:opacity-100 group-data-highlighted/item:opacity-100">
               Alt+{i + 1}
             </kbd>
           )}

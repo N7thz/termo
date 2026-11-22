@@ -6,10 +6,13 @@ import {
   type CompiledRule,
   classifyLine,
   compileRules,
+  diffLine,
   findCustom,
   findLinks,
+  findTokens,
   type Severity,
   type TextMatch,
+  type TokenKind,
 } from './matchers'
 
 export interface HighlightColors {
@@ -39,7 +42,11 @@ const hexAlpha = (hex: string, alpha: number) => {
  * - links: `arquivo:linha:coluna` (abre no VS Code), `localhost:porta` (abre no navegador),
  *   IPs e hashes do git (copiam);
  * - linhas de erro/aviso: fundo tingido, barra à esquerda e marca na régua da direita;
+ * - níveis de log (INFO, WARN...), datas/horas e UUIDs coloridos;
+ * - linhas de diff (+/-) tingidas de verde/vermelho, só dentro de um diff;
  * - regras próprias: trechos coloridos.
+ *
+ * As cores novas vêm da paleta ANSI do tema do terminal (term.options.theme), então seguem o tema.
  *
  * Só linhas que já passaram (acima do cursor) são marcadas, uma vez cada; o buffer alternativo
  * (vim, less, htop) é ignorado.
@@ -48,6 +55,8 @@ export class TerminalHighlights implements IDisposable {
   private opts: Options
   private rules: CompiledRule[]
   private scannedTo = 0
+  /** A saída está dentro de um diff (para não tingir "- item" de listas comuns). */
+  private inDiff = false
   private timer: ReturnType<typeof setTimeout> | undefined
   private decorations: IDecoration[] = []
   private disposables: IDisposable[] = []
@@ -119,7 +128,9 @@ export class TerminalHighlights implements IDisposable {
     // Depois de um `clear` o buffer encolhe: volta o ponteiro.
     if (this.scannedTo > cursorRow) this.scannedTo = 0
     const from = Math.max(this.scannedTo, cursorRow - MAX_SCAN)
-    if (!settings.severity && this.rules.length === 0) {
+    const tokens = { logLevels: settings.logLevels, timestamps: settings.timestamps, uuids: settings.uuids }
+    const anyToken = tokens.logLevels || tokens.timestamps || tokens.uuids
+    if (!settings.severity && !settings.diffs && !anyToken && this.rules.length === 0) {
       this.scannedTo = cursorRow
       return
     }
@@ -129,6 +140,18 @@ export class TerminalHighlights implements IDisposable {
       // Linha quebrada continua a anterior: já foi tratada junto.
       if (!line || line.isWrapped) continue
       const text = line.translateToString(true)
+      if (settings.diffs) {
+        const diff = diffLine(text, this.inDiff)
+        this.inDiff = diff.inDiff
+        if (diff.kind === 'added' || diff.kind === 'removed') {
+          this.tintLine(row - cursorRow, this.ansi(diff.kind === 'added' ? 'green' : 'red'))
+          continue
+        }
+        if (diff.kind === 'hunk') {
+          this.paint(row - cursorRow, 0, text.length, this.ansi('cyan'))
+          continue
+        }
+      }
       if (!text.trim()) continue
       const offset = row - cursorRow
 
@@ -138,6 +161,9 @@ export class TerminalHighlights implements IDisposable {
           this.markLine(offset, severity === 'error' ? colors.error : colors.warning)
           onSeverity(severity)
         }
+      }
+      if (anyToken) {
+        for (const t of findTokens(text, tokens)) this.paint(offset, t.start, t.end - t.start, this.tokenColor(t.kind))
       }
       for (const hit of findCustom(text, this.rules)) {
         const marker = this.term.registerMarker(offset)
@@ -153,6 +179,51 @@ export class TerminalHighlights implements IDisposable {
       }
     }
     this.scannedTo = cursorRow
+  }
+
+  /** Cor da paleta ANSI do tema atual do terminal (com uma reserva neutra se o tema não tiver). */
+  private ansi(name: 'red' | 'green' | 'yellow' | 'blue' | 'cyan' | 'magenta' | 'brightBlack'): string {
+    const theme = this.term.options.theme ?? {}
+    const value = theme[name]
+    return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) ? value : (theme.foreground ?? '#888888')
+  }
+
+  private tokenColor(kind: TokenKind): string {
+    switch (kind) {
+      case 'level-error':
+        return this.opts.colors.error
+      case 'level-warning':
+        return this.opts.colors.warning
+      case 'level-info':
+        return this.ansi('blue')
+      case 'level-debug':
+      case 'timestamp':
+        return this.ansi('brightBlack')
+      case 'uuid':
+        return this.ansi('magenta')
+    }
+  }
+
+  /** Pinta o texto de um trecho da linha (por cima das cores que o programa já mandou). */
+  private paint(offset: number, x: number, width: number, color: string) {
+    if (width <= 0) return
+    const marker = this.term.registerMarker(offset)
+    if (!marker) return
+    const deco = this.term.registerDecoration({ marker, x, width, foregroundColor: color, layer: 'top' })
+    if (deco) this.track(deco)
+  }
+
+  /** Fundo levemente tingido na linha inteira, sem barra nem régua (linhas de diff). */
+  private tintLine(offset: number, color: string) {
+    const marker = this.term.registerMarker(offset)
+    if (!marker) return
+    const deco = this.term.registerDecoration({ marker, x: 0, width: this.term.cols, layer: 'bottom' })
+    if (!deco) return
+    deco.onRender((el) => {
+      el.style.background = hexAlpha(color, 0.14)
+      el.style.pointerEvents = 'none'
+    })
+    this.track(deco)
   }
 
   private markLine(offset: number, color: string) {

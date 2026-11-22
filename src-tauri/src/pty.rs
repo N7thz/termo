@@ -21,6 +21,7 @@ use std::time::{Duration, Instant};
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
 
+use crate::agent_status::{self, AgentState};
 use crate::shell::is_internal_env;
 
 const READ_BUF: usize = 64 * 1024;
@@ -37,6 +38,8 @@ pub enum PtyEvent {
     /// `bytes` é o valor que o frontend devolve no `ack` depois de desenhar.
     Data { data: String, bytes: usize },
     Exit { code: Option<u32> },
+    /// Estado do Claude Code da aba, vindo dos hooks (ver `agent_status`).
+    Agent { state: AgentState },
 }
 
 pub struct SpawnSpec<'a> {
@@ -99,8 +102,9 @@ impl PtyManager {
     /// o destino sumiu (aba fechada), e aí a sessão é encerrada.
     pub fn spawn<F>(self: &Arc<Self>, owner: &str, spec: SpawnSpec, emit: F) -> Result<u32, String>
     where
-        F: Fn(PtyEvent) -> bool + Send + 'static,
+        F: Fn(PtyEvent) -> bool + Send + Sync + 'static,
     {
+        let emit = Arc::new(emit);
         let pair = native_pty_system()
             .openpty(PtySize { rows: spec.rows.max(1), cols: spec.cols.max(1), pixel_width: 0, pixel_height: 0 })
             .map_err(|e| format!("não foi possível abrir o pseudoterminal: {e}"))?;
@@ -117,6 +121,9 @@ impl PtyManager {
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "termo");
         cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
+        // O id sai antes do processo para os hooks do Claude saberem o arquivo de estado da aba.
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
+        cmd.env(agent_status::ENV_VAR, agent_status::env_value(id));
 
         let mut child = pair
             .slave
@@ -127,7 +134,6 @@ impl PtyManager {
         let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
         let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
         let flow = Arc::new(Flow { unacked: Mutex::new(0), cv: Condvar::new(), closed: AtomicBool::new(false) });
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
 
         self.sessions.lock().unwrap().insert(
             id,
@@ -157,6 +163,18 @@ impl PtyManager {
                 }
             })
             .map_err(|e| e.to_string())?;
+
+        let (closed, agent_emit) = (flow.clone(), emit.clone());
+        let watched = agent_status::watch(
+            id,
+            move || closed.closed.load(Ordering::Relaxed),
+            move |state| {
+                agent_emit(PtyEvent::Agent { state });
+            },
+        );
+        if let Err(e) = watched {
+            eprintln!("termo: sem vigia de estado do Claude na sessão {id}: {e}");
+        }
 
         let exit_code = Arc::new(Mutex::new(None::<u32>));
 

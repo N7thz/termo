@@ -1,3 +1,5 @@
+import type { AgentState } from '../features/agent-status/agentState'
+
 export type SessionKind = 'shell' | 'claude'
 
 export interface Settings {
@@ -21,6 +23,10 @@ export interface Settings {
   linkTarget: 'panel' | 'browser'
   /** Tamanho da interface (zoom do webview, com a fonte do terminal compensada). */
   interfaceSize: 'small' | 'medium' | 'large'
+  /** Reabre as abas, grupos e divisões de cada perfil ao abrir o app. */
+  restoreSession: boolean
+  /** Editor de entrada no estilo do Warp (experimental). */
+  inputEditor: boolean
 }
 
 export interface Profile {
@@ -81,6 +87,14 @@ export interface HighlightSettings {
   gitHashes: boolean
   /** `localhost:porta` e IPs clicáveis. */
   network: boolean
+  /** Níveis de log (INFO, WARN, DEBUG...). */
+  logLevels: boolean
+  /** Linhas de diff (+/-). */
+  diffs: boolean
+  /** Datas e horários. */
+  timestamps: boolean
+  /** UUIDs. */
+  uuids: boolean
   rules: HighlightRule[]
 }
 
@@ -99,7 +113,11 @@ export interface CreateSessionResult {
   kind: SessionKind
 }
 
-export type PtyEvent = { kind: 'data'; data: string; bytes: number } | { kind: 'exit'; code: number | null }
+export type PtyEvent =
+  | { kind: 'data'; data: string; bytes: number }
+  | { kind: 'exit'; code: number | null }
+  /** Estado do Claude Code da aba, vindo dos hooks (src-tauri/src/agent_status.rs). */
+  | { kind: 'agent'; state: AgentState }
 
 export interface LaunchInfo {
   /** Veio --claude na linha de comando ou a configuração pede. */
