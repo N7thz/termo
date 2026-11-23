@@ -36,5 +36,14 @@
       "resources/conpty.dll": "conpty.dll",
       "resources/OpenConsole.exe": "OpenConsole.exe"
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE3NjA2MDhCM0QzMzkwREMKUldUY2tETTlpMkJnRjRJeEh5a2dEUGx3bzVRWE43SUJrOVBGWWtxRWV5akx1cER5alR1aDlwejIK",
+      "endpoints": ["https://github.com/N7thz/termo/releases/latest/download/latest.json"],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

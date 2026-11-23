@@ -27,6 +27,39 @@ export interface Settings {
   restoreSession: boolean
   /** Editor de entrada no estilo do Warp (experimental). */
   inputEditor: boolean
+  /** Avisos do Windows: Claude esperando você e comandos longos que terminam com a janela sem foco. */
+  notifications: NotificationSettings
+  /** Comandos salvos com parâmetros `{{nome}}`, chamados pela paleta (até 50). */
+  workflows: Workflow[]
+  /** Atalho global que mostra e esconde o Termo (`Alt+F12`). Vazio = desligado. */
+  globalHotkey: string
+  /** Procura atualização nas releases do GitHub ao abrir. */
+  autoUpdate: boolean
+  /** Reabre as abas com o fim da saída que elas tinham (só com `restoreSession`). */
+  restoreOutput: boolean
+  /** Shell das abas novas: `auto`, `pwsh`, `powershell`, `cmd`, `wsl` ou `wsl:<distro>`. */
+  defaultShell: string
+  /** Ctrl+R abre a busca no histórico do Termo; desligado, vai para o shell (busca do PSReadLine). */
+  historySearch: boolean
+}
+
+export interface NotificationSettings {
+  enabled: boolean
+  /** Aba do Claude esperando você ou bloqueada. */
+  claude: boolean
+  /** Comando que terminou depois de `commandSecs` segundos com a janela sem foco. */
+  commands: boolean
+  /** 5 a 3600. */
+  commandSecs: number
+}
+
+export interface Workflow {
+  /** 1 a 60 caracteres. */
+  name: string
+  /** 1 a 2000 caracteres; `{{param}}` vira um campo para preencher. */
+  command: string
+  /** Até 200 caracteres. */
+  description: string
 }
 
 export interface Profile {
@@ -105,6 +138,8 @@ export interface CreateSessionOptions {
   cols: number
   rows: number
   cwd?: string
+  /** Perfil de shell da aba (`pwsh`, `powershell`, `cmd`, `wsl`, `wsl:<distro>`). Sem ele, vale `defaultShell`. */
+  shell?: string
 }
 
 export interface CreateSessionResult {
@@ -113,6 +148,16 @@ export interface CreateSessionResult {
   warnings: string[]
   /** Sem Claude instalado, a aba vira shell. */
   kind: SessionKind
+  /** Perfil concreto aberto: a aba guarda para reabrir com o mesmo shell. */
+  shell: string
+}
+
+/** Shell detectado na máquina (`shell_list`). */
+export interface ShellInfo {
+  /** Valor de `defaultShell` que abre este shell. */
+  id: string
+  label: string
+  family: 'pwsh' | 'powershell' | 'cmd' | 'wsl'
 }
 
 export type PtyEvent =

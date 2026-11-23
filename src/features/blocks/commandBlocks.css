@@ -89,3 +89,10 @@
   color: var(--accent);
   font-variant-numeric: tabular-nums;
 }
+
+/* Bloco selecionado pelo teclado (Ctrl+↑/↓): cor de destaque do tema, sem esconder o texto. */
+.termo-block-selected {
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}

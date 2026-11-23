@@ -25,6 +25,12 @@ export function tokenStyle(type: TokenType, theme: ITheme): CSSProperties {
   return type === 'comment' ? { color, fontStyle: 'italic' } : { color }
 }
 
+/** O que o TerminalView precisa da caixa: ler o texto e trocá-lo (Ctrl+R, workflows). */
+export interface InputEditorApi {
+  get: () => string
+  set: (text: string) => void
+}
+
 interface Props {
   /** Prompt ocioso e no PowerShell: a caixa aparece. Fechada, fica fora do fluxo e sem foco. */
   open: boolean
@@ -41,6 +47,10 @@ interface Props {
   onEscape: () => void
   /** Ctrl+L: limpa a tela. */
   onClear: () => void
+  /** Ctrl+R: abre a busca no histórico (sem isso, o Ctrl+R não faz nada na caixa). */
+  onSearchHistory?: () => void
+  /** Recebe a API da caixa a cada render. */
+  api?: RefObject<InputEditorApi | null>
 }
 
 /** Pedaço digitado até o cursor que Tab completa: começa depois do último espaço. */
@@ -67,6 +77,8 @@ export function InputEditor({
   onSubmit,
   onEscape,
   onClear,
+  onSearchHistory,
+  api,
 }: Props) {
   const [text, setText] = useState('')
   const [items, setItems] = useState<PathSuggestion[]>([])
@@ -82,6 +94,16 @@ export function InputEditor({
   const [askError, setAskError] = useState<string | null>(null)
 
   const tokens = useMemo<Token[]>(() => tokenize(text), [text])
+
+  if (api) {
+    api.current = {
+      get: () => text,
+      set: (next) => {
+        setText(next)
+        requestAnimationFrame(() => inputRef.current?.setSelectionRange(next.length, next.length))
+      },
+    }
+  }
 
   const closeList = () => {
     seq.current++
@@ -188,7 +210,10 @@ export function InputEditor({
     const el = e.currentTarget
     const collapsed = el.selectionStart === el.selectionEnd
     const ctrl = e.ctrlKey && !e.altKey && !e.shiftKey
-    if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+    if (ctrl && e.key.toLowerCase() === 'r' && onSearchHistory) {
+      e.preventDefault()
+      onSearchHistory()
+    } else if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
       e.preventDefault()
       submit()
     } else if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey) {

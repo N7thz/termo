@@ -3,12 +3,14 @@
  * se um comando mudar de nome ou de formato, só este arquivo muda.
  */
 import { Channel, invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import type { BrowserBounds } from '../features/browser/types'
 import type { ClaudeLine } from '../features/claude-bar/claude'
 import type { FileDiff, ReviewStatus } from '../features/code-review/diff'
 import type { GitBranchInfo } from '../features/git-branch/types'
 import type { NodeInfo, NodeVersions } from '../features/node-version/types'
 import type { SessionSnapshot } from '../features/tabs/tabs'
+import type { UpdateInfo } from '../features/updater/types'
 import type { ClaudeUsage } from '../features/usage-battery/usage'
 import type {
   ClipboardContent,
@@ -20,6 +22,7 @@ import type {
   PathSuggestion,
   PtyEvent,
   Settings,
+  ShellInfo,
 } from '../shared/types'
 
 export const ipc = {
@@ -31,6 +34,8 @@ export const ipc = {
     channel.onmessage = onEvent
     return invoke<CreateSessionResult>('pty_create', { opts, onEvent: channel })
   },
+  /** Shells instalados: pwsh, Windows PowerShell, cmd e as distros do WSL. */
+  shellList: () => invoke<ShellInfo[]>('shell_list'),
   write: (id: number, data: string) => invoke<void>('pty_write', { id, data }),
   resize: (id: number, cols: number, rows: number) => invoke<void>('pty_resize', { id, cols, rows }),
   /** Confirma que `bytes` já foram desenhados (controle de vazão). */
@@ -65,6 +70,8 @@ export const ipc = {
   searchFiles: (cwd: string, query: string, limit?: number) =>
     invoke<FileHit[]>('search_files', { cwd, query, limit: limit ?? null }),
   openFolder: (path: string) => invoke<void>('open_folder', { path }),
+  /** Histórico do PSReadLine (Ctrl+R): comandos distintos, os mais recentes primeiro. */
+  historyRead: (limit?: number) => invoke<string[]>('history_read', { limit: limit ?? null }),
 
   /** Code review: arquivos alterados do repositório da pasta (em relação ao HEAD); `null` fora de repositório. */
   reviewStatus: (cwd: string) => invoke<ReviewStatus | null>('review_status', { cwd }),
@@ -94,9 +101,24 @@ export const ipc = {
   /** Abas, grupos e divisões da última vez (validados em `restore`, em features/tabs/tabs.ts). */
   loadSession: () => invoke<unknown>('session_load'),
   saveSession: (session: SessionSnapshot) => invoke<void>('session_save', { session }),
+  /** Texto guardado de uma aba (serializado pelo xterm, com cores); `null` se não houver. */
+  loadScrollback: (id: string) => invoke<string | null>('scrollback_load', { id }),
+  saveScrollback: (id: string, text: string) => invoke<void>('scrollback_save', { id, text }),
+  /** Apaga o texto guardado das abas que não estão em `keep`. */
+  pruneScrollback: (keep: string[]) => invoke<number>('scrollback_prune', { keep }),
 
   getSettings: () => invoke<Settings>('settings_get'),
   setSettings: (patch: Partial<Settings>) => invoke<Settings>('settings_set', { patch }),
+
+  /** Aviso do Windows e piscar na barra de tarefas (respeita `notifications.enabled` no Rust). */
+  notify: (title: string, body: string) => invoke<void>('notify', { title, body }),
+  /** Procura versão nova nas releases do GitHub; `null` = já está na mais recente. */
+  updateCheck: () => invoke<UpdateInfo | null>('update_check'),
+  /** Baixa, instala e reinicia o Termo. */
+  updateInstall: () => invoke<void>('update_install'),
+  /** Versão nova achada na verificação ao abrir. */
+  onUpdateAvailable: (handler: (info: UpdateInfo) => void) =>
+    listen<UpdateInfo>('update-available', (e) => handler(e.payload)),
 
   readClipboard: () => invoke<ClipboardContent>('clipboard_read'),
   writeClipboard: (text: string) => invoke<void>('clipboard_write', { text }),

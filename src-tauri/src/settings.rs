@@ -36,6 +36,91 @@ pub struct Settings {
     pub restore_session: bool,
     /// Editor de entrada no estilo do Warp (experimental).
     pub input_editor: bool,
+    /// Avisos do Windows: Claude esperando você e comandos longos que terminam com a janela sem foco.
+    pub notifications: NotificationSettings,
+    /// Comandos salvos com parâmetros `{{nome}}`, chamados pela paleta.
+    pub workflows: Vec<Workflow>,
+    /// Atalho global que mostra e esconde o Termo (`Alt+F12`, `Ctrl+Shift+Space`...). Vazio = desligado.
+    pub global_hotkey: String,
+    /// Procura atualização nas releases do GitHub ao abrir.
+    pub auto_update: bool,
+    /// Reabre as abas com o fim da saída que elas tinham (só com `restore_session`).
+    pub restore_output: bool,
+    /// Shell das abas novas: `auto` (pwsh, senão Windows PowerShell), `pwsh`, `powershell`, `cmd`,
+    /// `wsl` (distribuição padrão) ou `wsl:<distro>`.
+    pub default_shell: String,
+    /// Ctrl+R abre a busca no histórico do Termo; desligado, o Ctrl+R vai para o shell (busca do PSReadLine).
+    pub history_search: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct NotificationSettings {
+    pub enabled: bool,
+    /// Aba do Claude esperando você ou bloqueada (pedido de permissão).
+    pub claude: bool,
+    /// Comando que terminou depois de `command_secs` segundos com a janela sem foco.
+    pub commands: bool,
+    pub command_secs: u32,
+}
+
+impl Default for NotificationSettings {
+    fn default() -> Self {
+        Self { enabled: true, claude: true, commands: true, command_secs: 30 }
+    }
+}
+
+pub const COMMAND_SECS_MIN: u32 = 5;
+pub const COMMAND_SECS_MAX: u32 = 3600;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Workflow {
+    /// 1 a 60 caracteres.
+    pub name: String,
+    /// 1 a 2000 caracteres; `{{param}}` vira um campo para preencher antes de rodar.
+    pub command: String,
+    /// Até 200 caracteres.
+    pub description: String,
+}
+
+pub const MAX_WORKFLOWS: usize = 50;
+
+fn sanitize_workflows(list: Vec<Workflow>) -> Vec<Workflow> {
+    list.into_iter()
+        .map(|w| Workflow {
+            name: w.name.trim().to_string(),
+            command: w.command.trim().to_string(),
+            description: w.description.trim().to_string(),
+        })
+        .filter(|w| {
+            let n = w.name.chars().count();
+            (1..=60).contains(&n)
+                && !w.command.is_empty()
+                && w.command.chars().count() <= 2000
+                && w.description.chars().count() <= 200
+        })
+        .take(MAX_WORKFLOWS)
+        .collect()
+}
+
+/// Atalho no formato do tauri-plugin-global-shortcut (`Ctrl+Alt+T`); vazio desliga. Aqui só se confere
+/// o formato; a combinação em si é validada ao registrar.
+pub fn is_valid_hotkey(h: &str) -> bool {
+    h.is_empty()
+        || (h.len() <= 40
+            && h.split('+').all(|p| !p.is_empty())
+            && h.chars().all(|c| c.is_ascii_alphanumeric() || "+`-=[];',./\\".contains(c)))
+}
+
+/// `auto`, `pwsh`, `powershell`, `cmd`, `wsl` ou `wsl:<distro>` (letras, números, `.`, `_`, `-`).
+pub fn is_valid_shell(s: &str) -> bool {
+    match s {
+        "auto" | "pwsh" | "powershell" | "cmd" | "wsl" => true,
+        _ => s.strip_prefix("wsl:").is_some_and(|d| {
+            (1..=64).contains(&d.len()) && d.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
+        }),
+    }
 }
 
 const INTERFACE_SIZES: [&str; 3] = ["small", "medium", "large"];
@@ -253,6 +338,13 @@ impl Default for Settings {
             interface_size: "medium".into(),
             restore_session: true,
             input_editor: false,
+            notifications: NotificationSettings::default(),
+            workflows: Vec::new(),
+            global_hotkey: String::new(),
+            auto_update: true,
+            restore_output: true,
+            default_shell: "auto".into(),
+            history_search: true,
         }
     }
 }
@@ -275,6 +367,14 @@ pub struct SettingsPatch {
     pub interface_size: Option<String>,
     pub restore_session: Option<bool>,
     pub input_editor: Option<bool>,
+    pub notifications: Option<NotificationSettings>,
+    /// Substitui a lista inteira de workflows (validada no apply).
+    pub workflows: Option<Vec<Workflow>>,
+    pub global_hotkey: Option<String>,
+    pub auto_update: Option<bool>,
+    pub restore_output: Option<bool>,
+    pub default_shell: Option<String>,
+    pub history_search: Option<bool>,
 }
 
 /// Ids de tema: letras minúsculas, números e hífen, até 40 caracteres.
@@ -337,6 +437,33 @@ impl Settings {
         if let Some(v) = patch.input_editor {
             self.input_editor = v;
         }
+        if let Some(mut v) = patch.notifications {
+            v.command_secs = v.command_secs.clamp(COMMAND_SECS_MIN, COMMAND_SECS_MAX);
+            self.notifications = v;
+        }
+        if let Some(v) = patch.workflows {
+            self.workflows = sanitize_workflows(v);
+        }
+        if let Some(v) = patch.global_hotkey {
+            let v = v.trim();
+            if is_valid_hotkey(v) {
+                self.global_hotkey = v.to_string();
+            }
+        }
+        if let Some(v) = patch.auto_update {
+            self.auto_update = v;
+        }
+        if let Some(v) = patch.restore_output {
+            self.restore_output = v;
+        }
+        if let Some(v) = patch.history_search {
+            self.history_search = v;
+        }
+        if let Some(v) = patch.default_shell {
+            if is_valid_shell(v.trim()) {
+                self.default_shell = v.trim().to_string();
+            }
+        }
     }
 }
 
@@ -360,6 +487,15 @@ impl SettingsStore {
                 }
                 if !INTERFACE_SIZES.contains(&s.interface_size.as_str()) {
                     s.interface_size = "medium".into();
+                }
+                s.notifications.command_secs =
+                    s.notifications.command_secs.clamp(COMMAND_SECS_MIN, COMMAND_SECS_MAX);
+                s.workflows = sanitize_workflows(std::mem::take(&mut s.workflows));
+                if !is_valid_hotkey(&s.global_hotkey) {
+                    s.global_hotkey.clear();
+                }
+                if !is_valid_shell(&s.default_shell) {
+                    s.default_shell = "auto".into();
                 }
                 s
             })
@@ -417,6 +553,39 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(s.font_size, FONT_MAX);
+    }
+
+    #[test]
+    fn validates_new_settings() {
+        let mut s = Settings::default();
+        s.apply(SettingsPatch {
+            notifications: Some(NotificationSettings { command_secs: 1, ..Default::default() }),
+            workflows: Some(vec![
+                Workflow { name: " Log ".into(), command: "git log --author={{autor}}".into(), ..Default::default() },
+                Workflow { name: String::new(), command: "x".into(), ..Default::default() },
+                Workflow { name: "vazio".into(), command: "  ".into(), ..Default::default() },
+            ]),
+            global_hotkey: Some("Ctrl+Alt+T".into()),
+            default_shell: Some("wsl:Ubuntu-22.04".into()),
+            ..Default::default()
+        });
+        assert_eq!(s.notifications.command_secs, COMMAND_SECS_MIN);
+        assert_eq!(s.workflows.len(), 1);
+        assert_eq!(s.workflows[0].name, "Log");
+        assert_eq!(s.global_hotkey, "Ctrl+Alt+T");
+        assert_eq!(s.default_shell, "wsl:Ubuntu-22.04");
+        s.apply(SettingsPatch {
+            global_hotkey: Some("Ctrl++".into()),
+            default_shell: Some("wsl:a; rm".into()),
+            ..Default::default()
+        });
+        assert_eq!(s.global_hotkey, "Ctrl+Alt+T");
+        assert_eq!(s.default_shell, "wsl:Ubuntu-22.04");
+        for ok in ["auto", "pwsh", "powershell", "cmd", "wsl"] {
+            assert!(is_valid_shell(ok));
+        }
+        assert!(!is_valid_shell("bash"));
+        assert!(is_valid_hotkey(""));
     }
 
     #[test]

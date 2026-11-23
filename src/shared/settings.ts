@@ -31,6 +31,13 @@ export const DEFAULT_SETTINGS: Settings = {
   interfaceSize: 'medium',
   restoreSession: true,
   inputEditor: false,
+  notifications: { enabled: true, claude: true, commands: true, commandSecs: 30 },
+  workflows: [],
+  globalHotkey: '',
+  autoUpdate: true,
+  restoreOutput: true,
+  defaultShell: 'auto',
+  historySearch: true,
 }
 
 /** Mesmos limites do Rust (MAX_PROFILES / MAX_PINNED em src-tauri/src/settings.rs). */

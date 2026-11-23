@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { blockKeyAction, filterOutput, type KeyLike, matchedText, stepSelection } from './blockNav'
 import { decodeCommand, findImagePaths, formatDuration, joinRows, tail } from './blocks'
 
 test('decodifica o comando do OSC 633;E', () => {
@@ -56,5 +57,72 @@ describe('findImagePaths', () => {
   test('respeita o limite', () => {
     const text = Array.from({ length: 10 }, (_, i) => `img${i}.png`).join(' ')
     expect(findImagePaths(text, 3)).toHaveLength(3)
+  })
+})
+
+describe('navegação entre blocos', () => {
+  test('stepSelection', () => {
+    expect(stepSelection(0, null, 'prev')).toBeNull()
+    expect(stepSelection(3, null, 'prev')).toBe(2)
+    expect(stepSelection(3, null, 'next')).toBeNull()
+    expect(stepSelection(3, 2, 'prev')).toBe(1)
+    expect(stepSelection(3, 0, 'prev')).toBe(0)
+    expect(stepSelection(3, 1, 'next')).toBe(2)
+    expect(stepSelection(3, 2, 'next')).toBeNull()
+    expect(stepSelection(3, 9, 'prev')).toBe(2)
+  })
+
+  const ev = (key: string, mods: Partial<KeyLike> = {}): KeyLike => ({
+    key,
+    ctrlKey: false,
+    shiftKey: false,
+    altKey: false,
+    ...mods,
+  })
+
+  test('teclas: Ctrl+↑ seleciona e o resto só com seleção', () => {
+    expect(blockKeyAction(ev('ArrowUp', { ctrlKey: true }), false, false)).toBe('prev')
+    expect(blockKeyAction(ev('ArrowDown', { ctrlKey: true }), false, false)).toBeNull()
+    expect(blockKeyAction(ev('ArrowDown', { ctrlKey: true }), true, false)).toBe('next')
+    expect(blockKeyAction(ev('Enter'), false, false)).toBeNull()
+    expect(blockKeyAction(ev('Enter'), true, false)).toBe('reopen')
+    expect(blockKeyAction(ev('Escape'), true, false)).toBe('clear')
+    expect(blockKeyAction(ev('/'), true, false)).toBe('filter')
+    expect(blockKeyAction(ev('L', { ctrlKey: true, shiftKey: true }), true, false)).toBe('filter')
+    expect(blockKeyAction(ev('C', { ctrlKey: true, shiftKey: true }), true, false)).toBe('copy-command')
+  })
+
+  test('Ctrl+C copia a saída só sem texto selecionado e com bloco', () => {
+    expect(blockKeyAction(ev('c', { ctrlKey: true }), true, false)).toBe('copy-output')
+    expect(blockKeyAction(ev('c', { ctrlKey: true }), true, true)).toBeNull()
+    expect(blockKeyAction(ev('c', { ctrlKey: true }), false, false)).toBeNull()
+    expect(blockKeyAction(ev('ArrowUp', { ctrlKey: true, altKey: true }), true, false)).toBeNull()
+  })
+})
+
+describe('filterOutput', () => {
+  const out = 'Compilando\nerro: falta ;\naviso: x\nERRO: outro\nfim'
+  test('texto simples ignora maiúsculas e guarda o número da linha', () => {
+    const r = filterOutput(out, 'erro', false)
+    expect(r.lines).toEqual([
+      { n: 2, text: 'erro: falta ;' },
+      { n: 4, text: 'ERRO: outro' },
+    ])
+    expect(r.total).toBe(5)
+    expect(matchedText(r)).toBe('erro: falta ;\nERRO: outro')
+  })
+  test('texto simples não trata o padrão como regex', () => {
+    expect(filterOutput('a.b\naxb', 'a.b', false).lines).toHaveLength(1)
+  })
+  test('regex', () => {
+    expect(filterOutput(out, '^(erro|aviso):', true).lines.map((l) => l.n)).toEqual([2, 3, 4])
+  })
+  test('regex inválida devolve o erro e nenhuma linha', () => {
+    const r = filterOutput(out, '(', true)
+    expect(r.error).toBeTruthy()
+    expect(r.lines).toEqual([])
+  })
+  test('consulta vazia mostra tudo', () => {
+    expect(filterOutput(out, '', false).lines).toHaveLength(5)
   })
 })

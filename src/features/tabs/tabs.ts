@@ -10,6 +10,10 @@ export interface Tab {
   cwd?: string
   /** Grupo com nome em que a aba está (dentro do perfil dela). */
   group?: string
+  /** Perfil de shell com que a aba abriu (`pwsh`, `cmd`, `wsl:Ubuntu`...). Sem ele, vale `defaultShell`. */
+  shell?: string
+  /** Id da saída guardada desta aba (veio da sessão salva): reabre com o texto que ela tinha. */
+  outputId?: string
 }
 
 /** Grupo de abas com nome, como as pastas da lateral do Arc/Dia. */
@@ -46,7 +50,16 @@ export interface TabsState {
 export interface SessionSnapshot {
   version: 1
   profile: string
-  tabs: { kind: SessionKind; title: string; profile: string; cwd?: string; group?: string }[]
+  tabs: {
+    kind: SessionKind
+    title: string
+    profile: string
+    cwd?: string
+    group?: string
+    shell?: string
+    /** Id da saída guardada (`scrollback/<id>.txt`). */
+    output?: string
+  }[]
   /** Índice (em `tabs`) da aba ativa de cada perfil. */
   active: Record<string, number>
   groups: TabGroup[]
@@ -63,6 +76,8 @@ export type TabsAction =
       profile?: string
       cwd?: string
       group?: string
+      /** Perfil de shell da aba nova (veja `Tab.shell`). */
+      shell?: string
       /** Abre já em tela dividida com esta aba (a nova fica à direita). */
       splitWith?: number
     }
@@ -137,12 +152,16 @@ function withActive(state: TabsState, active: number | null): TabsState {
 const withoutPairsOf = (pairs: SplitPair[], ...keys: number[]) =>
   pairs.filter((p) => !keys.includes(p.left) && !keys.includes(p.right))
 
+/** Mesma regra do Rust (`settings::is_valid_shell`), sem o `auto`: o que a aba guarda é sempre um shell concreto. */
+export const isShellId = (s: string) => /^(pwsh|powershell|cmd|wsl|wsl:[A-Za-z0-9._-]{1,64})$/.test(s)
+
 export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
   switch (action.type) {
     case 'open': {
       const profile = action.profile ?? state.profile
       const tab: Tab = { key: state.nextKey, kind: action.kind, title: action.title, profile }
       if (action.cwd) tab.cwd = action.cwd
+      if (action.shell && isShellId(action.shell)) tab.shell = action.shell
       if (action.group && state.groups.some((g) => g.id === action.group && g.profile === profile))
         tab.group = action.group
       // Com `after`, entra logo à direita daquela aba (duplicar); senão, no fim.
@@ -315,7 +334,11 @@ export function tabsToClose(state: TabsState, key: number, scope: 'others' | 'ri
 }
 
 /** Foto do estado para salvar. `cwdOf` dá a pasta atual de cada aba (a do prompt, se já houver). */
-export function snapshot(state: TabsState, cwdOf: (tab: Tab) => string | undefined): SessionSnapshot {
+export function snapshot(
+  state: TabsState,
+  cwdOf: (tab: Tab) => string | undefined,
+  outputOf: (tab: Tab) => string | undefined = (t) => t.outputId,
+): SessionSnapshot {
   const index = new Map(state.tabs.map((t, i) => [t.key, i]))
   const active: Record<string, number> = {}
   const remember = { ...state.lastActive, ...(state.active == null ? {} : { [state.profile]: state.active }) }
@@ -328,12 +351,15 @@ export function snapshot(state: TabsState, cwdOf: (tab: Tab) => string | undefin
     profile: state.profile,
     tabs: state.tabs.map((t) => {
       const cwd = cwdOf(t)
+      const output = outputOf(t)
       return {
         kind: t.kind,
         title: t.title,
         profile: t.profile,
         ...(cwd ? { cwd } : {}),
         ...(t.group ? { group: t.group } : {}),
+        ...(t.shell ? { shell: t.shell } : {}),
+        ...(output && isOutputId(output) ? { output } : {}),
       }
     }),
     active,
@@ -344,6 +370,26 @@ export function snapshot(state: TabsState, cwdOf: (tab: Tab) => string | undefin
       return left == null || right == null ? [] : [{ left, right, ratio: p.ratio }]
     }),
   }
+}
+
+/** Id da saída guardada: mesmas regras do Rust (`is_valid_output_id` em session.rs). */
+export function isOutputId(id: string): boolean {
+  return /^[a-z0-9]{1,32}$/.test(id)
+}
+
+/** Id da saída de uma aba: o que veio da sessão salva, senão um novo (guardado em `ids` pela chave da aba). */
+export function outputIdFor(
+  ids: Map<number, string>,
+  tab: { key: number; outputId?: string },
+  make = () => crypto.randomUUID().replaceAll('-', ''),
+): string {
+  if (tab.outputId) return tab.outputId
+  let id = ids.get(tab.key)
+  if (!id) {
+    id = make()
+    ids.set(tab.key, id)
+  }
+  return id
 }
 
 /** Valida o que veio do disco (pode estar velho ou corrompido) e monta o estado com chaves novas. */
@@ -380,6 +426,9 @@ export function restore(raw: unknown, base: TabsState = initialTabs, allowed?: R
     const cwd = str(t.cwd, 1000)
     if (cwd) tab.cwd = cwd
     if (t.group && groupIds.has(t.group)) tab.group = t.group
+    // Snapshots antigos não têm o campo: a aba abre com o shell padrão.
+    if (typeof t.shell === 'string' && isShellId(t.shell)) tab.shell = t.shell
+    if (typeof t.output === 'string' && isOutputId(t.output)) tab.outputId = t.output
     tabs.push(tab)
   })
   if (tabs.length === 0) return base

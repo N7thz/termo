@@ -5,8 +5,11 @@ mod coord;
 mod editor;
 mod files;
 mod git;
+mod hotkey;
+mod history;
 mod images;
 mod node;
+mod notify;
 mod paths;
 mod pty;
 mod recent;
@@ -14,6 +17,8 @@ mod review;
 mod session;
 mod settings;
 mod shell;
+mod shells;
+mod updater;
 mod usage;
 mod window;
 
@@ -46,6 +51,8 @@ struct CreateSessionOptions {
     cols: u16,
     rows: u16,
     cwd: Option<String>,
+    /// Perfil de shell da aba (`pwsh`, `cmd`, `wsl:<distro>`...). Sem ele, vale `defaultShell`.
+    shell: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -56,6 +63,8 @@ struct CreateSessionResult {
     warnings: Vec<String>,
     /// Pode diferir do pedido: sem Claude instalado, a aba vira shell.
     kind: &'static str,
+    /// Perfil concreto aberto (`pwsh`, `powershell`, `cmd`, `wsl`, `wsl:<distro>`): a aba guarda para reabrir igual.
+    shell: String,
 }
 
 #[derive(Serialize)]
@@ -106,21 +115,30 @@ fn pty_create(
         SessionKind::Shell => None,
     };
 
-    let shell_path = shell::detect_shell();
-    let spec = SpawnSpec {
-        shell: &shell_path,
-        args: shell::shell_args(
-            &shell_path,
-            claude.as_deref(),
-            agent_status::settings_file().as_deref(),
-            settings.get().shell_predictions,
-        ),
+    let current = settings.get();
+    let requested = opts.shell.as_deref().unwrap_or(&current.default_shell);
+    let plan = shells::plan(
+        requested,
         cwd,
-        cols: opts.cols,
-        rows: opts.rows,
-    };
+        claude.as_deref(),
+        agent_status::settings_file().as_deref(),
+        current.shell_predictions,
+    );
+    warnings.extend(plan.warnings);
+    let spec = SpawnSpec { shell: &plan.program, args: plan.args, cwd: plan.cwd, cols: opts.cols, rows: opts.rows };
     let id = ptys.spawn(webview.label(), spec, move |ev| on_event.send(ev).is_ok())?;
-    Ok(CreateSessionResult { id, warnings, kind: if claude.is_some() { "claude" } else { "shell" } })
+    Ok(CreateSessionResult {
+        id,
+        warnings,
+        kind: if claude.is_some() { "claude" } else { "shell" },
+        shell: plan.shell_id,
+    })
+}
+
+/// Shells instalados (pwsh, Windows PowerShell, cmd e as distros do WSL). `async`: o `wsl.exe -l -q` pode demorar.
+#[tauri::command]
+async fn shell_list() -> Vec<shells::ShellInfo> {
+    shells::detect()
 }
 
 #[tauri::command]
@@ -250,14 +268,44 @@ async fn record_dir(recent: State<'_, recent::RecentDirs>, path: String) -> Resu
     Ok(())
 }
 
+/// Histórico do PSReadLine para a busca do Ctrl+R (mais recentes primeiro, sem repetição).
+#[tauri::command]
+async fn history_read(limit: Option<usize>) -> Vec<String> {
+    history::read(limit)
+}
+
 #[tauri::command]
 fn settings_get(settings: State<SettingsStore>) -> Settings {
     settings.get()
 }
 
 #[tauri::command]
-fn settings_set(settings: State<SettingsStore>, patch: SettingsPatch) -> Result<Settings, String> {
+fn settings_set(app: AppHandle, settings: State<SettingsStore>, patch: SettingsPatch) -> Result<Settings, String> {
+    // O atalho global é registrado antes de salvar: se outro programa já o usa, nada muda e o erro volta.
+    if let Some(next) = patch.global_hotkey.as_deref() {
+        let previous = settings.get().global_hotkey;
+        let next = next.trim();
+        if next != previous && settings::is_valid_hotkey(next) {
+            hotkey::apply(&app, &previous, next)?;
+        }
+    }
     settings.update(patch)
+}
+
+/// Aviso do Windows (Claude esperando, comando longo). Respeita a configuração.
+#[tauri::command]
+fn notify(app: AppHandle, window: tauri::WebviewWindow, settings: State<SettingsStore>, title: String, body: String) -> Result<(), String> {
+    notify::show(&app, &window, &settings, &title, &body)
+}
+
+#[tauri::command]
+async fn update_check(app: AppHandle) -> Result<Option<updater::UpdateInfo>, String> {
+    updater::check(&app).await
+}
+
+#[tauri::command]
+async fn update_install(app: AppHandle) -> Result<(), String> {
+    updater::install(&app).await
 }
 
 #[tauri::command]
@@ -320,6 +368,22 @@ async fn session_load(store: State<'_, session::SessionStore>) -> Result<Option<
 #[tauri::command]
 async fn session_save(store: State<'_, session::SessionStore>, session: serde_json::Value) -> Result<(), String> {
     store.save(&session)
+}
+
+#[tauri::command]
+async fn scrollback_load(store: State<'_, session::ScrollbackStore>, id: String) -> Result<Option<String>, String> {
+    Ok(store.load(&id))
+}
+
+#[tauri::command]
+async fn scrollback_save(store: State<'_, session::ScrollbackStore>, id: String, text: String) -> Result<(), String> {
+    store.save(&id, &text)
+}
+
+/// Apaga a saída guardada das abas que não estão em `keep`.
+#[tauri::command]
+async fn scrollback_prune(store: State<'_, session::ScrollbackStore>, keep: Vec<String>) -> Result<usize, String> {
+    Ok(store.prune(&keep))
 }
 
 /// Abre `url` no painel de navegador ao lado do terminal, na área `bounds` (pixels lógicos).
@@ -442,10 +506,24 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         // Só o seletor de pasta ("Escolher pasta…" da linha de contexto); nada de ler ou gravar arquivos.
         .plugin(tauri_plugin_dialog::init())
+        // Avisos e atualização só por comandos próprios (notify, update_*): o frontend não recebe permissão dos plugins.
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(hotkey::plugin())
         .setup(move |app| {
             let dir = app.path().app_config_dir()?;
-            app.manage(SettingsStore::load(&dir));
+            let store = SettingsStore::load(&dir);
+            let initial = store.get();
+            app.manage(store);
+            app.manage(updater::PendingUpdate::default());
+            if let Err(e) = hotkey::apply(app.handle(), "", &initial.global_hotkey) {
+                eprintln!("atalho global: {e}");
+            }
+            if initial.auto_update {
+                updater::check_on_startup(app.handle().clone());
+            }
             app.manage(session::SessionStore::new(&dir));
+            app.manage(session::ScrollbackStore::new(&dir));
             app.manage(recent::RecentDirs::load(&dir, dirs::home_dir().as_deref()));
             app.manage(files::FileIndex::default());
             app.manage(node::VersionCache::default());
@@ -475,6 +553,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             launch_info,
             pty_create,
+            shell_list,
             pty_write,
             pty_resize,
             pty_ack,
@@ -492,6 +571,7 @@ pub fn run() {
             image_preview,
             image_open,
             search_files,
+            history_read,
             settings_get,
             settings_set,
             clipboard_read,
@@ -506,6 +586,9 @@ pub fn run() {
             browser_close,
             session_load,
             session_save,
+            scrollback_load,
+            scrollback_save,
+            scrollback_prune,
             coord_agents,
             coord_state,
             coord_act,
@@ -517,6 +600,9 @@ pub fn run() {
             review_stage,
             review_discard,
             new_window,
+            notify,
+            update_check,
+            update_install,
         ])
         .build(tauri::generate_context!())
         .expect("falha ao iniciar o Termo");

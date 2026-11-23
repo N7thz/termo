@@ -14,7 +14,9 @@ import { AiPanel, type AiPanelState } from '../ai/AiPanel'
 import { PathSuggestions, type SuggestionsPosition } from '../autocomplete/PathSuggestions'
 import { extractQuery } from '../autocomplete/query'
 import { ShellIntegration } from '../autocomplete/shellIntegration'
-import { CommandBlocks } from '../blocks/commandBlocks'
+import { BlockFilter } from '../blocks/BlockFilter'
+import { blockKeyAction } from '../blocks/blockNav'
+import { CommandBlocks, SAVE_WORKFLOW_EVENT } from '../blocks/commandBlocks'
 import { ImagePreview, type ImagePreviewAnchor } from '../blocks/ImagePreview'
 import { openLink } from '../browser/links'
 import { ClaudeBar } from '../claude-bar/ClaudeBar'
@@ -22,14 +24,22 @@ import type { TerminalActions } from '../context-menu/types'
 import type { Severity } from '../highlights/matchers'
 import { SearchBar } from '../highlights/SearchBar'
 import { TerminalHighlights } from '../highlights/terminalHighlights'
-import { InputEditor } from '../input/InputEditor'
+import { HistorySearch } from '../history-search/HistorySearch'
+import { CommandLog, type LoggedCommand } from '../history-search/history'
+import { InputEditor, type InputEditorApi } from '../input/InputEditor'
 import type { NodeInfo } from '../node-version/types'
+import { type FinishedCommand, watchCommands } from '../notifications/notifications'
+import { attachScrollback } from '../scrollback/scrollback'
 import { terminalFontSize } from '../settings/interfaceSize'
 import { isAppShortcut } from '../tabs/shortcuts'
 import { ContextBar } from './ContextBar'
 
 interface Props {
   kind: SessionKind
+  /** Perfil de shell da aba (`pwsh`, `cmd`, `wsl:Ubuntu`...). Sem ele, vale `defaultShell`. Só vale na abertura. */
+  shell?: string
+  /** O backend abriu este shell: a aba guarda para a restauração reabrir igual. */
+  onShell?: (shell: string) => void
   /** Aba com o foco (recebe o teclado). */
   active: boolean
   /** Aparece na tela; na tela dividida, a outra metade aparece sem ser a ativa. Padrão: `active`. */
@@ -54,6 +64,12 @@ interface Props {
   onPrompt?: () => void
   /** Estado do Claude Code da aba, vindo dos hooks (pensando, trabalhando, esperando...). */
   onAgent?: (state: AgentState) => void
+  /** Um comando terminou (texto, código e duração), para o aviso de comando longo. */
+  onCommandEnd?: (cmd: FinishedCommand) => void
+  /** Id onde guardar o fim da saída (`undefined` = não guarda). Lido só ao abrir o terminal. */
+  outputId?: string
+  /** Escreve o texto guardado em `outputId` antes de abrir o shell (aba restaurada). */
+  restoreOutput?: boolean
   /** Git da pasta da aba, para a linha de contexto (`null` fora de repositório). */
   git?: GitInfo | null
   /** Comando rodado no primeiro prompt da aba (ex.: `claude --resume <id>`, vindo da página de Sessões). */
@@ -87,6 +103,7 @@ const ROOM_ABOVE = 140
 
 export function TerminalView({
   kind,
+  shell: shellProfile,
   active,
   visible = active,
   onFocus,
@@ -95,12 +112,16 @@ export function TerminalView({
   cwd,
   onTitle,
   onKind,
+  onShell,
   onClose,
   onSeverity,
   onActions,
   onCwd,
   onPrompt,
   onAgent,
+  onCommandEnd,
+  outputId,
+  restoreOutput,
   git = null,
   initialCommand,
 }: Props) {
@@ -124,6 +145,17 @@ export function TerminalView({
   /** Prévia das imagens citadas por um bloco (botão da imagem na barra do bloco). */
   const [images, setImages] = useState<{ paths: string[]; anchor: ImagePreviewAnchor } | null>(null)
   const aiSeq = useRef(0)
+  /** Busca no histórico (Ctrl+R): aberta com a busca inicial, ou null. */
+  const [historySearch, setHistorySearch] = useState<{ query: string } | null>(null)
+  const commandLog = useRef<LoggedCommand[]>([])
+  const editorApi = useRef<InputEditorApi | null>(null)
+  /** Põe o comando na linha do shell (ou na caixa do editor), rodando ou não. */
+  const putCommandRef = useRef<(command: string, run: boolean) => void>(() => {})
+  const openHistoryRef = useRef<() => void>(() => {})
+  /** O Ctrl+R pode abrir a busca agora: shell no prompt, fora do buffer alternativo (vim, less). */
+  const historyReadyRef = useRef(false)
+  /** Filtro da saída de um bloco (botão do bloco ou `/` com o bloco selecionado). */
+  const [blockFilter, setBlockFilter] = useState<{ command: string; output: string } | null>(null)
   const [altBuffer, setAltBuffer] = useState(false)
   const [dead, setDead] = useState(false)
   /** Id do pty e estado do Claude da aba, para a barra do Claude. */
@@ -137,15 +169,39 @@ export function TerminalView({
   const clearRef = useRef<() => void>(() => {})
   // Linha de contexto (Node, pasta, branch): pasta e node vêm do prompt.
   const [shellCwd, setShellCwd] = useState<string | null>(null)
+  const [shellFamily, setShellFamily] = useState<'pwsh' | 'powershell' | 'cmd' | 'wsl'>('pwsh')
   const [node, setNode] = useState<NodeInfo | null>(null)
   const runRef = useRef<(command: string) => void>(() => {})
   const showEditor = settings.inputEditor && kind === 'shell' && idle && !altBuffer && !dead
   const showEditorRef = useRef(showEditor)
   showEditorRef.current = showEditor
+  historyReadyRef.current = settings.historySearch && kind === 'shell' && idle && !altBuffer && !dead
   const openSearchRef = useRef<() => void>(() => {})
   // Callbacks mudam a cada render; a ref evita recriar o terminal.
-  const cbRef = useRef({ onTitle, onKind, onClose, onSeverity, onActions, onCwd, onPrompt, onAgent })
-  cbRef.current = { onTitle, onKind, onClose, onSeverity, onActions, onCwd, onPrompt, onAgent }
+  const cbRef = useRef({
+    onTitle,
+    onKind,
+    onShell,
+    onClose,
+    onSeverity,
+    onActions,
+    onCwd,
+    onPrompt,
+    onAgent,
+    onCommandEnd,
+  })
+  cbRef.current = {
+    onTitle,
+    onKind,
+    onShell,
+    onClose,
+    onSeverity,
+    onActions,
+    onCwd,
+    onPrompt,
+    onAgent,
+    onCommandEnd,
+  }
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: o terminal é criado uma vez por aba; a fonte é tratada no efeito abaixo
   useEffect(() => {
@@ -211,11 +267,24 @@ export function TerminalView({
         }
       },
     )
+    // Comandos desta aba com a pasta em que rodaram: alimentam a busca no histórico (Ctrl+R).
+    const log = new CommandLog(term, () => shell.cwd)
+    commandLog.current = log.commands
+    // Duração de cada comando, para o aviso do Windows de comando longo.
+    const timer = watchCommands(term, (cmd) => cbRef.current.onCommandEnd?.(cmd))
+    // Guarda o fim da saída para a próxima abertura (só abas de shell, com a opção ligada).
+    const scroll = outputId ? attachScrollback(term, outputId) : null
     // Blocos por comando: barra de status na margem, duração e copiar/explicar na linha do prompt.
     const blocks = new CommandBlocks(term, {
       copy: (text) => void ipc.writeClipboard(text),
       failColor: () => term.options.theme?.red ?? term.options.theme?.foreground ?? 'red',
       cwd: () => shell.cwd,
+      filter: (b) => setBlockFilter(b),
+      reopen: (command) => {
+        term.paste(command)
+        term.focus()
+      },
+      saveWorkflow: (command) => window.dispatchEvent(new CustomEvent(SAVE_WORKFLOW_EVENT, { detail: { command } })),
       findImages: (dir, candidates) => ipc.imageExisting(dir, candidates),
       showImages: (paths, button) => {
         const b = button.getBoundingClientRect()
@@ -294,6 +363,7 @@ export function TerminalView({
         term.focus()
       },
       find: () => openSearchRef.current(),
+      command: (text, run) => putCommandRef.current(text, run),
       sendText: (text) => {
         term.focus()
         term.paste(text)
@@ -377,11 +447,73 @@ export function TerminalView({
       if (showEditorRef.current) inputRef.current?.focus()
       else term.focus()
     }
+    // Histórico e workflows: põe o comando na linha sem rodar (apagando o que estava digitado) ou roda.
+    putCommandRef.current = (command, run) => {
+      if (showEditorRef.current && editorApi.current) {
+        if (run) submitRef.current(command)
+        else {
+          editorApi.current.set(command)
+          inputRef.current?.focus()
+        }
+        return
+      }
+      const typed = shell.readInput() ?? ''
+      // End (vai para o fim da linha) + um Backspace por caractere digitado.
+      const clear = `\x1b[F${'\x7f'.repeat(typed.length)}`
+      if (!command.includes('\n')) {
+        send(`${clear}${command}${run ? '\r' : ''}`)
+        if (run) {
+          shell.commandSubmitted()
+          hide()
+        }
+      } else {
+        // Várias linhas: como colagem, para o shell não rodar cada linha ao receber o Enter.
+        send(clear)
+        term.paste(command)
+        if (run) {
+          window.setTimeout(() => {
+            send('\r')
+            shell.commandSubmitted()
+            hide()
+          }, 120)
+        }
+      }
+      term.focus()
+    }
+    openHistoryRef.current = () => {
+      if (!historyReadyRef.current) return
+      hide()
+      setHistorySearch({ query: showEditorRef.current ? (editorApi.current?.get() ?? '') : (shell.readInput() ?? '') })
+    }
 
     // Copiar/colar pela área de transferência do sistema (via Rust); atalhos do app não vão ao shell.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true
       if (isAppShortcut(e)) return false
+      // Ctrl+R: busca no histórico do Termo (com a opção desligada, ou fora do prompt, vai para o shell).
+      if (
+        e.ctrlKey &&
+        !e.shiftKey &&
+        !e.altKey &&
+        !e.metaKey &&
+        e.key.toLowerCase() === 'r' &&
+        historyReadyRef.current
+      ) {
+        e.preventDefault()
+        openHistoryRef.current()
+        return false
+      }
+      // Blocos: Ctrl+↑/↓ seleciona, e com um bloco selecionado Ctrl+C, Ctrl+Shift+C, Enter, / e Esc agem nele.
+      if (kind === 'shell' && !term.buffer.active.type.startsWith('alt')) {
+        const action = blockKeyAction(e, blocks.hasSelection(), term.hasSelection())
+        if (action) {
+          e.preventDefault()
+          blocks.perform(action)
+          return false
+        }
+        // Qualquer outra tecla de texto sai do modo de seleção e segue para o shell.
+        if (blocks.hasSelection() && e.key.length === 1 && !e.ctrlKey && !e.altKey) blocks.clearSelection()
+      }
       // Ctrl+Shift+F: busca na saída.
       if (e.ctrlKey && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {
         e.preventDefault()
@@ -448,29 +580,37 @@ export function TerminalView({
       await document.fonts.load(`${settings.fontSize}px 'JetBrains Mono'`).catch(() => undefined)
       if (disposed) return
       fit.fit()
+      // Texto da última vez (sessão restaurada), antes do shell novo.
+      if (restoreOutput) await scroll?.restore()
+      if (disposed) return
       try {
-        const res = await ipc.createSession({ kind, cols: term.cols, rows: term.rows, cwd }, (ev) => {
-          if (ev.kind === 'data') {
-            // Confirma só depois de desenhar: é o que segura o backend quando a saída é enorme.
-            term.write(ev.data, () => {
-              if (sessionId != null) void ipc.ack(sessionId, ev.bytes)
-            })
-          } else if (ev.kind === 'agent') {
-            cbRef.current.onAgent?.(ev.state)
-            setAgentState(ev.state)
-          } else {
-            exited = true
-            setDead(true)
-            hide()
-            const code = ev.code == null ? '' : ` (código ${ev.code})`
-            term.write(`\r\n${dim(`[processo encerrado${code}: pressione qualquer tecla para fechar a aba]`)}\r\n`)
-          }
-        })
+        const res = await ipc.createSession(
+          { kind, cols: term.cols, rows: term.rows, cwd, shell: shellProfile },
+          (ev) => {
+            if (ev.kind === 'data') {
+              // Confirma só depois de desenhar: é o que segura o backend quando a saída é enorme.
+              term.write(ev.data, () => {
+                if (sessionId != null) void ipc.ack(sessionId, ev.bytes)
+              })
+            } else if (ev.kind === 'agent') {
+              cbRef.current.onAgent?.(ev.state)
+              setAgentState(ev.state)
+            } else {
+              exited = true
+              setDead(true)
+              hide()
+              const code = ev.code == null ? '' : ` (código ${ev.code})`
+              term.write(`\r\n${dim(`[processo encerrado${code}: pressione qualquer tecla para fechar a aba]`)}\r\n`)
+            }
+          },
+        )
         if (disposed) return void ipc.kill(res.id)
         sessionId = res.id
         setPtyId(res.id)
         for (const w of res.warnings) term.write(warn(w))
         if (res.kind !== kind) cbRef.current.onKind(res.kind)
+        setShellFamily(res.shell.startsWith('wsl') ? 'wsl' : (res.shell as 'pwsh' | 'powershell' | 'cmd'))
+        cbRef.current.onShell?.(res.shell)
         term.focus()
       } catch (err) {
         exited = true
@@ -489,6 +629,9 @@ export function TerminalView({
       highlightsRef.current = null
       cbRef.current.onActions?.(null)
       blocks.dispose()
+      log.dispose()
+      timer.dispose()
+      scroll?.dispose()
       shell.dispose()
       term.dispose()
     }
@@ -580,6 +723,7 @@ export function TerminalView({
           fontFamily={settings.fontFamily}
           fontSize={terminalFontSize(settings.fontSize, settings.interfaceSize)}
           idle={idle}
+          family={shellFamily}
           onRun={(command) => runRef.current(command)}
         />
       )}
@@ -595,6 +739,26 @@ export function TerminalView({
           onSubmit={(text) => submitRef.current(text)}
           onEscape={() => termRef.current?.focus()}
           onClear={() => clearRef.current()}
+          onSearchHistory={settings.historySearch ? () => openHistoryRef.current() : undefined}
+          api={editorApi}
+        />
+      )}
+      {historySearch && (
+        <HistorySearch
+          fontFamily={settings.fontFamily}
+          fontSize={terminalFontSize(settings.fontSize, settings.interfaceSize)}
+          initialQuery={historySearch.query}
+          cwd={shellCwd}
+          session={() => commandLog.current}
+          onPick={(command, run) => {
+            setHistorySearch(null)
+            putCommandRef.current(command, run)
+          }}
+          onClose={() => {
+            setHistorySearch(null)
+            if (showEditorRef.current) inputRef.current?.focus()
+            else termRef.current?.focus()
+          }}
         />
       )}
       {ai && (
@@ -610,6 +774,17 @@ export function TerminalView({
           onRun={(command) => {
             setAi(null)
             runRef.current(command)
+          }}
+        />
+      )}
+      {blockFilter && (
+        <BlockFilter
+          command={blockFilter.command}
+          output={blockFilter.output}
+          onCopy={(text) => void ipc.writeClipboard(text)}
+          onClose={() => {
+            setBlockFilter(null)
+            termRef.current?.focus()
           }}
         />
       )}

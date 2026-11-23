@@ -5,17 +5,20 @@ import { Tooltip, TooltipContent, TooltipShortcut, TooltipTrigger } from '@ui-sd
 import { Plus, X } from 'lucide-react'
 import { type CSSProperties, useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { type AgentState, withAgentState } from './features/agent-status/agentState'
+import { SAVE_WORKFLOW_EVENT } from './features/blocks/commandBlocks'
 import { BrowserPanel } from './features/browser/BrowserPanel'
 import { CodeReviewPanel } from './features/code-review/CodeReviewPanel'
 import { TabMenu } from './features/context-menu/TabMenu'
 import { TerminalMenu } from './features/context-menu/TerminalMenu'
 import type { TabMenuAction, TerminalActions, TerminalMenuAction } from './features/context-menu/types'
 import type { Severity } from './features/highlights/matchers'
+import { useNotifier } from './features/notifications/useNotifier'
 import { CommandPalette } from './features/palette/CommandPalette'
 import { createProfile, PROFILE_COLORS, pinFolder, profileColorCss } from './features/profiles/profiles'
 import { SessionsIndicator } from './features/sessions/SessionsIndicator'
 import { SessionsPage } from './features/sessions/SessionsPage'
 import { SettingsPanel } from './features/settings/SettingsPanel'
+import { NewShellMenu } from './features/shell-profiles/NewShellMenu'
 import { ShortcutsDialog } from './features/shortcuts/ShortcutsDialog'
 import { ClaudeIcon } from './features/tabs/ClaudeIcon'
 import { SplitDivider } from './features/tabs/SplitDivider'
@@ -23,8 +26,10 @@ import { actionFor } from './features/tabs/shortcuts'
 import { TabKindIcon } from './features/tabs/TabKindIcon'
 import {
   initialTabs,
+  outputIdFor,
   pairOf,
   restore,
+  type SessionSnapshot,
   snapshot,
   type Tab,
   tabsReducer,
@@ -35,8 +40,11 @@ import {
 import { TerminalView } from './features/terminal/TerminalView'
 import { ThemesPage } from './features/theme/ThemesPage'
 import { useTheme } from './features/theme/useTheme'
+import { UpdateButton } from './features/updater/UpdateButton'
 import { UsageBattery } from './features/usage-battery/UsageBattery'
 import { WindowControls } from './features/window/WindowControls'
+import { WorkflowDialog } from './features/workflows/WorkflowDialog'
+import { WorkflowManager } from './features/workflows/WorkflowManager'
 import { GitDiff } from './features/workspace/GitDiff'
 import { StatusBar } from './features/workspace/StatusBar'
 import { TabSidebar } from './features/workspace/TabSidebar'
@@ -44,7 +52,7 @@ import { useWorkspace } from './features/workspace/useWorkspace'
 import { ipc } from './lib/ipc'
 import { actionButton, tooltip, tooltipKbd } from './lib/ui'
 import { clampFontSize, DEFAULT_SETTINGS } from './shared/settings'
-import type { Profile, SessionKind, Settings } from './shared/types'
+import type { Profile, SessionKind, Settings, Workflow } from './shared/types'
 
 // Feedback no pointer-down (active:), sem esperar o click. Ao fechar, a aba encolhe até sumir.
 const TAB =
@@ -132,6 +140,9 @@ export function App() {
 
   // Estado do Claude Code de cada aba (avatar). "Terminou" vira "pronto" quando a pessoa abre a aba.
   const [agents, setAgents] = useState<ReadonlyMap<number, AgentState>>(new Map())
+  const notifier = useNotifier(settings.notifications)
+  /** Id da saída guardada de cada aba nova (as restauradas já trazem o seu em `tab.outputId`). */
+  const outputIds = useRef(new Map<number, string>())
   useEffect(() => {
     const key = state.active
     if (key == null) return
@@ -170,13 +181,22 @@ export function App() {
   const openTab = useCallback(
     (
       kind: SessionKind,
-      opts: { shell?: string; cwd?: string; profile?: string; after?: number; group?: string; splitWith?: number } = {},
+      opts: {
+        shell?: string
+        shellId?: string
+        cwd?: string
+        profile?: string
+        after?: number
+        group?: string
+        splitWith?: number
+      } = {},
     ) =>
       dispatch({
         type: 'open',
         kind,
         title: kind === 'claude' ? 'Claude Code' : (opts.shell ?? shellName),
         cwd: opts.cwd,
+        shell: opts.shellId,
         profile: opts.profile,
         after: opts.after,
         group: opts.group,
@@ -264,23 +284,26 @@ export function App() {
   }
 
   // Salva abas, grupos e divisões (com a pasta atual de cada aba) logo depois de cada mudança.
-  const session = ready ? JSON.stringify(snapshot(state, (t) => workspace.info(t.key).cwd ?? t.cwd)) : ''
+  // Com "reabrir com o texto", cada aba de shell da janela principal guarda o fim da saída num id próprio.
+  const keepOutput = IS_MAIN_WINDOW && settings.restoreSession && settings.restoreOutput
+  const outputIdOf = (tab: { key: number; kind: SessionKind; outputId?: string }) =>
+    keepOutput && tab.kind === 'shell' ? outputIdFor(outputIds.current, tab) : undefined
+  const session = ready ? JSON.stringify(snapshot(state, (t) => workspace.info(t.key).cwd ?? t.cwd, outputIdOf)) : ''
   useEffect(() => {
     if (!session || !settings.restoreSession || !IS_MAIN_WINDOW) return
     const timer = window.setTimeout(() => {
-      ipc.saveSession(JSON.parse(session)).catch((err) => console.error('[termo] falha ao salvar a sessão', err))
+      const snap = JSON.parse(session) as SessionSnapshot
+      ipc
+        .saveSession(snap)
+        // O texto das abas fechadas (ou de todas, com a opção desligada) sai do disco.
+        .then(() => ipc.pruneScrollback(snap.tabs.flatMap((t) => (t.output ? [t.output] : []))))
+        .catch((err) => console.error('[termo] falha ao salvar a sessão', err))
     }, 400)
     return () => window.clearTimeout(timer)
   }, [session, settings.restoreSession])
 
-  // Sem abas em nenhum perfil: fecha a janela, como os outros terminais (salvando a sessão vazia antes,
-  // para a próxima abertura não reabrir o que foi fechado de propósito).
-  useEffect(() => {
-    if (!ready || state.tabs.length > 0) return
-    void (IS_MAIN_WINDOW ? ipc.saveSession(snapshot(initialTabs, () => undefined)) : Promise.resolve())
-      .catch(() => {})
-      .finally(() => void getCurrentWindow().close())
-  }, [ready, state.tabs.length])
+  // Sem abas a janela continua aberta, na tela vazia com "Nova aba" e "Claude Code". A sessão vazia
+  // é salva pelo efeito acima, então a próxima abertura não reabre o que foi fechado de propósito.
 
   // Fecha com uma saída curta (a aba encolhe); sem movimento reduzido, fecha direto.
   const closeTab = useCallback((key: number) => {
@@ -318,6 +341,33 @@ export function App() {
 
   // Ações do xterm de cada aba, para o menu do botão direito.
   const terminalActions = useRef(new Map<number, TerminalActions>())
+
+  // ---- Workflows: comandos salvos com {{parâmetros}} (paleta, Ctrl+Shift+R e "salvar como workflow" dos blocos) ----
+  const [workflowDialog, setWorkflowDialog] = useState<{ open: boolean; initial: Workflow | null }>({
+    open: false,
+    initial: null,
+  })
+  const [workflowManager, setWorkflowManager] = useState<{ open: boolean; draft: string | null }>({
+    open: false,
+    draft: null,
+  })
+  /** Põe o comando na linha do shell da aba ativa (`run`: também executa). */
+  const sendWorkflow = (command: string, run: boolean) => {
+    if (state.active != null) terminalActions.current.get(state.active)?.command?.(command, run)
+  }
+  const saveWorkflows = (workflows: Workflow[]) => {
+    // Na hora na tela (vários cliques seguidos partem da lista nova); o Rust valida e devolve a versão final.
+    setSettings((s) => ({ ...s, workflows }))
+    updateSettings({ workflows })
+  }
+  useEffect(() => {
+    const onSave = (e: Event) => {
+      const command = (e as CustomEvent<{ command?: unknown }>).detail?.command
+      if (typeof command === 'string' && command.trim()) setWorkflowManager({ open: true, draft: command })
+    }
+    window.addEventListener(SAVE_WORKFLOW_EVENT, onSave)
+    return () => window.removeEventListener(SAVE_WORKFLOW_EVENT, onSave)
+  }, [])
   /** Comando que a aba nova roda no primeiro prompt (pela chave da aba; vem da página de Sessões). */
   const initialCommands = useRef(new Map<number, string>())
   /** Abre uma aba na pasta e, se houver, roda o comando nela (`claude attach` / `claude --resume`). */
@@ -370,7 +420,12 @@ export function App() {
       case 'new-claude':
         return openTab('claude')
       case 'duplicate':
-        return openTab(tab.kind, { after: tab.key, cwd: workspace.info(tab.key).cwd ?? tab.cwd, group: tab.group })
+        return openTab(tab.kind, {
+          after: tab.key,
+          cwd: workspace.info(tab.key).cwd ?? tab.cwd,
+          group: tab.group,
+          shellId: tab.shell,
+        })
       case 'split-new':
         return openTab('shell', { splitWith: tab.key, cwd: workspace.info(tab.key).cwd ?? tab.cwd })
       case 'split-with-active':
@@ -493,6 +548,8 @@ export function App() {
           return setShowShortcuts((v) => !v)
         case 'palette':
           return setShowPalette((v) => !v)
+        case 'workflows':
+          return setWorkflowDialog({ open: true, initial: null })
         case 'toggle-sidebar':
           return updateSettings({ layout: { ...layout, sidebar: !layout.sidebar } })
         case 'collapse-sidebar':
@@ -662,8 +719,10 @@ export function App() {
                 Nova aba <TooltipShortcut className={tooltipKbd} />
               </TooltipContent>
             </Tooltip>
+            <NewShellMenu defaultShell={settings.defaultShell} onPick={(shellId) => openTab('shell', { shellId })} />
             <SessionsIndicator onOpen={() => setShowSessions((v) => !v)} />
             <UsageBattery />
+            <UpdateButton />
             <Tooltip shortcut="mod+shift+k">
               <TooltipTrigger
                 render={
@@ -688,6 +747,10 @@ export function App() {
               onOpenShortcuts={() => {
                 setShowSettings(false)
                 setShowShortcuts(true)
+              }}
+              onOpenWorkflows={() => {
+                setShowSettings(false)
+                setWorkflowManager({ open: true, draft: null })
               }}
             />
           </div>
@@ -716,6 +779,10 @@ export function App() {
                 >
                   <TerminalView
                     kind={tab.kind}
+                    shell={tab.shell}
+                    onShell={(shell) =>
+                      tab.shell !== shell && dispatch({ type: 'update', key: tab.key, patch: { shell } })
+                    }
                     initialCommand={initialCommands.current.get(tab.key)}
                     active={tab.key === state.active}
                     visible={tab.key === state.active || paneStyle(tab.key) != null}
@@ -736,7 +803,11 @@ export function App() {
                     onAgent={(s) => {
                       setAgents((m) => withAgentState(m, tab.key, s))
                       onClaudeState(tab, s)
+                      notifier.agent(tab.key, tab.title, s)
                     }}
+                    onCommandEnd={(cmd) => notifier.command(cmd)}
+                    outputId={outputIdOf(tab)}
+                    restoreOutput={keepOutput && tab.outputId != null}
                     onActions={(actions) =>
                       actions ? terminalActions.current.set(tab.key, actions) : terminalActions.current.delete(tab.key)
                     }
@@ -808,6 +879,26 @@ export function App() {
         )}
       </div>
       <ShortcutsDialog open={showShortcuts} onOpenChange={setShowShortcuts} />
+      <WorkflowDialog
+        open={workflowDialog.open}
+        onOpenChange={(open) => setWorkflowDialog((d) => ({ ...d, open }))}
+        workflows={settings.workflows}
+        initial={workflowDialog.initial}
+        canRun={tabs.find((t) => t.key === state.active)?.kind === 'shell'}
+        onSubmit={sendWorkflow}
+        onAdd={(w) => saveWorkflows([...settings.workflows, w])}
+        onManage={() => {
+          setWorkflowDialog((d) => ({ ...d, open: false }))
+          setWorkflowManager({ open: true, draft: null })
+        }}
+      />
+      <WorkflowManager
+        open={workflowManager.open}
+        onOpenChange={(open) => setWorkflowManager((m) => ({ ...m, open }))}
+        workflows={settings.workflows}
+        draft={workflowManager.draft}
+        onChange={saveWorkflows}
+      />
       <CommandPalette
         open={showPalette}
         onOpenChange={setShowPalette}
@@ -846,6 +937,12 @@ export function App() {
               updateSettings({ layout: { ...layout, sidebar: true, sidebarCollapsed: !layout.sidebarCollapsed } }),
           },
           { id: 'shortcuts', label: 'Atalhos de teclado', keys: 'f1', run: () => setShowShortcuts(true) },
+          {
+            id: 'workflows',
+            label: 'Workflows (comandos salvos)',
+            keys: 'mod+shift+r',
+            run: () => setWorkflowDialog({ open: true, initial: null }),
+          },
           ...profiles
             .filter((p) => p.id !== profile.id)
             .map((p) => ({
@@ -856,6 +953,8 @@ export function App() {
           { id: 'new-profile', label: 'Novo perfil', run: addProfile },
         ]}
         onActivateTab={(key) => dispatch({ type: 'activate', key })}
+        workflows={settings.workflows}
+        onWorkflow={(w) => setWorkflowDialog({ open: true, initial: w })}
         onGoToFolder={(dir) => void ipc.writeClipboard(`cd '${dir.replace(/'/g, "''")}'`)}
       />
     </Tabs>

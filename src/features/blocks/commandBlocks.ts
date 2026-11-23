@@ -1,4 +1,5 @@
 import type { IDecoration, IDisposable, IMarker, Terminal } from '@xterm/xterm'
+import { type BlockKeyAction, stepSelection } from './blockNav'
 import { decodeCommand, findImagePaths, formatDuration, joinRows, tail } from './blocks'
 import './commandBlocks.css'
 
@@ -41,7 +42,16 @@ export interface BlockCallbacks {
   findImages?: (cwd: string | null, candidates: string[]) => Promise<string[]>
   /** Abre a prévia das imagens do bloco junto do botão que foi clicado. */
   showImages?: (paths: string[], anchor: HTMLElement) => void
+  /** Abre o filtro da saída de um bloco (BlockFilter.tsx). */
+  filter?: (block: { command: string; output: string }) => void
+  /** Reabre o comando na linha do shell (sem executar). */
+  reopen?: (command: string) => void
+  /** Salvar o comando como workflow (a tela dos workflows escuta o evento; veja SAVE_WORKFLOW_EVENT). */
+  saveWorkflow?: (command: string) => void
 }
+
+/** Evento de `window` disparado por "Salvar como workflow"; `detail` é `{ command: string }`. */
+export const SAVE_WORKFLOW_EVENT = 'termo:save-workflow'
 
 /** Quantos blocos guardar com decorações (os mais antigos perdem os botões, a saída fica). */
 const MAX_BLOCKS = 300
@@ -54,6 +64,10 @@ const ICON = {
     '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M3 4h10M3 8h10M3 12h6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
   spark:
     '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M8 1.5l1.6 4.9 4.9 1.6-4.9 1.6L8 14.5l-1.6-4.9L1.5 8l4.9-1.6z" fill="currentColor"/></svg>',
+  filter:
+    '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M2.5 3.5h11L9.5 8.5v4l-3 1.5v-5.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
+  workflow:
+    '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M3 2.5h10v11l-5-3-5 3z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
   image:
     '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="6" cy="6.3" r="1.2" fill="currentColor"/><path d="M2.8 12l3.6-3.4 2.4 2.2 1.8-1.6 2.6 2.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
 }
@@ -64,6 +78,8 @@ export class CommandBlocks implements IDisposable {
   private promptStart: IMarker | null = null
   private pendingCommand = ''
   private running: CommandBlock | null = null
+  private selected: CommandBlock | null = null
+  private selection: IDecoration | null = null
   private disposables: IDisposable[] = []
 
   constructor(
@@ -96,6 +112,66 @@ export class CommandBlocks implements IDisposable {
         return { command: b.command, output: this.outputOf(b), exitCode: b.exitCode }
     }
     return null
+  }
+
+  /** Blocos que ainda têm a saída no buffer (os que rolaram para fora do histórico não entram). */
+  private live(): CommandBlock[] {
+    return this.blocks.filter((b) => b.end && !b.prompt.isDisposed && !b.end.isDisposed)
+  }
+
+  hasSelection(): boolean {
+    return this.selected != null
+  }
+
+  /** Seleciona o bloco anterior ou o próximo, rola até ele e o destaca. */
+  select(dir: 'prev' | 'next') {
+    const list = this.live()
+    const cur = this.selected ? list.indexOf(this.selected) : null
+    const next = stepSelection(list.length, cur != null && cur >= 0 ? cur : null, dir)
+    if (next == null) {
+      this.clearSelection()
+      if (dir === 'next') this.term.scrollToBottom()
+      return
+    }
+    this.setSelected(list[next])
+  }
+
+  clearSelection() {
+    this.selection?.dispose()
+    this.selection = null
+    this.selected = null
+  }
+
+  private setSelected(b: CommandBlock) {
+    this.selection?.dispose()
+    this.selected = b
+    const height = Math.max(1, (b.end?.line ?? b.prompt.line + 1) - b.prompt.line)
+    const dec = this.term.registerDecoration({ marker: b.prompt, x: 0, width: this.term.cols, height, layer: 'top' })
+    dec?.onRender((el) => {
+      el.className = 'xterm-decoration termo-block-selected'
+    })
+    this.selection = dec ?? null
+    // Deixa o bloco inteiro à vista quando cabe; senão alinha o começo dele no topo.
+    const top = b.prompt.line
+    const rows = this.term.rows
+    const view = this.term.buffer.active.viewportY
+    if (top < view || top + height > view + rows) this.term.scrollToLine(Math.max(0, top - (height < rows ? 1 : 0)))
+  }
+
+  /** Ação de teclado sobre o bloco selecionado (BlockKeyAction vem de blockNav.ts). */
+  perform(action: BlockKeyAction) {
+    if (action === 'prev' || action === 'next') return this.select(action)
+    const b = this.selected
+    if (!b) return
+    if (action === 'clear') return this.clearSelection()
+    if (action === 'copy-output') return this.cb.copy(this.outputOf(b))
+    if (action === 'copy-command') return this.cb.copy(b.command)
+    if (action === 'reopen') {
+      this.clearSelection()
+      this.cb.reopen?.(b.command)
+      return
+    }
+    if (action === 'filter') this.cb.filter?.({ command: b.command, output: this.outputOf(b) })
   }
 
   private onPromptStart() {
@@ -197,7 +273,10 @@ export class CommandBlocks implements IDisposable {
 
     // Status, duração e botões, à direita da linha do prompt.
     const images = b.images.length > 0 && this.cb.showImages ? 6 : 0
-    const width = Math.min(this.term.cols, (failed && this.cb.explain ? 30 : 20) + images)
+    const width = Math.min(
+      this.term.cols,
+      (failed && this.cb.explain ? 30 : 20) + images + (this.cb.filter ? 3 : 0) + (this.cb.saveWorkflow ? 3 : 0),
+    )
     const tools = this.term.registerDecoration({
       marker: b.prompt,
       anchor: 'right',
@@ -268,6 +347,11 @@ export class CommandBlocks implements IDisposable {
     }
     button(ICON.copy, 'Copiar o comando', () => this.cb.copy(b.command))
     button(ICON.output, 'Copiar a saída', () => this.cb.copy(this.outputOf(b)))
+    const filter = this.cb.filter
+    if (filter)
+      button(ICON.filter, 'Filtrar a saída (/)', () => filter({ command: b.command, output: this.outputOf(b) }))
+    const save = this.cb.saveWorkflow
+    if (save) button(ICON.workflow, 'Salvar como workflow', () => save(b.command))
     if (failed && this.cb.explain) {
       const explain = this.cb.explain
       button(ICON.spark, 'Explicar o erro com o Claude', () =>
@@ -278,6 +362,7 @@ export class CommandBlocks implements IDisposable {
   }
 
   private disposeBlock(b: CommandBlock) {
+    if (this.selected === b) this.clearSelection()
     for (const d of this.decorations.get(b) ?? []) d.dispose()
     this.decorations.delete(b)
     b.prompt.dispose()

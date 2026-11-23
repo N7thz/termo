@@ -24,6 +24,7 @@ export type AppAction =
   | 'fullscreen'
   | 'shortcuts'
   | 'palette'
+  | 'workflows'
   | 'toggle-sidebar'
   | 'collapse-sidebar'
   | `profile-${ProfileNumber}`
@@ -160,6 +161,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { group: 'Terminal', label: 'Copiar a seleção', keys: ['mod+shift+c', 'mod+c'] },
   { group: 'Terminal', label: 'Colar', keys: ['mod+v'] },
   { group: 'Terminal', label: 'Buscar na saída', keys: ['mod+shift+f'] },
+  { group: 'Terminal', label: 'Buscar no histórico de comandos', keys: ['ctrl+r'] },
   { group: 'Terminal', label: 'Executar a sugestão de pasta 1 a 9', keys: ['alt+1'] },
   { group: 'Terminal', label: 'Ir para a lista de sugestões', keys: ['alt+arrowdown'] },
   {
@@ -225,6 +227,13 @@ export const SHORTCUTS: readonly Shortcut[] = [
     keys: ['mod+shift+p'],
     action: 'palette',
     match: (e) => ctrlShift(e) && key(e) === 'p',
+  },
+  {
+    group: 'Janela',
+    label: 'Workflows (comandos salvos com parâmetros)',
+    keys: ['mod+shift+r'],
+    action: 'workflows',
+    match: (e) => ctrlShift(e) && key(e) === 'r',
   },
   {
     group: 'Janela',

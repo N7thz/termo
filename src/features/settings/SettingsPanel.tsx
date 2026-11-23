@@ -8,9 +8,11 @@ import { ChevronRight, Settings2 } from 'lucide-react'
 import { actionButton, tooltip } from '../../lib/ui'
 import type { Settings } from '../../shared/types'
 import { HighlightSettingsSection } from '../highlights/HighlightSettingsSection'
+import { ShellSettingsSection } from '../shell-profiles/ShellSettingsSection'
 import { findTheme } from '../theme/themes'
 import { FontSettingsSection } from './FontSettingsSection'
 import { useInterfaceZoom } from './interfaceSize'
+import { SystemSettingsSection } from './SystemSettingsSection'
 
 // Popover na top layer: o UI SDK posiciona; aqui só aparência e entrada/saída.
 const PANEL =
@@ -34,9 +36,19 @@ interface Props {
   onOpenThemes: () => void
   /** Abre a folha de atalhos. */
   onOpenShortcuts: () => void
+  /** Abre a tela dos workflows (criar, editar, apagar, reordenar). */
+  onOpenWorkflows: () => void
 }
 
-export function SettingsPanel({ open, onOpenChange, settings, onChange, onOpenThemes, onOpenShortcuts }: Props) {
+export function SettingsPanel({
+  open,
+  onOpenChange,
+  settings,
+  onChange,
+  onOpenThemes,
+  onOpenShortcuts,
+  onOpenWorkflows,
+}: Props) {
   // O painel está sempre montado (o botão fica na barra), então é ele quem aplica o zoom da interface.
   useInterfaceZoom(settings.interfaceSize)
   return (
@@ -51,7 +63,12 @@ export function SettingsPanel({ open, onOpenChange, settings, onChange, onOpenTh
       </Tooltip>
       <PopoverContent className={PANEL} side="bottom" align="end" sideOffset={6} collisionPadding={8}>
         <PopoverTitle className="m-0 text-[13px] font-semibold tracking-[0.01em]">Configurações</PopoverTitle>
-        <SettingsFields settings={settings} onChange={onChange} onOpenThemes={onOpenThemes} />
+        <SettingsFields
+          settings={settings}
+          onChange={onChange}
+          onOpenThemes={onOpenThemes}
+          onOpenWorkflows={onOpenWorkflows}
+        />
         <PopoverDescription className="m-0 border-t border-hairline pt-2.5 text-[11px]/normal tracking-[0.01em] text-muted">
           Ctrl+Shift+T nova aba · Ctrl+Shift+K Claude · Ctrl+Shift+, temas ·{' '}
           <button
@@ -72,6 +89,7 @@ function SettingsFields({
   settings,
   onChange,
   onOpenThemes,
+  onOpenWorkflows,
 }: Omit<Props, 'open' | 'onOpenChange' | 'onOpenShortcuts'>) {
   return (
     <>
@@ -103,6 +121,19 @@ function SettingsFields({
         </Switch>
       </Field>
       <Field className="flex items-center justify-between gap-2.5 text-[13px] tracking-[0.005em]">
+        <FieldLabel className={settings.restoreSession ? undefined : 'opacity-50'}>
+          …com o texto que estava em cada aba
+        </FieldLabel>
+        <Switch
+          className={SWITCH}
+          checked={settings.restoreOutput}
+          disabled={!settings.restoreSession}
+          onCheckedChange={(checked) => onChange({ restoreOutput: checked })}
+        >
+          <SwitchThumb className={THUMB} />
+        </Switch>
+      </Field>
+      <Field className="flex items-center justify-between gap-2.5 text-[13px] tracking-[0.005em]">
         <FieldLabel>Sugestões do histórico ao digitar (abas novas)</FieldLabel>
         <Switch
           className={SWITCH}
@@ -126,6 +157,29 @@ function SettingsFields({
         <FieldDescription className="m-0 text-[11px] text-muted">
           Caixa de comando com cores por token, histórico e Tab para caminhos (abas de PowerShell).
         </FieldDescription>
+      </Field>
+      <Field className="flex flex-col gap-1.5 text-[13px] tracking-[0.005em]">
+        <span className="flex items-center justify-between gap-2.5">
+          <FieldLabel>Ctrl+R busca no histórico do Termo</FieldLabel>
+          <Switch
+            className={SWITCH}
+            checked={settings.historySearch}
+            onCheckedChange={(checked) => onChange({ historySearch: checked })}
+          >
+            <SwitchThumb className={THUMB} />
+          </Switch>
+        </span>
+        <FieldDescription className="m-0 text-[11px] text-muted">
+          Lista com busca aproximada sobre os comandos da aba e o histórico do PowerShell. Desligado, o Ctrl+R vai para
+          o shell (a busca reversa do PSReadLine).
+        </FieldDescription>
+      </Field>
+      <Field className="flex items-center justify-between gap-2.5 text-[13px] tracking-[0.005em]">
+        <FieldLabel>Workflows (comandos com parâmetros)</FieldLabel>
+        <Button className={`${actionButton} text-[12.5px] text-text`} onClick={onOpenWorkflows}>
+          {settings.workflows.length > 0 ? `${settings.workflows.length} · Gerenciar` : 'Criar'}
+          <ChevronRight size={13} className="flex-none" />
+        </Button>
       </Field>
       <Field className="flex flex-col gap-1.5 text-[13px] tracking-[0.005em]">
         <span className="flex items-center justify-between gap-2.5">
@@ -156,10 +210,18 @@ function SettingsFields({
         />
         <FieldDescription className="m-0 text-[11px] text-muted">Vazio usa a pasta do usuário.</FieldDescription>
       </Field>
+      <ShellSettingsSection settings={settings} onChange={onChange} inputClass={INPUT} />
       <FontSettingsSection settings={settings} onChange={onChange} inputClass={INPUT} />
       <HighlightSettingsSection
         value={settings.highlights}
         onChange={(highlights) => onChange({ highlights })}
+        switchClass={SWITCH}
+        thumbClass={THUMB}
+        inputClass={INPUT}
+      />
+      <SystemSettingsSection
+        settings={settings}
+        onChange={onChange}
         switchClass={SWITCH}
         thumbClass={THUMB}
         inputClass={INPUT}

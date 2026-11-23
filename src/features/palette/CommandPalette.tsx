@@ -10,10 +10,10 @@ import {
   CommandShortcut,
 } from '@ui-sdk/react/command'
 import { Dialog, DialogBackdrop, DialogContent, DialogTitle } from '@ui-sdk/react/dialog'
-import { File, History, Search } from 'lucide-react'
+import { File, History, Search, Workflow as WorkflowIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { ipc } from '../../lib/ipc'
-import type { FileHit } from '../../shared/types'
+import type { FileHit, Workflow } from '../../shared/types'
 import { TabKindIcon } from '../tabs/TabKindIcon'
 import type { Tab } from '../tabs/tabs'
 import { folderName, shortPath } from '../workspace/format'
@@ -35,6 +35,9 @@ interface Props {
   info: (key: number) => TabInfo
   actions: readonly PaletteAction[]
   onActivateTab: (key: number) => void
+  /** Workflows salvos: aparecem com o prefixo "workflow" e abrem o formulário de parâmetros. */
+  workflows?: readonly Workflow[]
+  onWorkflow?: (workflow: Workflow) => void
   /** Vai para a pasta na aba ativa (`cd`). */
   onGoToFolder: (path: string) => void
 }
@@ -56,6 +59,8 @@ export function CommandPalette({
   info,
   actions,
   onActivateTab,
+  workflows = [],
+  onWorkflow,
   onGoToFolder,
 }: Props) {
   const [query, setQuery] = useState('')
@@ -101,6 +106,10 @@ export function CommandPalette({
     else if (kind === 'file' && cwd) {
       void ipc.openInEditor(arg, undefined, undefined, cwd).catch((err) => console.warn('[termo]', err))
     } else if (kind === 'action') actions.find((a) => a.id === arg)?.run()
+    else if (kind === 'workflow') {
+      const w = workflows[Number(arg)]
+      if (w) onWorkflow?.(w)
+    }
   }
 
   return (
@@ -142,6 +151,31 @@ export function CommandPalette({
                 )
               })}
             </CommandGroup>
+
+            {workflows.length > 0 && (
+              <>
+                <CommandSeparator className="mx-1 my-1 h-px bg-hairline" />
+                <CommandGroup>
+                  <CommandGroupLabel className={GROUP_LABEL}>Workflows</CommandGroupLabel>
+                  {workflows.map((w, i) => (
+                    <CommandItem
+                      // biome-ignore lint/suspicious/noArrayIndexKey: o índice é o valor da escolha; a lista só muda ao salvar
+                      key={i}
+                      value={`workflow:${i}`}
+                      label={`workflow ${w.name}`}
+                      keywords={[w.description, w.command, 'wf']}
+                      className={ITEM}
+                    >
+                      <span className={ICON}>
+                        <WorkflowIcon size={13} />
+                      </span>
+                      <span className="truncate">workflow {w.name}</span>
+                      {w.description && <span className="truncate text-[12px] text-muted">{w.description}</span>}
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </>
+            )}
 
             {files.length > 0 && (
               <>
