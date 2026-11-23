@@ -287,6 +287,10 @@ async fn open_in_editor(
     if editor::open_in_vscode(&file, line, column) {
         return Ok(());
     }
+    // Sem VS Code: executável ou script abre a pasta (com o arquivo selecionado), nunca roda.
+    if editor::runs_when_opened(&file) {
+        return app.opener().reveal_item_in_dir(&file).map_err(|e| e.to_string());
+    }
     app.opener().open_path(file.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
 }
 

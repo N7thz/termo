@@ -61,6 +61,11 @@ fn version_of(cache: &VersionCache, node: &Path) -> Option<String> {
     if let Some(v) = version_in_path(&real) {
         return Some(v);
     }
+    // Daqui em diante o arquivo é EXECUTADO. O caminho vem do `OSC 633;P;Node=`, que qualquer saída do
+    // terminal pode falsificar (um `cat` com a sequência certa): só roda um `node` que está numa pasta do PATH.
+    if !trusted_node(&real) {
+        return None;
+    }
     // O shim do Volta é sempre o mesmo arquivo e troca de versão por baixo: esse não vai para o cache.
     let shim = real
         .to_string_lossy()
@@ -78,6 +83,19 @@ fn version_of(cache: &VersionCache, node: &Path) -> Option<String> {
         }
     }
     v
+}
+
+/// Pode rodar `--version` neste arquivo? Só se ele se chama `node`/`node.exe` e está numa pasta do PATH
+/// do Termo (instalação comum ou shim de gerenciador). As versões dos gerenciadores nem chegam aqui:
+/// saem do nome da pasta, sem executar nada.
+fn trusted_node(real: &Path) -> bool {
+    let named_node = real
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.eq_ignore_ascii_case("node.exe") || n == "node");
+    let Some(dir) = real.parent() else { return false };
+    let Some(path) = std::env::var_os("PATH") else { return false };
+    named_node && std::env::split_paths(&path).filter_map(|d| std::fs::canonicalize(d).ok()).any(|d| d == dir)
 }
 
 /// `20.11.0` a partir de `v20.11.0` (ou já sem o `v`); `None` se não for uma versão.
@@ -250,6 +268,21 @@ mod tests {
         );
         assert_eq!(version_in_path(p).as_deref(), Some("20.11.0"));
         assert_eq!(version_in_path(Path::new(r"D:\node\node.exe")), None);
+    }
+
+    #[test]
+    fn only_runs_node_from_path() {
+        // Um "node.exe" fora do PATH (ex.: dentro de um repositório baixado) nunca é executado.
+        let dir = std::env::temp_dir().join(format!("termo-fake-node-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let fake = dir.join("node.exe");
+        std::fs::write(&fake, b"nao executar").unwrap();
+        let real = std::fs::canonicalize(&fake).unwrap();
+        assert!(!trusted_node(&real));
+        assert_eq!(node_info(&VersionCache::default(), fake.to_str(), None).version, None);
+        // Outro nome nunca, mesmo no PATH.
+        assert!(!trusted_node(&real.with_file_name("calc.exe")));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

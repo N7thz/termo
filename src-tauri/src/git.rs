@@ -28,10 +28,49 @@ fn git(cwd: &Path, args: &[&str]) -> Option<String> {
     git_full(cwd, args).ok()
 }
 
+/// `-c` que impedem o repositório de rodar comandos pelo git do Termo. A pasta da aba vem do
+/// `OSC 633;P;Cwd`, que qualquer saída do terminal pode falsificar; e um `.git/config` malicioso pode
+/// rodar comando no `status` (`core.fsmonitor`) e no `add`/`restore`/`status` (filtros clean/smudge/process
+/// ativados pelo `.gitattributes`). Comando vazio faz o git pular o filtro; `required=false` evita a recusa.
+/// (`diff` ainda precisa de `--no-ext-diff --no-textconv` no próprio comando.)
+pub fn safety_args(dir: &Path) -> Vec<String> {
+    let mut args = vec!["-c".to_string(), "core.fsmonitor=false".to_string()];
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(dir).args(["config", "--name-only", "--get-regexp", r"^filter\."]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let names = cmd.output().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
+    args.extend(filter_overrides(&names));
+    args
+}
+
+/// Para cada filtro de `git config --name-only --get-regexp ^filter\.`, os `-c` que o desligam.
+pub fn filter_overrides(config_names: &str) -> Vec<String> {
+    let mut drivers: Vec<&str> = Vec::new();
+    for line in config_names.lines() {
+        // filter.<nome>.<chave>; o nome pode ter pontos.
+        if let Some((name, _key)) = line.trim().strip_prefix("filter.").and_then(|r| r.rsplit_once('.')) {
+            if !name.is_empty() && !drivers.contains(&name) {
+                drivers.push(name);
+            }
+        }
+    }
+    drivers
+        .iter()
+        .flat_map(|n| {
+            ["clean=", "smudge=", "process=", "required=false"].map(|k| ["-c".to_string(), format!("filter.{n}.{k}")])
+        })
+        .flatten()
+        .collect()
+}
+
 /// Como `git`, mas devolve a mensagem de erro do git quando o comando falha.
 fn git_full(cwd: &Path, args: &[&str]) -> Result<String, String> {
     let mut cmd = Command::new("git");
-    cmd.arg("-C").arg(cwd).args(args).env("GIT_OPTIONAL_LOCKS", "0");
+    cmd.arg("-C").arg(cwd).args(safety_args(cwd)).args(args).env("GIT_OPTIONAL_LOCKS", "0");
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -156,11 +195,11 @@ pub fn git_info(cwd: &Path) -> Option<GitInfo> {
     parse_status(&status, &mut info);
 
     // Com commits: diff contra o HEAD (staged + não staged). Repositório vazio: staged + não staged.
-    let (added, removed) = match git(cwd, &["diff", "HEAD", "--numstat"]) {
+    let (added, removed) = match git(cwd, &["diff", "HEAD", "--numstat", "--no-ext-diff", "--no-textconv"]) {
         Some(out) => sum_numstat(&out),
         None => {
-            let (a1, r1) = git(cwd, &["diff", "--cached", "--numstat"]).map(|o| sum_numstat(&o)).unwrap_or_default();
-            let (a2, r2) = git(cwd, &["diff", "--numstat"]).map(|o| sum_numstat(&o)).unwrap_or_default();
+            let (a1, r1) = git(cwd, &["diff", "--cached", "--numstat", "--no-ext-diff", "--no-textconv"]).map(|o| sum_numstat(&o)).unwrap_or_default();
+            let (a2, r2) = git(cwd, &["diff", "--numstat", "--no-ext-diff", "--no-textconv"]).map(|o| sum_numstat(&o)).unwrap_or_default();
             (a1 + a2, r1 + r2)
         }
     };
@@ -249,6 +288,47 @@ u UU N... 1 2 3 4 a b c conflito.ts\n? novo.txt\n? outro.txt\n";
         assert!(switch_branch(&dir, "--orphan").is_err());
         assert!(switch_branch(&dir, "").is_err());
         assert!(switch_branch(&dir, "a b").is_err());
+    }
+
+    #[test]
+    fn neutralizes_filters_by_name() {
+        let names = "filter.lfs.clean\nfilter.lfs.smudge\nfilter.a.b.process\n";
+        let args = filter_overrides(names);
+        assert!(args.contains(&"filter.lfs.clean=".to_string()));
+        assert!(args.contains(&"filter.lfs.required=false".to_string()));
+        assert!(args.contains(&"filter.a.b.smudge=".to_string()));
+        // Cada `-c` vem antes do valor, e cada filtro aparece uma vez (4 chaves × 2 filtros).
+        assert_eq!(args.len(), 16);
+        assert!(args.chunks(2).all(|c| c[0] == "-c"));
+    }
+
+    #[test]
+    fn malicious_repo_config_does_not_run() {
+        if which::which("git").is_err() {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("termo-git-evil-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        git_full(&dir, &["init", "-q", "-b", "main"]).unwrap();
+        // Configuração que um repositório baixado pode trazer: comandos no status e no add.
+        let raw = |args: &[&str]| {
+            Command::new("git").arg("-C").arg(&dir).args(args).output().unwrap();
+        };
+        raw(&["config", "core.fsmonitor", "echo x > pwned-fsmonitor.txt"]);
+        raw(&["config", "filter.evil.clean", "echo x > pwned-filter.txt; cat"]);
+        raw(&["config", "filter.evil.required", "true"]);
+        std::fs::write(dir.join(".gitattributes"), "*.txt filter=evil\n").unwrap();
+        std::fs::write(dir.join("a.txt"), "1\n").unwrap();
+        assert!(git_info(&dir).is_some());
+        git_full(&dir, &["add", "a.txt"]).unwrap();
+        assert!(!dir.join("pwned-fsmonitor.txt").exists(), "fsmonitor rodou");
+        assert!(!dir.join("pwned-filter.txt").exists(), "filtro clean rodou");
+        // Sem o endurecimento o filtro roda (prova de que o teste testa algo).
+        raw(&["rm", "-q", "--cached", "a.txt"]);
+        raw(&["add", "a.txt"]);
+        assert!(dir.join("pwned-filter.txt").exists(), "o git puro deveria rodar o filtro");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

@@ -3,6 +3,21 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// Extensões que o Windows executa (ou interpreta) ao "abrir" pelo app padrão.
+const RUNNABLE: &[&str] = &[
+    "exe", "com", "bat", "cmd", "ps1", "psm1", "psd1", "vbs", "vbe", "js", "jse", "wsf", "wsh", "msi", "msp", "msc",
+    "lnk", "scr", "pif", "hta", "cpl", "reg", "url", "appref-ms", "jar", "py", "pyw", "application", "gadget", "inf",
+    "scf", "sct", "ws", "settingcontent-ms", "library-ms", "search-ms", "diagcab",
+];
+
+/// Abrir pelo app padrão executaria o arquivo? Aí a alternativa ao VS Code é abrir a pasta dele.
+/// O caminho vem de um link na saída do terminal, que qualquer programa (ou um `cat`) pode escrever.
+pub fn runs_when_opened(file: &Path) -> bool {
+    file.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| RUNNABLE.iter().any(|r| r.eq_ignore_ascii_case(e)))
+}
+
 /// Resolve o caminho citado (relativo à pasta da aba) e confirma que é um arquivo.
 pub fn resolve_file(path: &str, cwd: Option<&str>) -> Result<PathBuf, String> {
     let raw = Path::new(path.trim());
@@ -47,6 +62,16 @@ pub fn open_in_vscode(file: &Path, line: Option<u32>, column: Option<u32>) -> bo
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn runnable_files_are_not_opened() {
+        for f in ["a.exe", "b.BAT", "c.ps1", "d.lnk", "e.js", "f.appref-ms"] {
+            assert!(runs_when_opened(Path::new(f)), "{f}");
+        }
+        for f in ["a.ts", "b.rs", "c.txt", "d.png", "Makefile"] {
+            assert!(!runs_when_opened(Path::new(f)), "{f}");
+        }
+    }
 
     #[test]
     fn goto_formats_position() {

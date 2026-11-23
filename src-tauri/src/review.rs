@@ -65,7 +65,13 @@ pub struct FileDiff {
 /// Roda o git e devolve (sucesso, stdout, stderr). Não abre console e não trava o índice de outros processos.
 fn run(dir: &Path, args: &[&str]) -> Result<(bool, String, String), String> {
     let mut cmd = Command::new("git");
-    cmd.arg("-C").arg(dir).args(["-c", "core.quotepath=off"]).args(args).env("GIT_OPTIONAL_LOCKS", "0");
+    // safety_args: o repositório não roda comandos pelo nosso git (fsmonitor, filtros clean/smudge).
+    cmd.arg("-C")
+        .arg(dir)
+        .args(["-c", "core.quotepath=off"])
+        .args(crate::git::safety_args(dir))
+        .args(args)
+        .env("GIT_OPTIONAL_LOCKS", "0");
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -155,9 +161,9 @@ pub fn status(cwd: &Path) -> Result<Option<ReviewStatus>, String> {
     let Some(root) = root_of(cwd) else { return Ok(None) };
     let porcelain = ok(&root, &["status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all"])?;
     let numstat = if has_head(&root) {
-        ok(&root, &["diff", "HEAD", "--numstat", "--no-renames"])?
+        ok(&root, &["diff", "HEAD", "--numstat", "--no-renames", "--no-ext-diff", "--no-textconv"])?
     } else {
-        ok(&root, &["diff", "--cached", "--numstat", "--no-renames"])?
+        ok(&root, &["diff", "--cached", "--numstat", "--no-renames", "--no-ext-diff", "--no-textconv"])?
     };
     let counts = parse_numstat(&numstat);
     let branch = ok(&root, &["branch", "--show-current"]).ok().map(|b| b.trim().to_string()).filter(|b| !b.is_empty());
@@ -244,9 +250,9 @@ pub fn diff(cwd: &Path, path: &str) -> Result<FileDiff, String> {
         let bytes = std::fs::read(root.join(path)).map_err(|e| e.to_string())?;
         new_file_diff(path, &String::from_utf8_lossy(&bytes))
     } else if has_head(&root) {
-        ok(&root, &["diff", "HEAD", "--no-renames", "--no-color", "--no-ext-diff", "--", path])?
+        ok(&root, &["diff", "HEAD", "--no-renames", "--no-color", "--no-ext-diff", "--no-textconv", "--", path])?
     } else {
-        ok(&root, &["diff", "--cached", "--no-renames", "--no-color", "--no-ext-diff", "--", path])?
+        ok(&root, &["diff", "--cached", "--no-renames", "--no-color", "--no-ext-diff", "--no-textconv", "--", path])?
     };
     let (diff, truncated) = truncate(text);
     Ok(FileDiff { diff, binary: false, truncated })

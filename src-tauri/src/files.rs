@@ -25,7 +25,12 @@ pub struct FileHit {
 
 fn git_ls_files(cwd: &Path) -> Option<Vec<String>> {
     let mut cmd = Command::new("git");
-    cmd.arg("-C").arg(cwd).args(["ls-files", "-co", "--exclude-standard"]).env("GIT_OPTIONAL_LOCKS", "0");
+    // safety_args: a pasta pode ser um repositório malicioso (fsmonitor/filtros rodariam comandos).
+    cmd.arg("-C")
+        .arg(cwd)
+        .args(crate::git::safety_args(cwd))
+        .args(["ls-files", "-co", "--exclude-standard"])
+        .env("GIT_OPTIONAL_LOCKS", "0");
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
