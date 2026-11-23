@@ -89,6 +89,55 @@ pub fn check_openable(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Pasta das imagens coladas (print, imagem copiada do navegador) que viram arquivo para o shell.
+pub fn paste_dir() -> PathBuf {
+    std::env::temp_dir().join("termo-paste")
+}
+
+/// Arquivos colados com mais que isso são apagados ao colar o próximo.
+const PASTE_KEEP: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 3600);
+
+/// Grava a imagem (RGBA, como vem da área de transferência) como PNG em `dir`, com um nome novo
+/// (`colado-<ms>.png`), e apaga as coladas há mais de uma semana. Devolve o caminho.
+pub fn save_png(dir: &Path, rgba: &[u8], width: u32, height: u32) -> Result<PathBuf, String> {
+    if width == 0 || height == 0 || rgba.len() != width as usize * height as usize * 4 {
+        return Err("imagem da área de transferência inválida".into());
+    }
+    std::fs::create_dir_all(dir).map_err(|e| format!("não foi possível criar {}: {e}", dir.display()))?;
+    prune_pastes(dir);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    let mut path = dir.join(format!("colado-{}.png", now.as_millis()));
+    let mut n = 1;
+    while path.exists() {
+        path = dir.join(format!("colado-{}-{n}.png", now.as_millis()));
+        n += 1;
+    }
+    let file = std::fs::File::create(&path).map_err(|e| format!("não foi possível gravar a imagem: {e}"))?;
+    let mut enc = png::Encoder::new(std::io::BufWriter::new(file), width, height);
+    enc.set_color(png::ColorType::Rgba);
+    enc.set_depth(png::BitDepth::Eight);
+    enc.write_header()
+        .and_then(|mut w| w.write_image_data(rgba))
+        .map_err(|e| format!("não foi possível gravar a imagem: {e}"))?;
+    Ok(path)
+}
+
+fn prune_pastes(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for e in entries.flatten() {
+        let old = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > PASTE_KEEP);
+        let ours = e.file_name().to_string_lossy().starts_with("colado-");
+        if old && ours {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
 fn base64(data: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
@@ -106,6 +155,23 @@ fn base64(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saves_pasted_image_as_png() {
+        let dir = std::env::temp_dir().join(format!("termo-paste-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let rgba = [255u8, 0, 0, 255, 0, 255, 0, 255]; // 2x1: vermelho, verde
+        let a = save_png(&dir, &rgba, 2, 1).unwrap();
+        let b = save_png(&dir, &rgba, 2, 1).unwrap();
+        assert_ne!(a, b, "cada colagem vira um arquivo novo");
+        let bytes = std::fs::read(&a).unwrap();
+        assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n");
+        assert!(preview(a.to_str().unwrap()).unwrap().data_url.starts_with("data:image/png;base64,"));
+        // Tamanho que não bate com os pixels é recusado.
+        assert!(save_png(&dir, &rgba, 3, 1).is_err());
+        assert!(save_png(&dir, &[], 0, 0).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn encodes_base64() {

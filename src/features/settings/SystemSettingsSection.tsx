@@ -4,7 +4,7 @@ import { Switch, SwitchThumb } from '@ui-sdk/react/switch'
 import { X } from 'lucide-react'
 import { useState } from 'react'
 import { ipc } from '../../lib/ipc'
-import type { NotificationSettings, Settings } from '../../shared/types'
+import type { NotificationSettings, Settings, TraySettings } from '../../shared/types'
 import { announceUpdate } from '../updater/UpdateButton'
 import { comboFromEvent, formatCombo } from './hotkey'
 
@@ -76,6 +76,8 @@ export function SystemSettingsSection({ settings, onChange, switchClass, thumbCl
       </Field>
 
       <HotkeyField settings={settings} onChange={onChange} inputClass={inputClass} />
+
+      <TrayFields settings={settings} onChange={onChange} switchClass={switchClass} thumbClass={thumbClass} />
 
       {toggle('Procurar atualização ao abrir', settings.autoUpdate, (autoUpdate) => onChange({ autoUpdate }))}
       <UpdateCheck />
@@ -173,6 +175,61 @@ function UpdateCheck() {
       {state.message && (
         <p className="m-0 text-[11px] text-muted" role="status">
           {state.message}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function TrayFields({ settings, onChange, switchClass, thumbClass }: Omit<Props, 'inputClass'>) {
+  const t = settings.tray
+  const [error, setError] = useState<string | null>(null)
+  // Direto pelo ipc: ligar o início com o Windows pode falhar (registro), e o erro aparece aqui.
+  const set = (patch: Partial<TraySettings>) => {
+    setError(null)
+    ipc
+      .setSettings({ tray: { ...t, ...patch } })
+      .then((s) => onChange({ tray: s.tray }))
+      .catch((err) => setError(String(err)))
+  }
+  const row = (label: string, checked: boolean, key: keyof TraySettings, disabled = false, hint?: string) => (
+    <Field className="flex flex-col gap-1 text-[13px] tracking-[0.005em]">
+      <span className={ROW}>
+        <FieldLabel className={disabled ? 'opacity-50' : undefined}>{label}</FieldLabel>
+        <Switch
+          className={switchClass}
+          checked={checked}
+          disabled={disabled}
+          onCheckedChange={(v) => set({ [key]: v })}
+        >
+          <SwitchThumb className={thumbClass} />
+        </Switch>
+      </span>
+      {hint && <FieldDescription className="m-0 text-[11px] text-muted">{hint}</FieldDescription>}
+    </Field>
+  )
+  return (
+    <div className="flex flex-col gap-2.5">
+      {row(
+        'Ícone na bandeja do Windows',
+        t.enabled,
+        'enabled',
+        false,
+        'Clique mostra ou esconde o Termo; o botão direito tem nova aba, Claude Code, nova janela e sair.',
+      )}
+      {row(
+        'Fechar manda para a bandeja',
+        t.closeToTray,
+        'closeToTray',
+        !t.enabled,
+        'A janela principal some, mas as abas continuam rodando. Para fechar de vez: Sair, no menu da bandeja.',
+      )}
+      {row('Minimizar manda para a bandeja', t.minimizeToTray, 'minimizeToTray', !t.enabled)}
+      {row('Iniciar com o Windows', t.launchAtLogin, 'launchAtLogin')}
+      {row('…só na bandeja, sem abrir a janela', t.startHidden, 'startHidden', !t.enabled || !t.launchAtLogin)}
+      {error && (
+        <p className="m-0 text-[11px] text-claude" role="alert">
+          {error}
         </p>
       )}
     </div>

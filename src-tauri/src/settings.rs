@@ -51,6 +51,109 @@ pub struct Settings {
     pub default_shell: String,
     /// Ctrl+R abre a busca no histórico do Termo; desligado, o Ctrl+R vai para o shell (busca do PSReadLine).
     pub history_search: bool,
+    /// Ícone na bandeja do Windows (área de notificação) e o que fechar/minimizar fazem.
+    pub tray: TraySettings,
+    /// Imagem de fundo (uma ou várias, em slideshow) atrás do terminal ou sobre a janela inteira.
+    pub background: BackgroundSettings,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BackgroundSettings {
+    pub enabled: bool,
+    /// Caminhos absolutos das imagens (até `MAX_BACKGROUNDS`).
+    pub images: Vec<String>,
+    /// `terminal` (atrás do texto do terminal) ou `window` (sobre a janela inteira, sem pegar cliques).
+    pub target: String,
+    /// Opacidade da imagem, em %: `BG_OPACITY_MIN` a 100.
+    pub opacity: u8,
+    /// Desfoque em px: 0 a `BG_BLUR_MAX`.
+    pub blur: u8,
+    /// `cover`, `contain`, `center` (tamanho original) ou `tile` (repetida).
+    pub fit: String,
+    /// Troca a imagem a cada N segundos; 0 = não troca. Fora do 0: `BG_CHANGE_MIN` a `BG_CHANGE_MAX`.
+    pub change_secs: u32,
+    /// Ordem aleatória no slideshow.
+    pub shuffle: bool,
+}
+
+impl Default for BackgroundSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            images: Vec::new(),
+            target: "terminal".into(),
+            opacity: 20,
+            blur: 0,
+            fit: "cover".into(),
+            change_secs: 0,
+            shuffle: false,
+        }
+    }
+}
+
+pub const MAX_BACKGROUNDS: usize = 50;
+pub const BG_OPACITY_MIN: u8 = 5;
+pub const BG_BLUR_MAX: u8 = 40;
+pub const BG_CHANGE_MIN: u32 = 5;
+pub const BG_CHANGE_MAX: u32 = 86_400;
+const BG_TARGETS: &[&str] = &["terminal", "window"];
+const BG_FITS: &[&str] = &["cover", "contain", "center", "tile"];
+
+/// Limita cada campo à faixa aceita; arquivo editado à mão ou patch fora da faixa volta ao válido.
+fn sanitize_background(mut b: BackgroundSettings) -> BackgroundSettings {
+    let mut images: Vec<String> = Vec::new();
+    for raw in b.images {
+        let p = raw.trim().to_string();
+        if p.is_empty() || p.len() > 1024 || p.contains('\0') || images.contains(&p) {
+            continue;
+        }
+        images.push(p);
+        if images.len() >= MAX_BACKGROUNDS {
+            break;
+        }
+    }
+    b.images = images;
+    if !BG_TARGETS.contains(&b.target.as_str()) {
+        b.target = "terminal".into();
+    }
+    if !BG_FITS.contains(&b.fit.as_str()) {
+        b.fit = "cover".into();
+    }
+    b.opacity = b.opacity.clamp(BG_OPACITY_MIN, 100);
+    b.blur = b.blur.min(BG_BLUR_MAX);
+    if b.change_secs != 0 {
+        b.change_secs = b.change_secs.clamp(BG_CHANGE_MIN, BG_CHANGE_MAX);
+    }
+    b
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TraySettings {
+    /// Mostra o ícone na bandeja, com o menu (mostrar, nova aba, Claude Code, nova janela, sair).
+    pub enabled: bool,
+    /// Fechar a janela principal só a esconde; as abas continuam rodando. Sair pelo menu da bandeja.
+    pub close_to_tray: bool,
+    /// Minimizar a janela principal a esconde na bandeja (some da barra de tarefas).
+    pub minimize_to_tray: bool,
+    /// Abre o Termo junto com o Windows.
+    pub launch_at_login: bool,
+    /// Aberto junto com o Windows, fica só na bandeja (sem janela) até ser chamado.
+    pub start_hidden: bool,
+}
+
+impl TraySettings {
+    /// Esconder na bandeja só vale com o ícone ligado: sem ele, a janela sumiria sem volta.
+    pub fn hides_on_close(&self) -> bool {
+        self.enabled && self.close_to_tray
+    }
+    pub fn hides_on_minimize(&self) -> bool {
+        self.enabled && self.minimize_to_tray
+    }
+    pub fn starts_hidden(&self) -> bool {
+        self.enabled && self.start_hidden
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -113,10 +216,10 @@ pub fn is_valid_hotkey(h: &str) -> bool {
             && h.chars().all(|c| c.is_ascii_alphanumeric() || "+`-=[];',./\\".contains(c)))
 }
 
-/// `auto`, `pwsh`, `powershell`, `cmd`, `wsl` ou `wsl:<distro>` (letras, números, `.`, `_`, `-`).
+/// `auto`, `pwsh`, `powershell`, `cmd`, `bash` (Git Bash), `wsl` ou `wsl:<distro>` (letras, números, `.`, `_`, `-`).
 pub fn is_valid_shell(s: &str) -> bool {
     match s {
-        "auto" | "pwsh" | "powershell" | "cmd" | "wsl" => true,
+        "auto" | "pwsh" | "powershell" | "cmd" | "bash" | "wsl" => true,
         _ => s.strip_prefix("wsl:").is_some_and(|d| {
             (1..=64).contains(&d.len()) && d.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
         }),
@@ -345,6 +448,8 @@ impl Default for Settings {
             restore_output: true,
             default_shell: "auto".into(),
             history_search: true,
+            tray: TraySettings::default(),
+            background: BackgroundSettings::default(),
         }
     }
 }
@@ -375,6 +480,9 @@ pub struct SettingsPatch {
     pub restore_output: Option<bool>,
     pub default_shell: Option<String>,
     pub history_search: Option<bool>,
+    pub tray: Option<TraySettings>,
+    /// Substitui a configuração inteira do fundo (validada no apply).
+    pub background: Option<BackgroundSettings>,
 }
 
 /// Ids de tema: letras minúsculas, números e hífen, até 40 caracteres.
@@ -459,6 +567,12 @@ impl Settings {
         if let Some(v) = patch.history_search {
             self.history_search = v;
         }
+        if let Some(v) = patch.tray {
+            self.tray = v;
+        }
+        if let Some(v) = patch.background {
+            self.background = sanitize_background(v);
+        }
         if let Some(v) = patch.default_shell {
             if is_valid_shell(v.trim()) {
                 self.default_shell = v.trim().to_string();
@@ -497,6 +611,7 @@ impl SettingsStore {
                 if !is_valid_shell(&s.default_shell) {
                     s.default_shell = "auto".into();
                 }
+                s.background = sanitize_background(std::mem::take(&mut s.background));
                 s
             })
             .unwrap_or_default();
@@ -556,6 +671,42 @@ mod tests {
     }
 
     #[test]
+    fn sanitizes_background() {
+        let mut s = Settings::default();
+        s.apply(SettingsPatch {
+            background: Some(BackgroundSettings {
+                enabled: true,
+                images: vec![" C:/a.png ".into(), "C:/a.png".into(), "".into(), "D:/b.jpg".into()],
+                target: "sidebar".into(),
+                opacity: 0,
+                blur: 200,
+                fit: "stretch".into(),
+                change_secs: 1,
+                shuffle: true,
+            }),
+            ..Default::default()
+        });
+        let b = &s.background;
+        assert_eq!(b.images, vec!["C:/a.png".to_string(), "D:/b.jpg".to_string()]);
+        assert_eq!((b.target.as_str(), b.fit.as_str()), ("terminal", "cover"));
+        assert_eq!((b.opacity, b.blur, b.change_secs), (BG_OPACITY_MIN, BG_BLUR_MAX, BG_CHANGE_MIN));
+        // Arquivo antigo, sem o campo: desligado.
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.background, BackgroundSettings::default());
+    }
+
+    #[test]
+    fn tray_options_need_the_icon() {
+        let mut t = TraySettings { close_to_tray: true, minimize_to_tray: true, start_hidden: true, ..Default::default() };
+        assert!(!t.hides_on_close() && !t.hides_on_minimize() && !t.starts_hidden());
+        t.enabled = true;
+        assert!(t.hides_on_close() && t.hides_on_minimize() && t.starts_hidden());
+        // Arquivo antigo, sem o campo: tudo desligado.
+        let s: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(s.tray, TraySettings::default());
+    }
+
+    #[test]
     fn validates_new_settings() {
         let mut s = Settings::default();
         s.apply(SettingsPatch {
@@ -581,10 +732,10 @@ mod tests {
         });
         assert_eq!(s.global_hotkey, "Ctrl+Alt+T");
         assert_eq!(s.default_shell, "wsl:Ubuntu-22.04");
-        for ok in ["auto", "pwsh", "powershell", "cmd", "wsl"] {
+        for ok in ["auto", "pwsh", "powershell", "cmd", "bash", "wsl"] {
             assert!(is_valid_shell(ok));
         }
-        assert!(!is_valid_shell("bash"));
+        assert!(!is_valid_shell("zsh") && !is_valid_shell("bash:x"));
         assert!(is_valid_hotkey(""));
     }
 

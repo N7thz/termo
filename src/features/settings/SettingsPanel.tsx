@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@ui-sdk/react/tooltip'
 import { ChevronRight, Settings2 } from 'lucide-react'
 import { actionButton, tooltip } from '../../lib/ui'
 import type { Settings } from '../../shared/types'
+import { BackgroundSettingsSection } from '../background/BackgroundSettingsSection'
 import { HighlightSettingsSection } from '../highlights/HighlightSettingsSection'
 import { ShellSettingsSection } from '../shell-profiles/ShellSettingsSection'
 import { findTheme } from '../theme/themes'
@@ -212,6 +213,7 @@ function SettingsFields({
       </Field>
       <ShellSettingsSection settings={settings} onChange={onChange} inputClass={INPUT} />
       <FontSettingsSection settings={settings} onChange={onChange} inputClass={INPUT} />
+      <BackgroundSettingsSection settings={settings} onChange={onChange} switchClass={SWITCH} thumbClass={THUMB} />
       <HighlightSettingsSection
         value={settings.highlights}
         onChange={(highlights) => onChange({ highlights })}

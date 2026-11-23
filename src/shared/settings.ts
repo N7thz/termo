@@ -38,6 +38,17 @@ export const DEFAULT_SETTINGS: Settings = {
   restoreOutput: true,
   defaultShell: 'auto',
   historySearch: true,
+  tray: { enabled: false, closeToTray: false, minimizeToTray: false, launchAtLogin: false, startHidden: false },
+  background: {
+    enabled: false,
+    images: [],
+    target: 'terminal',
+    opacity: 20,
+    blur: 0,
+    fit: 'cover',
+    changeSecs: 0,
+    shuffle: false,
+  },
 }
 
 /** Mesmos limites do Rust (MAX_PROFILES / MAX_PINNED em src-tauri/src/settings.rs). */

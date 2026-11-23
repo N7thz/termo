@@ -153,7 +153,7 @@ const withoutPairsOf = (pairs: SplitPair[], ...keys: number[]) =>
   pairs.filter((p) => !keys.includes(p.left) && !keys.includes(p.right))
 
 /** Mesma regra do Rust (`settings::is_valid_shell`), sem o `auto`: o que a aba guarda é sempre um shell concreto. */
-export const isShellId = (s: string) => /^(pwsh|powershell|cmd|wsl|wsl:[A-Za-z0-9._-]{1,64})$/.test(s)
+export const isShellId = (s: string) => /^(pwsh|powershell|cmd|bash|wsl|wsl:[A-Za-z0-9._-]{1,64})$/.test(s)
 
 export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
   switch (action.type) {

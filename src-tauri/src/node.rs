@@ -20,6 +20,93 @@ pub struct NodeInfo {
     pub project: bool,
     /// Versão pedida pelo projeto em `.nvmrc` ou `.node-version` (como está escrita, sem o `v`).
     pub wanted: Option<String>,
+    /// Scripts do `package.json` do projeto, na ordem do arquivo (como o "NPM Scripts" do VS Code).
+    pub scripts: Vec<NpmScript>,
+    /// Quem roda os scripts: `npm`, `pnpm`, `yarn` ou `bun` (campo `packageManager`, senão o lockfile).
+    pub package_manager: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NpmScript {
+    pub name: String,
+    /// O comando do script, para mostrar ao lado do nome (cortado em `MAX_SCRIPT_COMMAND`).
+    pub command: String,
+}
+
+/// Quantos scripts a lista mostra no máximo.
+const MAX_SCRIPTS: usize = 100;
+/// Tamanho máximo do comando mostrado (o script roda inteiro: quem executa é o gerenciador).
+const MAX_SCRIPT_COMMAND: usize = 300;
+/// `package.json` maior que isso não é lido (lido a cada prompt).
+const MAX_PACKAGE_JSON: u64 = 1024 * 1024;
+
+/// `scripts` do `package.json` na ordem em que aparecem (o `Map` do serde_json ordenaria pelo nome).
+#[derive(Default)]
+struct OrderedScripts(Vec<NpmScript>);
+
+impl<'de> serde::Deserialize<'de> for OrderedScripts {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> serde::de::Visitor<'de> for V {
+            type Value = OrderedScripts;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("um objeto de scripts")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut out = Vec::new();
+                while let Some((name, value)) = map.next_entry::<String, serde_json::Value>()? {
+                    // Só texto vira script; o nome não pode estar vazio nem ter quebra de linha.
+                    let Some(command) = value.as_str() else { continue };
+                    if name.trim().is_empty() || name.contains(['\n', '\r']) || out.len() >= MAX_SCRIPTS {
+                        continue;
+                    }
+                    let command: String = command.chars().take(MAX_SCRIPT_COMMAND).collect();
+                    out.push(NpmScript { name, command });
+                }
+                Ok(OrderedScripts(out))
+            }
+        }
+        d.deserialize_map(V)
+    }
+}
+
+#[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct PackageJson {
+    scripts: Option<OrderedScripts>,
+    package_manager: Option<String>,
+}
+
+fn read_package(root: &Path) -> PackageJson {
+    let path = root.join("package.json");
+    let small = std::fs::metadata(&path).is_ok_and(|m| m.len() <= MAX_PACKAGE_JSON);
+    small
+        .then(|| std::fs::read_to_string(&path).ok())
+        .flatten()
+        .and_then(|text| serde_json::from_str(text.trim_start_matches('\u{feff}')).ok())
+        .unwrap_or_default()
+}
+
+/// Gerenciador do projeto: o campo `packageManager` (`pnpm@9.1.0`) manda; senão, o lockfile; senão, npm.
+fn package_manager(root: &Path, field: Option<&str>) -> &'static str {
+    const KNOWN: &[&str] = &["npm", "pnpm", "yarn", "bun"];
+    if let Some(name) = field.and_then(|f| f.split('@').next()) {
+        if let Some(pm) = KNOWN.iter().find(|k| **k == name.trim()) {
+            return pm;
+        }
+    }
+    const LOCKS: &[(&str, &str)] = &[
+        ("bun.lock", "bun"),
+        ("bun.lockb", "bun"),
+        ("pnpm-lock.yaml", "pnpm"),
+        ("yarn.lock", "yarn"),
+        ("package-lock.json", "npm"),
+    ];
+    LOCKS
+        .iter()
+        .find(|(file, _)| root.join(file).is_file())
+        .map_or("npm", |(_, pm)| pm)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
@@ -49,10 +136,20 @@ pub fn node_info(cache: &VersionCache, node: Option<&str>, cwd: Option<&str>) ->
         .and_then(|n| version_of(cache, Path::new(n)));
     let root = cwd.map(Path::new).and_then(project_root);
     let wanted = root.as_deref().and_then(wanted_version);
+    let (scripts, package_manager) = match root.as_deref() {
+        Some(r) => {
+            let pkg = read_package(r);
+            let pm = package_manager(r, pkg.package_manager.as_deref());
+            (pkg.scripts.unwrap_or_default().0, Some(pm))
+        }
+        None => (Vec::new(), None),
+    };
     NodeInfo {
         version,
         project: root.is_some(),
         wanted,
+        scripts,
+        package_manager,
     }
 }
 
@@ -308,6 +405,32 @@ mod tests {
         assert!(info.project);
         assert_eq!(info.wanted.as_deref(), Some("20.11.0"));
         assert_eq!(info.version, None);
+        assert!(info.scripts.is_empty());
+        assert_eq!(info.package_manager, Some("npm"));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn reads_scripts_in_file_order_and_package_manager() {
+        let root = std::env::temp_dir().join(format!("termo-scripts-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            "\u{feff}{\"scripts\":{\"dev\":\"vite\",\"build\":\"vite build\",\"x\":1,\"\":\"vazio\",\"test:web\":\"bun test\"}}",
+        )
+        .unwrap();
+        std::fs::write(root.join("pnpm-lock.yaml"), "").unwrap();
+        let info = node_info(&VersionCache::default(), None, root.to_str());
+        let names: Vec<&str> = info.scripts.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["dev", "build", "test:web"]);
+        assert_eq!(info.scripts[1].command, "vite build");
+        assert_eq!(info.package_manager, Some("pnpm"));
+        // O campo packageManager vence o lockfile.
+        std::fs::write(root.join("package.json"), r#"{"packageManager":"bun@1.3.10"}"#).unwrap();
+        assert_eq!(node_info(&VersionCache::default(), None, root.to_str()).package_manager, Some("bun"));
+        // JSON quebrado: projeto sem scripts, sem erro.
+        std::fs::write(root.join("package.json"), "{ quebrado").unwrap();
+        assert!(node_info(&VersionCache::default(), None, root.to_str()).scripts.is_empty());
         std::fs::remove_dir_all(&root).ok();
     }
 }

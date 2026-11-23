@@ -66,6 +66,8 @@ export const ipc = {
   imagePreview: (path: string) => invoke<{ dataUrl: string; bytes: number }>('image_preview', { path }),
   /** Abre a imagem no visualizador padrão do sistema. */
   imageOpen: (path: string) => invoke<void>('image_open', { path }),
+  /** Grava a imagem da área de transferência como PNG temporário; `null` se não houver imagem. */
+  clipboardSaveImage: () => invoke<string | null>('clipboard_save_image'),
   /** Arquivos da pasta que combinam com a busca (correspondência difusa). */
   searchFiles: (cwd: string, query: string, limit?: number) =>
     invoke<FileHit[]>('search_files', { cwd, query, limit: limit ?? null }),
@@ -81,6 +83,12 @@ export const ipc = {
   reviewStage: (cwd: string, path: string, staged: boolean) => invoke<void>('review_stage', { cwd, path, staged }),
   /** Descarta as alterações do arquivo: volta ao HEAD; arquivo novo é apagado. */
   reviewDiscard: (cwd: string, path: string) => invoke<void>('review_discard', { cwd, path }),
+  /** Prepara (`true`) ou tira do stage todas as alterações do repositório. */
+  reviewStageAll: (cwd: string, staged: boolean) => invoke<void>('review_stage_all', { cwd, staged }),
+  /** Commita o que está no stage; devolve o hash curto. */
+  reviewCommit: (cwd: string, message: string) => invoke<string>('review_commit', { cwd, message }),
+  /** Mensagem de commit escrita pelo Claude a partir do diff do stage (não commita). */
+  reviewCommitMessage: (cwd: string) => invoke<string>('review_commit_message', { cwd }),
 
   /** Sessões do Claude Code no painel do coord (`/agents`); o formato está em features/sessions/sessions.ts. */
   coordAgents: () => invoke<unknown>('coord_agents'),
@@ -119,6 +127,9 @@ export const ipc = {
   /** Versão nova achada na verificação ao abrir. */
   onUpdateAvailable: (handler: (info: UpdateInfo) => void) =>
     listen<UpdateInfo>('update-available', (e) => handler(e.payload)),
+  /** Item de aba do menu da bandeja ("Nova aba", "Nova aba com Claude Code"); só a janela principal recebe. */
+  onTrayAction: (handler: (action: 'new-tab' | 'new-claude') => void) =>
+    listen<'new-tab' | 'new-claude'>('tray-action', (e) => handler(e.payload)),
 
   readClipboard: () => invoke<ClipboardContent>('clipboard_read'),
   writeClipboard: (text: string) => invoke<void>('clipboard_write', { text }),

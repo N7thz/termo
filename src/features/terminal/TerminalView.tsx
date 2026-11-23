@@ -1,3 +1,4 @@
+import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { FitAddon } from '@xterm/addon-fit'
 import { ImageAddon } from '@xterm/addon-image'
 import { LigaturesAddon } from '@xterm/addon-ligatures'
@@ -11,9 +12,12 @@ import { ipc } from '../../lib/ipc'
 import type { GitInfo, PathSuggestion, SessionKind, Settings } from '../../shared/types'
 import type { AgentState } from '../agent-status/agentState'
 import { AiPanel, type AiPanelState } from '../ai/AiPanel'
+import { AttachmentStrip } from '../attachments/AttachmentStrip'
+import { type Attachment, addAttachments, type PathTarget, pathsText } from '../attachments/attachments'
 import { PathSuggestions, type SuggestionsPosition } from '../autocomplete/PathSuggestions'
 import { extractQuery } from '../autocomplete/query'
 import { ShellIntegration } from '../autocomplete/shellIntegration'
+import { isTranslucent } from '../background/background'
 import { BlockFilter } from '../blocks/BlockFilter'
 import { blockKeyAction } from '../blocks/blockNav'
 import { CommandBlocks, SAVE_WORKFLOW_EVENT } from '../blocks/commandBlocks'
@@ -31,6 +35,7 @@ import type { NodeInfo } from '../node-version/types'
 import { type FinishedCommand, watchCommands } from '../notifications/notifications'
 import { attachScrollback } from '../scrollback/scrollback'
 import { terminalFontSize } from '../settings/interfaceSize'
+import { MODE_TONE, modeOf } from '../shell-profiles/modes'
 import { isAppShortcut } from '../tabs/shortcuts'
 import { ContextBar } from './ContextBar'
 
@@ -169,7 +174,7 @@ export function TerminalView({
   const clearRef = useRef<() => void>(() => {})
   // Linha de contexto (Node, pasta, branch): pasta e node vêm do prompt.
   const [shellCwd, setShellCwd] = useState<string | null>(null)
-  const [shellFamily, setShellFamily] = useState<'pwsh' | 'powershell' | 'cmd' | 'wsl'>('pwsh')
+  const [shellFamily, setShellFamily] = useState<'pwsh' | 'powershell' | 'cmd' | 'bash' | 'wsl'>('pwsh')
   const [node, setNode] = useState<NodeInfo | null>(null)
   const runRef = useRef<(command: string) => void>(() => {})
   const showEditor = settings.inputEditor && kind === 'shell' && idle && !altBuffer && !dead
@@ -177,6 +182,22 @@ export function TerminalView({
   showEditorRef.current = showEditor
   historyReadyRef.current = settings.historySearch && kind === 'shell' && idle && !altBuffer && !dead
   const openSearchRef = useRef<() => void>(() => {})
+  // Arquivos que entraram na linha (imagem colada, arquivos arrastados): faixa de miniaturas.
+  const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [attachError, setAttachError] = useState<string | null>(null)
+  const [dropping, setDropping] = useState(false)
+  const insertPathsRef = useRef<(paths: string[]) => void>(() => {})
+  const pasteImageRef = useRef<() => void>(() => {})
+  const clearAttachments = () => {
+    setAttachments((l) => (l.length ? [] : l))
+    setAttachError(null)
+  }
+  const activeRef = useRef(active)
+  activeRef.current = active
+  const kindRef = useRef(kind)
+  kindRef.current = kind
+  const shellFamilyRef = useRef(shellFamily)
+  shellFamilyRef.current = shellFamily
   // Callbacks mudam a cada render; a ref evita recriar o terminal.
   const cbRef = useRef({
     onTitle,
@@ -222,6 +243,8 @@ export function TerminalView({
       allowProposedApi: true,
       scrollback: 10000,
       theme: withRuler(terminalTheme),
+      // Fundo transparente quando há imagem de fundo atrás do terminal (features/background).
+      allowTransparency: isTranslucent(terminalTheme.background),
       // Régua da direita: marcas de erro/aviso e resultados da busca.
       overviewRuler: { width: 8 },
     })
@@ -336,16 +359,73 @@ export function TerminalView({
       void ipc.writeClipboard(term.getSelection())
       term.clearSelection()
     }
+    // Caminhos (imagem colada ou arquivos arrastados) entram na linha do shell ou na caixa estilo Warp.
+    const insertText = (text: string) => {
+      const editor = editorApi.current
+      if (showEditorRef.current && editor) {
+        const cur = editor.get()
+        editor.set(`${cur.replace(/\s+$/, '')}${cur.trim() ? ' ' : ''}${text.trim()} `)
+        inputRef.current?.focus()
+      } else {
+        term.paste(text)
+        term.focus()
+      }
+    }
+    insertPathsRef.current = (paths) => {
+      if (exited || paths.length === 0) return
+      const target: PathTarget = kindRef.current === 'claude' ? 'claude' : shellFamilyRef.current
+      insertText(pathsText(paths, target))
+      setAttachError(null)
+      setAttachments((list) => addAttachments(list, paths))
+    }
+    /** Imagem copiada (print): vira um PNG temporário. No Claude o Ctrl+V já anexou; aqui só a miniatura. */
+    pasteImageRef.current = () => {
+      if (kindRef.current === 'claude') send('\x16')
+      ipc
+        .clipboardSaveImage()
+        .then((path) => {
+          if (!path) return
+          if (kindRef.current === 'claude') setAttachments((list) => addAttachments(list, [path]))
+          else insertPathsRef.current([path])
+        })
+        .catch((err) => setAttachError(`Não deu para salvar a imagem colada: ${String(err)}`))
+    }
     const pasteClipboard = () => {
       ipc
         .readClipboard()
         .then(({ text, hasImage }) => {
           if (text) term.paste(text)
-          // Imagem copiada: repassa o Ctrl+V para o Claude Code colar a imagem.
-          else if (hasImage) send('\x16')
+          else if (hasImage) pasteImageRef.current()
         })
         .catch((err) => console.warn('[termo] falha ao ler a área de transferência', err))
     }
+    // Ctrl+V de imagem na caixa estilo Warp (um textarea): o navegador não cola nada; vira o caminho.
+    const onEditorPaste = (e: ClipboardEvent) => {
+      if (e.target !== inputRef.current || !e.clipboardData || e.clipboardData.getData('text/plain')) return
+      if ([...e.clipboardData.items].some((i) => i.kind === 'file' && i.type.startsWith('image/'))) {
+        e.preventDefault()
+        pasteImageRef.current()
+      }
+    }
+    wrap.addEventListener('paste', onEditorPaste, true)
+    // Arrastar arquivos para a janela: entram na aba com foco (na tela dividida, a metade ativa).
+    let unlistenDrop: (() => void) | undefined
+    let dropDisposed = false
+    void getCurrentWebview()
+      .onDragDropEvent(({ payload }) => {
+        if (!activeRef.current || exited) return
+        if (payload.type === 'enter' || payload.type === 'over') setDropping(true)
+        else if (payload.type === 'leave') setDropping(false)
+        else if (payload.type === 'drop') {
+          setDropping(false)
+          insertPathsRef.current(payload.paths)
+        }
+      })
+      .then((fn) => {
+        if (dropDisposed) fn()
+        else unlistenDrop = fn
+      })
+      .catch(() => undefined)
 
     cbRef.current.onActions?.({
       hasSelection: () => term.hasSelection(),
@@ -561,6 +641,7 @@ export function TerminalView({
       if (data.includes('\r')) {
         shell.commandSubmitted()
         hide()
+        clearAttachments()
       }
       send(data)
     })
@@ -609,7 +690,7 @@ export function TerminalView({
         setPtyId(res.id)
         for (const w of res.warnings) term.write(warn(w))
         if (res.kind !== kind) cbRef.current.onKind(res.kind)
-        setShellFamily(res.shell.startsWith('wsl') ? 'wsl' : (res.shell as 'pwsh' | 'powershell' | 'cmd'))
+        setShellFamily(res.shell.startsWith('wsl') ? 'wsl' : (res.shell as 'pwsh' | 'powershell' | 'cmd' | 'bash'))
         cbRef.current.onShell?.(res.shell)
         term.focus()
       } catch (err) {
@@ -624,6 +705,7 @@ export function TerminalView({
       disposed = true
       clearTimeout(refreshTimer)
       ro.disconnect()
+      wrap.removeEventListener('paste', onEditorPaste, true)
       if (sessionId != null) void ipc.kill(sessionId)
       highlights.dispose()
       highlightsRef.current = null
@@ -633,6 +715,8 @@ export function TerminalView({
       timer.dispose()
       scroll?.dispose()
       shell.dispose()
+      dropDisposed = true
+      unlistenDrop?.()
       term.dispose()
     }
   }, [])
@@ -651,7 +735,10 @@ export function TerminalView({
   }, [settings.fontFamily, settings.fontSize, settings.interfaceSize])
 
   useEffect(() => {
-    if (termRef.current) termRef.current.options.theme = withRuler(terminalTheme)
+    const term = termRef.current
+    if (!term) return
+    term.options.allowTransparency = isTranslucent(terminalTheme.background)
+    term.options.theme = withRuler(terminalTheme)
   }, [terminalTheme])
 
   // Foco vindo de dentro do xterm (clique na metade da tela dividida): avisa quem controla a aba ativa.
@@ -685,6 +772,12 @@ export function TerminalView({
       data-terminal-active={active || undefined}
       ref={wrapRef}
     >
+      {/* Faixa fina no tom do modo (PowerShell, cmd, WSL, Claude): distingue as abas de relance. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute top-1 right-2 left-5 h-0.5 rounded-full opacity-60 [transition:background-color_200ms_ease-out]"
+        style={{ background: MODE_TONE[modeOf(kind, shellProfile)] }}
+      />
       <div className="min-h-0 w-full flex-1" ref={hostRef} />
       <PathSuggestions
         items={suggestions}
@@ -692,6 +785,22 @@ export function TerminalView({
         onPick={(item) => pickRef.current(item)}
         onDismiss={() => dismissRef.current()}
       />
+      {!dead && (
+        <AttachmentStrip
+          items={attachments}
+          error={attachError}
+          onDismiss={(path) => setAttachments((l) => l.filter((a) => a.path !== path))}
+          onDismissError={() => setAttachError(null)}
+        />
+      )}
+      {dropping && active && !dead && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-2 grid place-items-center rounded-[12px] border-2 border-dashed border-accent bg-[color-mix(in_srgb,var(--accent)_8%,transparent)] text-[13px] text-text"
+        >
+          <span className="rounded-md bg-surface px-2.5 py-1 shadow-tip">Solte para inserir o caminho</span>
+        </div>
+      )}
       {kind === 'claude' && !dead && (
         <ClaudeBar
           ptyId={ptyId}
@@ -736,7 +845,10 @@ export function TerminalView({
           inputRef={inputRef}
           history={historyRef}
           cwd={() => cwdRef.current}
-          onSubmit={(text) => submitRef.current(text)}
+          onSubmit={(text) => {
+            clearAttachments()
+            submitRef.current(text)
+          }}
           onEscape={() => termRef.current?.focus()}
           onClear={() => clearRef.current()}
           onSearchHistory={settings.historySearch ? () => openHistoryRef.current() : undefined}

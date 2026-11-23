@@ -227,11 +227,16 @@ pub fn new_file_diff(path: &str, text: &str) -> String {
     out
 }
 
-fn truncate(mut diff: String) -> (String, bool) {
-    if diff.len() <= MAX_DIFF {
+fn truncate(diff: String) -> (String, bool) {
+    truncate_to(diff, MAX_DIFF)
+}
+
+/// Corta o diff em `max` bytes, no fim de uma linha.
+fn truncate_to(mut diff: String, max: usize) -> (String, bool) {
+    if diff.len() <= max {
         return (diff, false);
     }
-    let mut cut = MAX_DIFF;
+    let mut cut = max;
     while !diff.is_char_boundary(cut) {
         cut -= 1;
     }
@@ -269,6 +274,73 @@ pub fn stage(cwd: &Path, path: &str, staged: bool) -> Result<(), String> {
         ok(&root, &["rm", "--cached", "-q", "--", path])?;
     }
     Ok(())
+}
+
+/// Prepara (`git add -A`) ou tira do stage todas as alterações do repositório.
+pub fn stage_all(cwd: &Path, staged: bool) -> Result<(), String> {
+    let root = root_of(cwd).ok_or("a pasta não é um repositório git")?;
+    if staged {
+        ok(&root, &["add", "-A"])?;
+    } else if has_head(&root) {
+        ok(&root, &["restore", "--staged", "--", "."])?;
+    } else {
+        ok(&root, &["rm", "-r", "--cached", "-q", "--", "."])?;
+    }
+    Ok(())
+}
+
+/// Tamanho máximo da mensagem de commit aceita do painel.
+pub const MAX_COMMIT_MESSAGE: usize = 16 * 1024;
+
+/// Mensagem de commit limpa: sem espaços nas pontas e sem linhas de comentário (`#`), como no editor do git.
+pub fn clean_commit_message(message: &str) -> Result<String, String> {
+    if message.len() > MAX_COMMIT_MESSAGE {
+        return Err("mensagem de commit grande demais".into());
+    }
+    let text: Vec<&str> = message.lines().filter(|l| !l.starts_with('#')).map(str::trim_end).collect();
+    let text = text.join("\n").trim().to_string();
+    if text.is_empty() {
+        return Err("escreva a mensagem do commit".into());
+    }
+    Ok(text)
+}
+
+/// Commita o que está no stage, com a mensagem dada (passada como argumento, nunca por um shell). Os hooks do
+/// repositório rodam como num `git commit` digitado. Devolve o hash curto do commit novo.
+pub fn commit(cwd: &Path, message: &str) -> Result<String, String> {
+    let root = root_of(cwd).ok_or("a pasta não é um repositório git")?;
+    let message = clean_commit_message(message)?;
+    let staged = ok(&root, &["diff", "--cached", "--name-only", "--no-renames"])?;
+    if staged.trim().is_empty() {
+        return Err("nada no stage: prepare os arquivos antes de commitar".into());
+    }
+    ok(&root, &["commit", "--cleanup=strip", "-m", &message])?;
+    Ok(ok(&root, &["rev-parse", "--short", "HEAD"])?.trim().to_string())
+}
+
+/// Tamanho máximo do diff mandado ao Claude para escrever a mensagem.
+const MAX_MESSAGE_DIFF: usize = 48 * 1024;
+
+/// O que o Claude lê para escrever a mensagem: o diff do stage (ou, sem nada no stage, o de todas as
+/// alterações), o `--stat` e os últimos assuntos de commit, para seguir o estilo do repositório.
+pub fn commit_context(cwd: &Path) -> Result<String, String> {
+    let root = root_of(cwd).ok_or("a pasta não é um repositório git")?;
+    let base = ["--no-renames", "--no-color", "--no-ext-diff", "--no-textconv"];
+    let staged = !ok(&root, &["diff", "--cached", "--name-only"])?.trim().is_empty();
+    let range: Vec<&str> = if staged {
+        vec!["diff", "--cached"]
+    } else if has_head(&root) {
+        vec!["diff", "HEAD"]
+    } else {
+        return Err("nada para descrever: prepare os arquivos primeiro".into());
+    };
+    let stat = ok(&root, &[&range[..], &["--stat"][..], &base[..]].concat())?;
+    let (diff, _) = truncate_to(ok(&root, &[&range[..], &base[..]].concat())?, MAX_MESSAGE_DIFF);
+    if stat.trim().is_empty() {
+        return Err("nada para descrever: não há alterações".into());
+    }
+    let log = if has_head(&root) { ok(&root, &["log", "-8", "--format=%s"]).unwrap_or_default() } else { String::new() };
+    Ok(format!("Últimos commits:\n{log}\nArquivos:\n{stat}\nDiff:\n{diff}"))
 }
 
 /// Descarta as alterações do arquivo: volta ao HEAD; arquivo novo é apagado.
@@ -368,6 +440,50 @@ mod tests {
         discard(&dir, "novo.txt").unwrap();
         assert!(status(&dir).unwrap().unwrap().files.is_empty());
         assert_eq!(std::fs::read_to_string(dir.join("a.txt")).unwrap().replace("\r\n", "\n"), "1\n2\n3\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn commit_message_is_cleaned() {
+        assert_eq!(clean_commit_message("  feat: x  \n\n# comentário\ncorpo  \n").unwrap(), "feat: x\n\ncorpo");
+        assert!(clean_commit_message(" \n# só comentário\n").is_err());
+        assert!(clean_commit_message(&"x".repeat(MAX_COMMIT_MESSAGE + 1)).is_err());
+    }
+
+    #[test]
+    fn stage_all_and_commit_flow() {
+        let dir = std::env::temp_dir().join(format!("termo-commit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-q", "-b", "main"]);
+        git(&dir, &["config", "user.email", "t@t"]);
+        git(&dir, &["config", "user.name", "t"]);
+        std::fs::write(dir.join("a.txt"), "1\n").unwrap();
+        std::fs::write(dir.join("b.txt"), "2\n").unwrap();
+
+        // Sem HEAD: stage de tudo e tirar de tudo.
+        stage_all(&dir, true).unwrap();
+        assert!(status(&dir).unwrap().unwrap().files.iter().all(|f| f.staged == Staged::Full));
+        stage_all(&dir, false).unwrap();
+        assert!(status(&dir).unwrap().unwrap().files.iter().all(|f| f.staged == Staged::None));
+        assert!(commit(&dir, "feat: nada").is_err(), "nada no stage");
+
+        stage_all(&dir, true).unwrap();
+        assert!(commit_context(&dir).unwrap().contains("a.txt"));
+        assert!(commit(&dir, "   ").is_err());
+        // Mensagem com aspas e `;` vai literal: não passa por shell.
+        let hash = commit(&dir, "feat: primeiro \"commit\"; sem shell").unwrap();
+        assert!(!hash.is_empty());
+        assert!(status(&dir).unwrap().unwrap().files.is_empty());
+        assert_eq!(ok(&dir, &["log", "-1", "--format=%s"]).unwrap().trim(), "feat: primeiro \"commit\"; sem shell");
+
+        // Com HEAD: o contexto mostra os últimos assuntos.
+        std::fs::write(dir.join("a.txt"), "1\nmais\n").unwrap();
+        let ctx = commit_context(&dir).unwrap();
+        assert!(ctx.contains("feat: primeiro") && ctx.contains("+mais"));
+        stage_all(&dir, true).unwrap();
+        stage_all(&dir, false).unwrap();
+        assert_eq!(status(&dir).unwrap().unwrap().files[0].staged, Staged::None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

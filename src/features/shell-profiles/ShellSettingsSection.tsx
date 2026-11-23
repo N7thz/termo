@@ -38,7 +38,7 @@ export function ShellSettingsSection({ settings, onChange, inputClass }: Props) 
       </select>
       <FieldDescription className="m-0 text-[11px] text-muted">
         No cmd não há blocos por comando e a pasta não troca pelo seletor. No WSL os blocos funcionam, mas a linha de
-        contexto mostra só a pasta. A aba do Claude Code sempre usa o PowerShell.
+        contexto mostra só a pasta. No Git Bash há blocos, pasta e branch. A aba do Claude Code sempre usa o PowerShell.
       </FieldDescription>
     </Field>
   )

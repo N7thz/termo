@@ -1,8 +1,9 @@
 //! IA do terminal pelo Claude Code instalado (`claude -p`), sem chave de API: usa a conta do usuário.
 //!
-//! Dois pedidos:
+//! Três pedidos:
 //! - **explicar erro**: comando, código de saída e o fim da saída → explicação curta e a correção;
-//! - **comando**: pedido em linguagem natural → um comando do PowerShell (não é executado, vai para a caixa).
+//! - **comando**: pedido em linguagem natural → um comando do PowerShell (não é executado, vai para a caixa);
+//! - **mensagem de commit**: diff do stage e últimos commits → mensagem no estilo do repositório (não commita).
 //!
 //! O prompt vai pela entrada padrão (o `claude` pode ser um `.cmd`, e argumentos com quebra de linha não
 //! passam bem pelo `cmd.exe`). Roda sem ferramentas (`--tools ""`), sem salvar sessão e sem as
@@ -16,11 +17,26 @@ use std::time::{Duration, Instant};
 const TIMEOUT: Duration = Duration::from_secs(120);
 /// Saída máxima do comando que falhou mandada ao modelo (o fim é o que importa num erro).
 const MAX_OUTPUT: usize = 8000;
+/// Contexto máximo (diff + stat + log) mandado para escrever a mensagem de commit.
+const MAX_COMMIT_CONTEXT: usize = 64 * 1024;
+
+/// Começo de `s` com até `max` bytes, sem cortar um caractere.
+fn head(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let mut i = max;
+    while !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    &s[..i]
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Explain,
     Command,
+    CommitMessage,
 }
 
 impl Mode {
@@ -28,6 +44,7 @@ impl Mode {
         match s {
             "explain" => Ok(Mode::Explain),
             "command" => Ok(Mode::Command),
+            "commit" => Ok(Mode::CommitMessage),
             _ => Err(format!("pedido de IA desconhecido: {s}")),
         }
     }
@@ -60,6 +77,13 @@ linha, sem explicação, sem crases e sem bloco de código. Se for preciso mais 
 Não use ferramentas.\n\nPasta atual: {cwd}\nPedido: {}",
             input.trim()
         ),
+        Mode::CommitMessage => format!(
+            "Escreva a mensagem de commit para as alterações abaixo. Siga o estilo dos últimos commits do \
+repositório (idioma, prefixos como `feat:`/`fix:`, tamanho). Primeira linha com até 72 caracteres; se ajudar, uma \
+linha em branco e um corpo curto em tópicos. Responda só com a mensagem, sem crases, sem bloco de código e sem \
+explicação. Não use ferramentas.\n\n{}",
+            head(input, MAX_COMMIT_CONTEXT)
+        ),
     }
 }
 
@@ -68,6 +92,10 @@ pub fn clean(mode: Mode, out: &str) -> String {
     let text = out.trim();
     if mode == Mode::Explain {
         return text.to_string();
+    }
+    if mode == Mode::CommitMessage {
+        let lines: Vec<&str> = text.lines().filter(|l| !l.trim_start().starts_with("```")).collect();
+        return lines.join("\n").trim().trim_matches('`').trim().to_string();
     }
     let mut lines: Vec<&str> = text.lines().filter(|l| !l.trim_start().starts_with("```")).collect();
     lines.retain(|l| !l.trim().is_empty());
@@ -141,6 +169,7 @@ mod tests {
     fn modes() {
         assert_eq!(Mode::parse("explain"), Ok(Mode::Explain));
         assert_eq!(Mode::parse("command"), Ok(Mode::Command));
+        assert_eq!(Mode::parse("commit"), Ok(Mode::CommitMessage));
         assert!(Mode::parse("rm").is_err());
     }
 
@@ -151,6 +180,8 @@ mod tests {
         assert_eq!(clean(Mode::Command, "PS> git status"), "git status");
         assert_eq!(clean(Mode::Command, "cd x\nls"), "cd x; ls");
         assert_eq!(clean(Mode::Explain, "  texto\n"), "texto");
+        assert_eq!(clean(Mode::CommitMessage, "```\nfeat: x\n\n- a\n```"), "feat: x\n\n- a");
+        assert!(build_prompt(Mode::CommitMessage, &"é".repeat(MAX_COMMIT_CONTEXT), None, "PowerShell").len() < MAX_COMMIT_CONTEXT + 1000);
     }
 
     #[test]

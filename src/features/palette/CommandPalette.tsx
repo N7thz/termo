@@ -142,7 +142,7 @@ export function CommandPalette({
                     className={ITEM}
                   >
                     <span className={ICON}>
-                      <TabKindIcon kind={tab.kind} />
+                      <TabKindIcon kind={tab.kind} shell={tab.shell} />
                     </span>
                     <span className="truncate">{tab.title}</span>
                     {tabCwd && <span className="truncate text-[12px] text-muted">{shortPath(tabCwd)}</span>}

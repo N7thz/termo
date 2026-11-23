@@ -39,6 +39,10 @@ export interface DiffLine {
 
 export interface Hunk {
   header: string
+  /** Onde o trecho começa no arquivo novo (no antigo, se o arquivo foi apagado). */
+  start: number
+  /** O que o git põe depois do `@@` (a função ou a linha em volta); vazio quando não há. */
+  context: string
   lines: DiffLine[]
 }
 
@@ -52,10 +56,10 @@ export function parseDiff(diff: string): Hunk[] {
     const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw
     const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/.exec(line)
     if (m) {
-      cur = { header: line, lines: [] }
-      hunks.push(cur)
       oldNo = Number(m[1])
       newNo = Number(m[2])
+      cur = { header: line, start: newNo || oldNo || 1, context: m[3].trim(), lines: [] }
+      hunks.push(cur)
       continue
     }
     if (!cur) continue
@@ -65,6 +69,94 @@ export function parseDiff(diff: string): Hunk[] {
     // "\ No newline at end of file" e linhas vazias do fim ficam de fora.
   }
   return hunks
+}
+
+/** Pedaço de uma linha alterada; `changed` marca o que mudou em relação à linha par. */
+export interface Segment {
+  text: string
+  changed: boolean
+}
+
+/** Palavras, espaços e cada símbolo separado: a unidade do realce dentro da linha. */
+function tokens(s: string): string[] {
+  return s.match(/[\p{L}\p{N}_]+|\s+|[^\p{L}\p{N}_\s]/gu) ?? []
+}
+
+/** Linhas com mais pedaços que isso não ganham realce (o LCS é quadrático). */
+const MAX_TOKENS = 400
+
+function merge(parts: Segment[]): Segment[] {
+  const out: Segment[] = []
+  for (const p of parts) {
+    const last = out[out.length - 1]
+    if (last && last.changed === p.changed) last.text += p.text
+    else out.push({ ...p })
+  }
+  return out
+}
+
+/**
+ * Realce dentro da linha: compara a linha removida com a adicionada por palavras (LCS) e marca o que mudou
+ * de cada lado. `null` quando as linhas são diferentes demais (menos da metade em comum) ou longas demais:
+ * aí o realce só atrapalharia.
+ */
+export function wordDiff(before: string, after: string): { old: Segment[]; new: Segment[] } | null {
+  const a = tokens(before)
+  const b = tokens(after)
+  if (!a.length || !b.length || a.length > MAX_TOKENS || b.length > MAX_TOKENS) return null
+  const n = a.length
+  const m = b.length
+  // lcs[i][j]: tamanho do LCS de a[i..] e b[j..].
+  const lcs: Uint16Array[] = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1))
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1])
+    }
+  }
+  const old: Segment[] = []
+  const neu: Segment[] = []
+  let same = 0
+  let i = 0
+  let j = 0
+  while (i < n && j < m) {
+    if (a[i] === b[j]) {
+      if (a[i].trim()) same += a[i].length
+      old.push({ text: a[i++], changed: false })
+      neu.push({ text: b[j++], changed: false })
+    } else if (lcs[i + 1][j] >= lcs[i][j + 1]) old.push({ text: a[i++], changed: true })
+    else neu.push({ text: b[j++], changed: true })
+  }
+  while (i < n) old.push({ text: a[i++], changed: true })
+  while (j < m) neu.push({ text: b[j++], changed: true })
+  const size = Math.max(before.trim().length, after.trim().length)
+  if (size === 0 || same / size < 0.5) return null
+  return { old: merge(old), new: merge(neu) }
+}
+
+/**
+ * Realce de cada linha do trecho: em cada bloco de removidas seguido de adicionadas, a i-ésima removida é
+ * comparada com a i-ésima adicionada. As linhas sem par (ou sem realce) ficam `undefined`.
+ */
+export function lineSegments(lines: readonly DiffLine[]): (Segment[] | undefined)[] {
+  const out: (Segment[] | undefined)[] = new Array(lines.length).fill(undefined)
+  let k = 0
+  while (k < lines.length) {
+    if (lines[k].type !== 'del') {
+      k++
+      continue
+    }
+    const dels: number[] = []
+    while (k < lines.length && lines[k].type === 'del') dels.push(k++)
+    const adds: number[] = []
+    while (k < lines.length && lines[k].type === 'add') adds.push(k++)
+    for (let p = 0; p < Math.min(dels.length, adds.length); p++) {
+      const d = wordDiff(lines[dels[p]].text, lines[adds[p]].text)
+      if (!d) continue
+      out[dels[p]] = d.old
+      out[adds[p]] = d.new
+    }
+  }
+  return out
 }
 
 /** Um comentário feito numa linha do diff. */

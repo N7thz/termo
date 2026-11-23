@@ -4,6 +4,7 @@ import type { GitInfo } from '../../shared/types'
 import { FolderPicker } from '../folder-picker/FolderPicker'
 import { BranchPicker } from '../git-branch/BranchPicker'
 import { NodePicker } from '../node-version/NodePicker'
+import { ScriptsMenu } from '../node-version/ScriptsMenu'
 import type { NodeInfo } from '../node-version/types'
 
 interface Props {
@@ -16,7 +17,7 @@ interface Props {
   /** Prompt ocioso: dá para mandar um comando ao shell (trocar o Node ou a pasta). */
   idle: boolean
   /** Família do shell da aba: no cmd e no WSL a pasta é só um texto (o seletor roda `Set-Location`) e no WSL o git e o node do Windows não valem. */
-  family?: 'pwsh' | 'powershell' | 'cmd' | 'wsl'
+  family?: 'pwsh' | 'powershell' | 'cmd' | 'bash' | 'wsl'
   onRun: (command: string) => void
 }
 
@@ -42,6 +43,16 @@ export function ContextBar({ cwd, git, node, theme, fontFamily, fontSize, idle, 
     >
       {node?.project && powershell && (
         <NodePicker info={node} color={green} className={`${chip} text-text`} canRun={idle} onRun={onRun} />
+      )}
+      {node?.project && !wsl && (
+        <ScriptsMenu
+          info={node}
+          color={green}
+          className={`${chip} text-text`}
+          family={family}
+          canRun={idle}
+          onRun={onRun}
+        />
       )}
       {powershell ? (
         <FolderPicker cwd={cwd} className={`${chip} max-w-[50%] text-text`} canRun={idle} onRun={onRun} />

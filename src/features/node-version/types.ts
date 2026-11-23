@@ -6,6 +6,18 @@ export interface NodeInfo {
   project: boolean
   /** Versão pedida em `.nvmrc`/`.node-version`, sem o `v`. */
   wanted: string | null
+  /** Scripts do package.json, na ordem do arquivo (vazio fora de projeto Node). */
+  scripts: NpmScript[]
+  /** Quem roda os scripts (campo `packageManager`, senão o lockfile); `null` fora de projeto. */
+  packageManager: PackageManager | null
+}
+
+export type PackageManager = 'npm' | 'pnpm' | 'yarn' | 'bun'
+
+export interface NpmScript {
+  name: string
+  /** O comando do script (cortado em 300 caracteres), para mostrar ao lado do nome. */
+  command: string
 }
 
 export type NodeManager = 'fnm' | 'nvm' | 'volta'

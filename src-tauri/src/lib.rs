@@ -17,6 +17,7 @@ mod review;
 mod session;
 mod settings;
 mod shell;
+mod tray;
 mod shells;
 mod updater;
 mod usage;
@@ -235,6 +236,18 @@ fn image_open(app: AppHandle, path: String) -> Result<(), String> {
     app.opener().open_path(path, None::<&str>).map_err(|e| e.to_string())
 }
 
+/// Imagem da área de transferência (print, imagem copiada) gravada como PNG numa pasta temporária,
+/// para entrar como caminho na linha do shell. `None` se não houver imagem.
+#[tauri::command]
+async fn clipboard_save_image(app: AppHandle) -> Result<Option<String>, String> {
+    let Ok(img) = app.clipboard().read_image() else { return Ok(None) };
+    let (rgba, w, h) = (img.rgba().to_vec(), img.width(), img.height());
+    tauri::async_runtime::spawn_blocking(move || images::save_png(&images::paste_dir(), &rgba, w, h))
+        .await
+        .map_err(|e| e.to_string())?
+        .map(|p| Some(p.to_string_lossy().into_owned()))
+}
+
 /// Arquivos da pasta que combinam com a busca (correspondência difusa), para a busca geral.
 #[tauri::command]
 async fn search_files(
@@ -289,7 +302,18 @@ fn settings_set(app: AppHandle, settings: State<SettingsStore>, patch: SettingsP
             hotkey::apply(&app, &previous, next)?;
         }
     }
-    settings.update(patch)
+    // Iniciar com o Windows também vem antes: sem permissão no registro, nada é salvo.
+    let tray_patch = patch.tray.clone();
+    if let Some(t) = &tray_patch {
+        if t.launch_at_login != settings.get().tray.launch_at_login {
+            tray::apply_autostart(&app, t.launch_at_login)?;
+        }
+    }
+    let saved = settings.update(patch)?;
+    if tray_patch.is_some() {
+        tray::apply(&app, &saved.tray);
+    }
+    Ok(saved)
 }
 
 /// Aviso do Windows (Claude esperando, comando longo). Respeita a configuração.
@@ -450,6 +474,33 @@ async fn review_discard(cwd: String, path: String) -> Result<(), String> {
     review::discard(std::path::Path::new(&cwd), &path)
 }
 
+/// Prepara (`staged: true`) ou tira do stage todas as alterações do repositório.
+#[tauri::command]
+async fn review_stage_all(cwd: String, staged: bool) -> Result<(), String> {
+    review::stage_all(std::path::Path::new(&cwd), staged)
+}
+
+/// Commita o que está no stage com a mensagem dada; devolve o hash curto.
+#[tauri::command]
+async fn review_commit(cwd: String, message: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || review::commit(std::path::Path::new(&cwd), &message))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Mensagem de commit escrita pelo Claude Code (`claude -p`, sem ferramentas) a partir do diff do stage.
+#[tauri::command]
+async fn review_commit_message(cwd: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let context = review::commit_context(std::path::Path::new(&cwd))?;
+        let claude = shell::find_claude()?;
+        let shell_name = shell::shell_name(&shell::detect_shell());
+        ai::ask(&claude, ai::Mode::CommitMessage, &context, Some(&cwd), &shell_name)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// IA pelo Claude Code (`claude -p`): `mode` é `explain` (explicar um erro) ou `command` (linguagem natural
 /// vira um comando do PowerShell, que volta para a caixa sem ser executado).
 #[tauri::command]
@@ -500,6 +551,7 @@ async fn coord_state() -> Result<serde_json::Value, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let cli = shell::parse_cli(std::env::args());
+    let background = std::env::args().any(|a| a == tray::BACKGROUND_ARG);
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -510,6 +562,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(hotkey::plugin())
+        .plugin(tray::autostart_plugin())
         .setup(move |app| {
             let dir = app.path().app_config_dir()?;
             let store = SettingsStore::load(&dir);
@@ -521,6 +574,19 @@ pub fn run() {
             }
             if initial.auto_update {
                 updater::check_on_startup(app.handle().clone());
+            }
+            if let Err(e) = tray::build(app.handle(), &initial.tray) {
+                eprintln!("bandeja: {e}");
+            }
+            // O registro pode ter sido mudado por fora (Gerenciador de Tarefas): vale o que está salvo.
+            if let Err(e) = tray::apply_autostart(app.handle(), initial.tray.launch_at_login) {
+                eprintln!("{e}");
+            }
+            // Aberto pelo Windows no login, com "ficar só na bandeja": a janela principal nem aparece.
+            if background && initial.tray.starts_hidden() {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.hide();
+                }
             }
             app.manage(session::SessionStore::new(&dir));
             app.manage(session::ScrollbackStore::new(&dir));
@@ -544,6 +610,15 @@ pub fn run() {
             }
         })
         .on_window_event(|window, event| {
+            // Modo bandeja: fechar/minimizar a janela principal só a esconde.
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if tray::on_close_requested(window) {
+                    api.prevent_close();
+                }
+            }
+            if let WindowEvent::Resized(_) = event {
+                tray::on_resized(window);
+            }
             if let WindowEvent::Destroyed = event {
                 if let Some(ptys) = window.try_state::<Ptys>() {
                     ptys.kill_owner(window.label());
@@ -570,6 +645,7 @@ pub fn run() {
             image_existing,
             image_preview,
             image_open,
+            clipboard_save_image,
             search_files,
             history_read,
             settings_get,
@@ -599,6 +675,9 @@ pub fn run() {
             review_diff,
             review_stage,
             review_discard,
+            review_stage_all,
+            review_commit,
+            review_commit_message,
             new_window,
             notify,
             update_check,

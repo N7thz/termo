@@ -37,10 +37,45 @@ export interface Settings {
   autoUpdate: boolean
   /** Reabre as abas com o fim da saída que elas tinham (só com `restoreSession`). */
   restoreOutput: boolean
-  /** Shell das abas novas: `auto`, `pwsh`, `powershell`, `cmd`, `wsl` ou `wsl:<distro>`. */
+  /** Shell das abas novas: `auto`, `pwsh`, `powershell`, `cmd`, `bash` (Git Bash), `wsl` ou `wsl:<distro>`. */
   defaultShell: string
   /** Ctrl+R abre a busca no histórico do Termo; desligado, vai para o shell (busca do PSReadLine). */
   historySearch: boolean
+  /** Ícone na bandeja do Windows e o que fechar/minimizar fazem. */
+  tray: TraySettings
+  /** Imagem de fundo (uma ou várias, em slideshow); limites em src-tauri/src/settings.rs. */
+  background: BackgroundSettings
+}
+
+export interface BackgroundSettings {
+  enabled: boolean
+  /** Caminhos absolutos das imagens (até 50). */
+  images: string[]
+  /** `terminal`: atrás do texto do terminal. `window`: sobre a janela inteira, sem pegar cliques. */
+  target: 'terminal' | 'window'
+  /** Opacidade em %, de 5 a 100. */
+  opacity: number
+  /** Desfoque em px, de 0 a 40. */
+  blur: number
+  /** `cover` preenche, `contain` mostra inteira, `center` no tamanho original, `tile` repetida. */
+  fit: 'cover' | 'contain' | 'center' | 'tile'
+  /** Troca a imagem a cada N segundos (5 a 86400); 0 = não troca. */
+  changeSecs: number
+  /** Ordem aleatória no slideshow. */
+  shuffle: boolean
+}
+
+export interface TraySettings {
+  /** Ícone na bandeja, com o menu (mostrar, nova aba, Claude Code, nova janela, sair). */
+  enabled: boolean
+  /** Fechar a janela principal só a esconde; as abas continuam rodando. */
+  closeToTray: boolean
+  /** Minimizar a janela principal a esconde na bandeja. */
+  minimizeToTray: boolean
+  /** Abre o Termo junto com o Windows. */
+  launchAtLogin: boolean
+  /** Aberto junto com o Windows, fica só na bandeja até ser chamado. */
+  startHidden: boolean
 }
 
 export interface NotificationSettings {
@@ -138,7 +173,7 @@ export interface CreateSessionOptions {
   cols: number
   rows: number
   cwd?: string
-  /** Perfil de shell da aba (`pwsh`, `powershell`, `cmd`, `wsl`, `wsl:<distro>`). Sem ele, vale `defaultShell`. */
+  /** Perfil de shell da aba (`pwsh`, `powershell`, `cmd`, `bash`, `wsl`, `wsl:<distro>`). Sem ele, vale `defaultShell`. */
   shell?: string
 }
 
@@ -157,7 +192,7 @@ export interface ShellInfo {
   /** Valor de `defaultShell` que abre este shell. */
   id: string
   label: string
-  family: 'pwsh' | 'powershell' | 'cmd' | 'wsl'
+  family: 'pwsh' | 'powershell' | 'cmd' | 'bash' | 'wsl'
 }
 
 export type PtyEvent =

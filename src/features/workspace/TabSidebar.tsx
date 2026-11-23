@@ -1,6 +1,6 @@
 import { Button } from '@ui-sdk/react/button'
 import { Tooltip, TooltipContent, TooltipShortcut, TooltipTrigger } from '@ui-sdk/react/tooltip'
-import { ChevronRight, Columns2, Folder, PanelLeftClose, PanelLeftOpen, Plus, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Columns2, Folder, PanelLeftClose, PanelLeftOpen, Plus, X } from 'lucide-react'
 import { type ReactNode, useRef, useState } from 'react'
 import { tooltip, tooltipKbd } from '../../lib/ui'
 import { MAX_PROFILES } from '../../shared/settings'
@@ -10,6 +10,7 @@ import { TabMenu } from '../context-menu/TabMenu'
 import type { TabMenuAction } from '../context-menu/types'
 import { ProfileEditor } from '../profiles/ProfileEditor'
 import { isPinned, profileColorCss } from '../profiles/profiles'
+import { NewShellMenu } from '../shell-profiles/NewShellMenu'
 import { TabKindIcon } from '../tabs/TabKindIcon'
 import { MAX_GROUP_NAME, type Tab, type TabGroup } from '../tabs/tabs'
 import { folderName, shortPath } from './format'
@@ -27,8 +28,10 @@ interface Props {
   colors: DiffColors
   onActivate: (key: number) => void
   onClose: (key: number) => void
-  /** Aba nova no perfil atual; com `cwd`, abre naquela pasta. */
-  onNew: (kind: SessionKind, cwd?: string) => void
+  /** Aba nova no perfil atual; com `cwd`, abre naquela pasta; com `shellId`, naquele shell. */
+  onNew: (kind: SessionKind, cwd?: string, shellId?: string) => void
+  /** `defaultShell` das configurações: ícone do botão Shell e item marcado no menu de modos. */
+  defaultShell: string
   onTabAction: (tab: Tab, action: TabMenuAction) => void
   onSwitchProfile: (id: string) => void
   onAddProfile: () => void
@@ -59,7 +62,8 @@ interface Props {
 }
 
 /** Largura da lateral aberta e minimizada (o App usa a mesma para animar a coluna). */
-export const SIDEBAR_WIDTH = { open: 'w-56', collapsed: 'w-14' } as const
+// Aberta, ocupa o wrapper do App, que guarda a largura arrastada (padrão 224px).
+export const SIDEBAR_WIDTH = { open: 'w-full', collapsed: 'w-14' } as const
 
 /** Botão quadrado da faixa minimizada (favoritos, pastas fixadas, nova aba). */
 const RAIL_BUTTON =
@@ -195,7 +199,7 @@ function Favorite({
       <TooltipTrigger
         render={
           <Button
-            className="flex h-14 flex-col items-center justify-center gap-1.5 rounded-[12px] bg-highlight text-[11.5px] leading-none tracking-[0.01em] text-muted shadow-[inset_0_0_0_1px_var(--hairline)] [transition:background-color_140ms_ease-out,color_140ms_ease-out,scale_300ms_var(--spring)] hover:bg-surface-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent active:scale-[0.96] motion-reduce:active:scale-100"
+            className="flex h-14 w-full flex-col items-center justify-center gap-1.5 rounded-[12px] bg-highlight text-[11.5px] leading-none tracking-[0.01em] text-muted shadow-[inset_0_0_0_1px_var(--hairline)] [transition:background-color_140ms_ease-out,color_140ms_ease-out,scale_300ms_var(--spring)] hover:bg-surface-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent active:scale-[0.96] motion-reduce:active:scale-100"
             onClick={onClick}
           />
         }
@@ -216,6 +220,8 @@ function Favorite({
  */
 export function TabSidebar(props: Props) {
   const { profiles, profile, tabs, active, info, colors, onActivate, onClose, onNew, onTabAction, renderAlert } = props
+  // Ícone do botão Shell: o modo que o Ctrl+Shift+T abre (`auto` cai no PowerShell 7).
+  const defaultFamily = props.defaultShell === 'auto' ? undefined : props.defaultShell
   const { closing } = props
 
   // Sentido da troca de perfil: o conteúdo entra pela direita indo para um ponto à direita, e vice-versa,
@@ -294,7 +300,7 @@ export function TabSidebar(props: Props) {
         />
         {/* Cartão de três linhas, como no Warp: título, pasta e branch com o diff. */}
         <span className="pointer-events-none flex items-center gap-2.5 pr-6">
-          <TabKindIcon kind={tab.kind} size={16} agent={props.agents?.get(tab.key)} />
+          <TabKindIcon kind={tab.kind} shell={tab.shell} size={16} agent={props.agents?.get(tab.key)} />
           <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{tab.title}</span>
           {partner != null && (
             <Columns2 size={13} className="flex-none opacity-70" aria-label="Em tela dividida" role="img" />
@@ -366,7 +372,7 @@ export function TabSidebar(props: Props) {
           onClick={() => onActivate(tab.key)}
         />
         <span className="pointer-events-none">
-          <TabKindIcon kind={tab.kind} size={18} agent={props.agents?.get(tab.key)} />
+          <TabKindIcon kind={tab.kind} shell={tab.shell} size={18} agent={props.agents?.get(tab.key)} />
         </span>
         {partner != null && (
           <span
@@ -457,7 +463,7 @@ export function TabSidebar(props: Props) {
         </div>
         <div className="flex flex-none flex-col items-center gap-1.5">
           <RailButton label="Nova aba: Shell (Ctrl+Shift+T)" onClick={() => onNew('shell')}>
-            <TabKindIcon kind="shell" size={17} />
+            <TabKindIcon kind="shell" shell={defaultFamily} size={17} />
           </RailButton>
           <RailButton label="Nova aba: Claude Code (Ctrl+Shift+K)" onClick={() => onNew('claude')}>
             <TabKindIcon kind="claude" size={17} />
@@ -501,9 +507,14 @@ export function TabSidebar(props: Props) {
             })}
             {loose.map((tab) => renderRailTab(tab))}
             <div data-drop-loose className="flex flex-col items-center">
-              <RailButton label="Nova aba" onClick={() => onNew('shell')}>
+              <NewShellMenu
+                defaultShell={props.defaultShell}
+                onPick={(kind, shellId) => onNew(kind, undefined, shellId)}
+                triggerClassName={RAIL_BUTTON}
+                triggerLabel="Nova aba: escolher o modo"
+              >
                 <Plus aria-hidden size={15} />
-              </RailButton>
+              </NewShellMenu>
             </div>
           </div>
         </nav>
@@ -534,12 +545,23 @@ export function TabSidebar(props: Props) {
       </div>
 
       <div className="grid flex-none grid-cols-2 gap-2">
-        <Favorite
-          label="Shell"
-          keys="mod+shift+t"
-          icon={<TabKindIcon kind="shell" size={16} />}
-          onClick={() => onNew('shell')}
-        />
+        <div className="relative">
+          <Favorite
+            label="Shell"
+            keys="mod+shift+t"
+            icon={<TabKindIcon kind="shell" shell={defaultFamily} size={16} />}
+            onClick={() => onNew('shell')}
+          />
+          {/* Canto do botão: os outros modos (cmd, WSL, Windows PowerShell). */}
+          <NewShellMenu
+            defaultShell={props.defaultShell}
+            onPick={(kind, shellId) => onNew(kind, undefined, shellId)}
+            triggerClassName="absolute top-1 right-1 grid size-5 place-items-center rounded-md text-muted outline-none hover:bg-surface-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent data-open:bg-surface-hover data-open:text-text"
+            triggerLabel="Nova aba em outro modo"
+          >
+            <ChevronDown aria-hidden size={12} />
+          </NewShellMenu>
+        </div>
         <Favorite
           label="Claude Code"
           keys="mod+shift+k"
@@ -611,12 +633,22 @@ export function TabSidebar(props: Props) {
             {tabs.filter((t) => !t.group || !props.groups.some((g) => g.id === t.group)).map((tab) => renderTab(tab))}
             {/* Soltar aqui (ou no vão até ele) leva a aba para o fim das soltas, fora de qualquer grupo. */}
             <div data-drop-loose className="flex flex-col">
-              <Button
-                className={`${ROW} focus-visible:outline-2 focus-visible:outline-accent`}
-                onClick={() => onNew('shell')}
-              >
-                <Plus aria-hidden size={14} /> Nova aba
-              </Button>
+              <span className="flex items-center">
+                <Button
+                  className={`${ROW} min-w-0 flex-1 focus-visible:outline-2 focus-visible:outline-accent`}
+                  onClick={() => onNew('shell')}
+                >
+                  <Plus aria-hidden size={14} /> Nova aba
+                </Button>
+                <NewShellMenu
+                  defaultShell={props.defaultShell}
+                  onPick={(kind, shellId) => onNew(kind, undefined, shellId)}
+                  triggerClassName="grid size-7 flex-none place-items-center rounded-md text-muted outline-none hover:bg-surface-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent data-open:bg-surface-hover data-open:text-text"
+                  triggerLabel="Nova aba em outro modo"
+                >
+                  <ChevronDown aria-hidden size={13} />
+                </NewShellMenu>
+              </span>
             </div>
           </div>
         </div>
