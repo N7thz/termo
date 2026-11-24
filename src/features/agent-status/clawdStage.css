@@ -1,0 +1,396 @@
+/*
+ * Cenas do Clawd na barra do Claude (ClawdStage.tsx). Unidades em pixels da grade do desenho (viewBox):
+ * os passos são inteiros e as animações usam `steps()` para o pixel art não borrar.
+ */
+
+.clawd-stage .walker,
+.clawd-stage .facing,
+.clawd-stage .front,
+.clawd-stage .side,
+.clawd-stage .torso,
+.clawd-stage .lids,
+.clawd-stage .arm-r,
+.clawd-stage .legs-a,
+.clawd-stage .legs-b,
+.clawd-stage .inspect,
+.clawd-stage .loupe-glint,
+.clawd-stage .bulb,
+.clawd-stage .bang,
+.clawd-stage .ball,
+.clawd-stage .sparks {
+  transform-box: view-box;
+}
+
+/* No meio do palco, a não ser quando anda. */
+.clawd-stage .walker {
+  transform: translateX(23px);
+}
+.clawd-stage .eyes {
+  fill: var(--bg);
+}
+.clawd-stage .lids {
+  opacity: 0;
+}
+
+/* ---- Pronto: pisca e, de vez em quando, vira de lado para olhar. ---- */
+.clawd-stage[data-state="idle"] .lids {
+  animation: clawd-blink 4.5s steps(1, end) infinite;
+}
+.clawd-stage[data-state="idle"] .side {
+  opacity: 0;
+  animation: clawd-peek 9s steps(1, end) infinite;
+}
+.clawd-stage[data-state="idle"] .front {
+  animation: clawd-peek-front 9s steps(1, end) infinite;
+}
+
+/* ---- Pensando: braço levantado e a lâmpada acendendo e apagando. ---- */
+.clawd-stage[data-state="thinking"] .glass {
+  fill: var(--tone-yellow, var(--accent));
+  animation: clawd-flicker 1.4s steps(1, end) infinite;
+}
+.clawd-stage[data-state="thinking"] .shine {
+  fill: var(--text);
+  opacity: 0.7;
+  animation: clawd-flicker 1.4s steps(1, end) infinite;
+}
+.clawd-stage[data-state="thinking"] .base {
+  fill: var(--muted);
+}
+.clawd-stage[data-state="thinking"] .lids {
+  animation: clawd-blink 3s steps(1, end) infinite;
+}
+
+/*
+ * ---- Trabalhando: na primeira metade anda pela barra (do meio para a direita, até a esquerda e de volta
+ * ao meio), de perfil; na segunda para de frente e examina com a lupa, de olhos apertados. ----
+ */
+.clawd-stage[data-state="working"] .walker {
+  animation: clawd-walk 9s linear infinite;
+}
+.clawd-stage[data-state="working"] .facing {
+  transform-origin: 9px 0;
+  animation: clawd-turn 9s steps(1, end) infinite;
+}
+.clawd-stage[data-state="working"] .side {
+  animation: clawd-walking 9s steps(1, end) infinite;
+}
+.clawd-stage[data-state="working"] .inspect {
+  opacity: 0;
+  animation: clawd-inspecting 9s steps(1, end) infinite;
+}
+.clawd-stage[data-state="working"] .side .legs-a {
+  animation: clawd-step 0.4s steps(1, end) infinite;
+}
+.clawd-stage[data-state="working"] .side .legs-b {
+  animation: clawd-step 0.4s steps(1, end) infinite -0.2s;
+}
+.clawd-stage[data-state="working"] .side .torso {
+  animation: clawd-bob 0.4s steps(1, end) infinite;
+}
+.clawd-stage .loupe-ring {
+  fill: var(--tone-blue, var(--accent));
+}
+.clawd-stage .loupe-lens {
+  fill: var(--text);
+  opacity: 0.85;
+}
+.clawd-stage .loupe-glint {
+  fill: var(--bg);
+}
+.clawd-stage[data-state="working"] .loupe-glint {
+  animation: clawd-glint 0.8s steps(1, end) infinite;
+}
+
+/* ---- Esperando você: respira devagar e pisca, olhando para a frente. ---- */
+.clawd-stage[data-state="waiting"] .facing .front {
+  animation: clawd-bob 1.8s steps(1, end) infinite;
+}
+.clawd-stage[data-state="waiting"] .lids {
+  animation: clawd-blink 2.6s steps(1, end) infinite;
+}
+
+/* ---- Pedindo permissão: pula acenando, com o "!" piscando. ---- */
+.clawd-stage[data-state="blocked"] .facing,
+.clawd-stage[data-state="blocked"] .bang {
+  animation: clawd-jump 0.9s steps(1, end) infinite;
+}
+.clawd-stage[data-state="blocked"] .arm-r {
+  animation: clawd-wave 0.45s steps(1, end) infinite;
+}
+.clawd-stage[data-state="blocked"] .bang {
+  fill: var(--accent);
+}
+
+/* ---- Terminou: embaixadinhas com a bola e brilhos, por alguns segundos. ---- */
+/* Parada no chão ao lado do Clawd (também com "reduzir movimento"). */
+.clawd-stage .ball {
+  transform: translate(18px, 7px);
+}
+.clawd-stage[data-state="done"] .ball {
+  animation: clawd-juggle 0.8s steps(1, end) 4 both;
+}
+.clawd-stage[data-state="done"] .ball-light {
+  fill: var(--text);
+}
+.clawd-stage[data-state="done"] .ball-dark {
+  fill: var(--bg);
+}
+.clawd-stage[data-state="done"] .facing {
+  animation: clawd-kick 0.8s steps(1, end) 4 both;
+}
+.clawd-stage[data-state="done"] .sparks {
+  fill: var(--tone-yellow, var(--accent));
+  animation: clawd-sparkle 0.8s steps(1, end) 4 both;
+}
+
+@keyframes clawd-blink {
+  0%,
+  94% {
+    opacity: 0;
+  }
+  95%,
+  98% {
+    opacity: 1;
+  }
+  99%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes clawd-peek {
+  0%,
+  70% {
+    opacity: 0;
+    transform: none;
+  }
+  71%,
+  80% {
+    opacity: 1;
+    transform: none;
+  }
+  81%,
+  90% {
+    opacity: 1;
+    transform: translateX(18px) scaleX(-1);
+  }
+  91%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes clawd-peek-front {
+  0%,
+  70% {
+    opacity: 1;
+  }
+  71%,
+  90% {
+    opacity: 0;
+  }
+  91%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes clawd-flicker {
+  0%,
+  55% {
+    opacity: 1;
+  }
+  56%,
+  62% {
+    opacity: 0.35;
+  }
+  63%,
+  70% {
+    opacity: 1;
+  }
+  71%,
+  78% {
+    opacity: 0.35;
+  }
+  79%,
+  100% {
+    opacity: 1;
+  }
+}
+
+/* Do meio (23) à direita (46), à esquerda (0), de volta ao meio; parado no meio na segunda metade. */
+@keyframes clawd-walk {
+  0% {
+    transform: translateX(23px);
+  }
+  11%,
+  14% {
+    transform: translateX(46px);
+  }
+  36%,
+  39% {
+    transform: translateX(0);
+  }
+  50%,
+  100% {
+    transform: translateX(23px);
+  }
+}
+
+@keyframes clawd-turn {
+  0%,
+  13% {
+    transform: scaleX(1);
+  }
+  14%,
+  38% {
+    transform: scaleX(-1);
+  }
+  39%,
+  100% {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes clawd-walking {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes clawd-inspecting {
+  0%,
+  49% {
+    opacity: 0;
+  }
+  50%,
+  100% {
+    opacity: 1;
+  }
+}
+
+/* O brilho dá a volta na lente (3×3): canto de cima à esquerda, à direita, embaixo à direita, à esquerda. */
+@keyframes clawd-glint {
+  0% {
+    transform: translate(0, 0);
+  }
+  25% {
+    transform: translate(2px, 0);
+  }
+  50% {
+    transform: translate(2px, 2px);
+  }
+  75% {
+    transform: translate(0, 2px);
+  }
+}
+
+@keyframes clawd-step {
+  0% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-1px);
+  }
+}
+
+@keyframes clawd-bob {
+  0% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-1px);
+  }
+}
+
+@keyframes clawd-jump {
+  0%,
+  60% {
+    transform: translateY(0);
+  }
+  65%,
+  70% {
+    transform: translateY(-2px);
+  }
+  75%,
+  85% {
+    transform: translateY(-3px);
+  }
+  90%,
+  100% {
+    transform: translateY(0);
+  }
+}
+
+@keyframes clawd-wave {
+  0% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+/* A bola quica ao lado do Clawd, do chão (y 7) até acima da cabeça, e termina parada no chão. */
+@keyframes clawd-juggle {
+  0% {
+    transform: translate(18px, 7px);
+  }
+  15% {
+    transform: translate(18px, 1px);
+  }
+  30% {
+    transform: translate(17px, -4px);
+  }
+  45% {
+    transform: translate(17px, -7px);
+  }
+  60% {
+    transform: translate(17px, -4px);
+  }
+  75% {
+    transform: translate(18px, 1px);
+  }
+  90%,
+  100% {
+    transform: translate(18px, 7px);
+  }
+}
+
+@keyframes clawd-kick {
+  0%,
+  10% {
+    transform: translateY(-1px);
+  }
+  15%,
+  100% {
+    transform: translateY(0);
+  }
+}
+
+@keyframes clawd-sparkle {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .clawd-stage[data-state] * {
+    animation: none;
+  }
+  .clawd-stage[data-state] .side {
+    opacity: 0;
+  }
+}

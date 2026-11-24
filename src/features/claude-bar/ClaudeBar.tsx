@@ -17,6 +17,7 @@ import { type CSSProperties, useEffect, useState } from 'react'
 import { ipc } from '../../lib/ipc'
 import { menuContent, menuItem } from '../../lib/ui'
 import type { GitInfo } from '../../shared/types'
+import { ClawdStage, hasScene } from '../agent-status/ClawdStage'
 import { GitBranch } from '../workspace/GitDiff'
 import {
   ATTACH_FILTERS,
@@ -286,6 +287,12 @@ export function ClaudeBar({
           title={`Custo estimado da sessão${line?.linesAdded != null ? ` · +${line.linesAdded} −${line.linesRemoved ?? 0} linhas` : ''}`}
         >
           {cost}
+        </span>
+      )}
+      {/* O Clawd no canto da barra, com uma cena por estado do Claude (pensando, trabalhando...). */}
+      {hasScene(agentState) && (
+        <span className="-mb-0.5 ml-auto flex flex-none self-end">
+          <ClawdStage state={agentState} />
         </span>
       )}
     </div>
