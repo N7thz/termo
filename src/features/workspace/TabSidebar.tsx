@@ -1,6 +1,16 @@
 import { Button } from '@ui-sdk/react/button'
 import { Tooltip, TooltipContent, TooltipShortcut, TooltipTrigger } from '@ui-sdk/react/tooltip'
-import { ChevronDown, ChevronRight, Columns2, Folder, PanelLeftClose, PanelLeftOpen, Plus, X } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronRight,
+  Columns2,
+  Folder,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  Radio,
+  X,
+} from 'lucide-react'
 import { type ReactNode, useRef, useState } from 'react'
 import { tooltip, tooltipKbd } from '../../lib/ui'
 import { MAX_PROFILES } from '../../shared/settings'
@@ -54,6 +64,8 @@ interface Props {
   agents?: ReadonlyMap<number, AgentState>
   /** Arrastar: põe a aba antes de `before` (ou no fim do grupo `group`; `null` = soltas). */
   onReorder: (key: number, before: number | null, group: string | null) => void
+  /** Abas que estão digitando junto (digitar em vários painéis): ganham um ícone de transmissão. */
+  broadcasting?: ReadonlySet<number>
   /** Aba solta sobre o terminal: abre ao lado da aba ativa. */
   onSplitWith: (key: number) => void
   /** Lateral minimizada: faixa estreita só com os ícones. */
@@ -302,6 +314,9 @@ export function TabSidebar(props: Props) {
         <span className="pointer-events-none flex items-center gap-2.5 pr-6">
           <TabKindIcon kind={tab.kind} shell={tab.shell} size={16} agent={props.agents?.get(tab.key)} />
           <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{tab.title}</span>
+          {props.broadcasting?.has(tab.key) && (
+            <Radio size={13} className="flex-none text-accent" aria-label="Recebendo o que é digitado" role="img" />
+          )}
           {partner != null && (
             <Columns2 size={13} className="flex-none opacity-70" aria-label="Em tela dividida" role="img" />
           )}
@@ -380,6 +395,9 @@ export function TabSidebar(props: Props) {
             className="pointer-events-none absolute right-1 bottom-1 size-1.5 rounded-full bg-accent"
             title="Em tela dividida"
           />
+        )}
+        {props.broadcasting?.has(tab.key) && (
+          <Radio aria-hidden size={10} className="pointer-events-none absolute bottom-1 left-1 text-accent" />
         )}
         {renderAlert && (
           <span className="pointer-events-none absolute -top-1 -right-1 scale-90">{renderAlert(tab.key)}</span>

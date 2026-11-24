@@ -12,8 +12,12 @@ export interface TerminalActions {
   find: () => void
   /** Cola o texto como uma colagem (bracketed paste) e manda Enter: assim o Claude Code recebe uma mensagem só. */
   sendText?: (text: string) => void
+  /** Cola o texto sem mandar Enter (contexto para o Claude Code: a pessoa completa com a pergunta). */
+  pasteText?: (text: string) => void
   /** Põe o comando na linha do shell, apagando o que estava digitado (ou na caixa do editor); `run` também executa. */
   command?: (text: string, run: boolean) => void
+  /** Manda os bytes ao pty como se tivessem sido digitados (digitar em vários painéis). */
+  write?: (data: string) => void
 }
 
 export type TabMenuAction =

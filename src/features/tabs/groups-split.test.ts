@@ -151,3 +151,22 @@ describe('salvar e restaurar', () => {
     expect(r.groups).toEqual([])
   })
 })
+
+describe('zoom do painel', () => {
+  const split = () =>
+    tabsReducer(open(open({ ...initialTabs, profile: 'p' }, 'a'), 'b'), { type: 'split', key: 1, with: 2 })
+
+  test('liga e desliga sem desfazer a divisão', () => {
+    const zoomed = tabsReducer(split(), { type: 'zoom', key: 2 })
+    expect(zoomed.pairs).toHaveLength(1)
+    expect(zoomed.pairs[0].zoomed).toBe(true)
+    expect(tabsReducer(zoomed, { type: 'zoom', key: 1 }).pairs[0].zoomed).toBe(false)
+  })
+
+  test('sem divisão não faz nada, e nova divisão começa sem zoom', () => {
+    const lone = open({ ...initialTabs, profile: 'p' }, 'a')
+    expect(tabsReducer(lone, { type: 'zoom', key: 1 })).toBe(lone)
+    const zoomed = tabsReducer(split(), { type: 'zoom', key: 1 })
+    expect(tabsReducer(zoomed, { type: 'split', key: 1, with: 2 }).pairs[0].zoomed).toBeUndefined()
+  })
+})

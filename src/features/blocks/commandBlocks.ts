@@ -1,5 +1,6 @@
 import type { IDecoration, IDisposable, IMarker, Terminal } from '@xterm/xterm'
-import { type BlockKeyAction, stepSelection } from './blockNav'
+import { blocksToMarkdown, type ExportBlock } from './blockExport'
+import { type BlockKeyAction, extendFocus, stepSelection } from './blockNav'
 import { decodeCommand, findImagePaths, formatDuration, joinRows, tail } from './blocks'
 import './commandBlocks.css'
 
@@ -48,6 +49,10 @@ export interface BlockCallbacks {
   reopen?: (command: string) => void
   /** Salvar o comando como workflow (a tela dos workflows escuta o evento; veja SAVE_WORKFLOW_EVENT). */
   saveWorkflow?: (command: string) => void
+  /** Manda os blocos ao Claude Code como contexto (sem Enter). */
+  sendToClaude?: (blocks: ExportBlock[]) => void
+  /** Abre o menu de exportar os blocos (junto do botão clicado, ou no canto com `null`). */
+  exportBlocks?: (blocks: ExportBlock[], anchor: HTMLElement | null) => void
 }
 
 /** Evento de `window` disparado por "Salvar como workflow"; `detail` é `{ command: string }`. */
@@ -66,6 +71,10 @@ const ICON = {
     '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M8 1.5l1.6 4.9 4.9 1.6-4.9 1.6L8 14.5l-1.6-4.9L1.5 8l4.9-1.6z" fill="currentColor"/></svg>',
   filter:
     '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M2.5 3.5h11L9.5 8.5v4l-3 1.5v-5.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
+  claude:
+    '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M5.5 7h5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+  export:
+    '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M8 2.5v7M5 6.5l3 3 3-3M3 11.5v1.5h10v-1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   workflow:
     '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M3 2.5h10v11l-5-3-5 3z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
   image:
@@ -79,6 +88,8 @@ export class CommandBlocks implements IDisposable {
   private pendingCommand = ''
   private running: CommandBlock | null = null
   private selected: CommandBlock | null = null
+  /** Outra ponta da seleção de vários blocos (Shift+↑/↓); igual a `selected` com um bloco só. */
+  private focus: CommandBlock | null = null
   private selection: IDecoration | null = null
   private disposables: IDisposable[] = []
 
@@ -140,30 +151,82 @@ export class CommandBlocks implements IDisposable {
     this.selection?.dispose()
     this.selection = null
     this.selected = null
+    this.focus = null
   }
 
-  private setSelected(b: CommandBlock) {
+  /** Estende a seleção para o bloco de cima ou de baixo (sem seleção, começa pelo último). */
+  extend(dir: 'prev' | 'next') {
+    const list = this.live()
+    const anchor = this.selected ? list.indexOf(this.selected) : -1
+    const focus = this.focus ? list.indexOf(this.focus) : -1
+    if (anchor < 0 || focus < 0) return this.select('prev')
+    this.setSelected(list[anchor], list[extendFocus(list.length, focus, dir)])
+  }
+
+  /** Blocos selecionados, em ordem (vazio sem seleção). */
+  private selectedBlocks(): CommandBlock[] {
+    const list = this.live()
+    const a = this.selected ? list.indexOf(this.selected) : -1
+    const b = this.focus ? list.indexOf(this.focus) : a
+    if (a < 0) return []
+    return list.slice(Math.min(a, b < 0 ? a : b), Math.max(a, b < 0 ? a : b) + 1)
+  }
+
+  private toExport(b: CommandBlock): ExportBlock {
+    return {
+      command: b.command,
+      output: this.outputOf(b),
+      exitCode: b.exitCode,
+      cwd: b.cwd,
+      durationMs: (b.endedAt ?? b.startedAt) - b.startedAt,
+    }
+  }
+
+  private setSelected(anchor: CommandBlock, focus: CommandBlock = anchor) {
     this.selection?.dispose()
-    this.selected = b
-    const height = Math.max(1, (b.end?.line ?? b.prompt.line + 1) - b.prompt.line)
-    const dec = this.term.registerDecoration({ marker: b.prompt, x: 0, width: this.term.cols, height, layer: 'top' })
+    this.selected = anchor
+    this.focus = focus
+    const first = anchor.prompt.line <= focus.prompt.line ? anchor : focus
+    const last = first === anchor ? focus : anchor
+    const top = first.prompt.line
+    const bottom = last.end?.line ?? last.prompt.line + 1
+    const height = Math.max(1, bottom - top)
+    const dec = this.term.registerDecoration({
+      marker: first.prompt,
+      x: 0,
+      width: this.term.cols,
+      height,
+      layer: 'top',
+    })
     dec?.onRender((el) => {
       el.className = 'xterm-decoration termo-block-selected'
     })
     this.selection = dec ?? null
-    // Deixa o bloco inteiro à vista quando cabe; senão alinha o começo dele no topo.
-    const top = b.prompt.line
+    // Deixa a seleção inteira à vista quando cabe; senão mostra a ponta que está se movendo.
     const rows = this.term.rows
     const view = this.term.buffer.active.viewportY
-    if (top < view || top + height > view + rows) this.term.scrollToLine(Math.max(0, top - (height < rows ? 1 : 0)))
+    if (height < rows) {
+      if (top < view || bottom > view + rows) this.term.scrollToLine(Math.max(0, top - 1))
+    } else if (focus === first) this.term.scrollToLine(top)
+    else this.term.scrollToLine(Math.max(0, bottom - rows))
   }
 
   /** Ação de teclado sobre o bloco selecionado (BlockKeyAction vem de blockNav.ts). */
   perform(action: BlockKeyAction) {
     if (action === 'prev' || action === 'next') return this.select(action)
+    if (action === 'extend-prev') return this.extend('prev')
+    if (action === 'extend-next') return this.extend('next')
     const b = this.selected
     if (!b) return
     if (action === 'clear') return this.clearSelection()
+    const many = () => this.selectedBlocks().map((x) => this.toExport(x))
+    if (action === 'send-claude') {
+      const blocks = many()
+      this.clearSelection()
+      return this.cb.sendToClaude?.(blocks)
+    }
+    if (action === 'copy-markdown') return this.cb.copy(blocksToMarkdown(many()))
+    if (action === 'export') return this.cb.exportBlocks?.(many(), null)
     if (action === 'copy-output') return this.cb.copy(this.outputOf(b))
     if (action === 'copy-command') return this.cb.copy(b.command)
     if (action === 'reopen') {
@@ -275,7 +338,12 @@ export class CommandBlocks implements IDisposable {
     const images = b.images.length > 0 && this.cb.showImages ? 6 : 0
     const width = Math.min(
       this.term.cols,
-      (failed && this.cb.explain ? 30 : 20) + images + (this.cb.filter ? 3 : 0) + (this.cb.saveWorkflow ? 3 : 0),
+      (failed && this.cb.explain ? 30 : 20) +
+        images +
+        (this.cb.filter ? 3 : 0) +
+        (this.cb.saveWorkflow ? 3 : 0) +
+        (this.cb.sendToClaude ? 3 : 0) +
+        (this.cb.exportBlocks ? 3 : 0),
     )
     const tools = this.term.registerDecoration({
       marker: b.prompt,
@@ -352,6 +420,22 @@ export class CommandBlocks implements IDisposable {
       button(ICON.filter, 'Filtrar a saída (/)', () => filter({ command: b.command, output: this.outputOf(b) }))
     const save = this.cb.saveWorkflow
     if (save) button(ICON.workflow, 'Salvar como workflow', () => save(b.command))
+    const send = this.cb.sendToClaude
+    if (send) button(ICON.claude, 'Enviar ao Claude Code (Ctrl+Enter)', () => send([this.toExport(b)]))
+    const exportBlocks = this.cb.exportBlocks
+    if (exportBlocks) {
+      const el = document.createElement('button')
+      el.type = 'button'
+      el.className = 'termo-block-button'
+      el.innerHTML = ICON.export
+      el.title = 'Exportar: Markdown, .txt ou imagem (E)'
+      el.setAttribute('aria-label', 'Exportar o bloco')
+      el.addEventListener('click', (e) => {
+        e.stopPropagation()
+        exportBlocks([this.toExport(b)], el)
+      })
+      box.append(el)
+    }
     if (failed && this.cb.explain) {
       const explain = this.cb.explain
       button(ICON.spark, 'Explicar o erro com o Claude', () =>
@@ -362,7 +446,7 @@ export class CommandBlocks implements IDisposable {
   }
 
   private disposeBlock(b: CommandBlock) {
-    if (this.selected === b) this.clearSelection()
+    if (this.selected === b || this.focus === b) this.clearSelection()
     for (const d of this.decorations.get(b) ?? []) d.dispose()
     this.decorations.delete(b)
     b.prompt.dispose()

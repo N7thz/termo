@@ -55,6 +55,133 @@ pub struct Settings {
     pub tray: TraySettings,
     /// Imagem de fundo (uma ou várias, em slideshow) atrás do terminal ou sobre a janela inteira.
     pub background: BackgroundSettings,
+    /// Layouts salvos: conjuntos de abas, grupos e divisões, abertos com um clique.
+    pub layouts: Vec<SavedLayout>,
+}
+
+pub const MAX_LAYOUTS: usize = 20;
+pub const MAX_LAYOUT_TABS: usize = 16;
+pub const MAX_LAYOUT_COMMAND: usize = 500;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SavedLayout {
+    /// 1 a 60 caracteres; único na lista (sem diferenciar maiúsculas).
+    pub name: String,
+    pub tabs: Vec<LayoutTab>,
+    /// Nomes dos grupos; `LayoutTab.group` é o índice aqui.
+    pub groups: Vec<String>,
+    /// Pares de tela dividida, por índice em `tabs`.
+    pub splits: Vec<LayoutSplit>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LayoutTab {
+    /// `shell` ou `claude`.
+    pub kind: String,
+    pub title: String,
+    /// Perfil de shell (`pwsh`, `cmd`, `wsl:Ubuntu`, `ssh:host`...); vazio = o padrão.
+    pub shell: String,
+    pub cwd: String,
+    /// Índice em `SavedLayout.groups`.
+    pub group: Option<usize>,
+    /// Comando que roda ao abrir (uma linha; só em abas de shell).
+    pub command: String,
+}
+
+impl Default for LayoutTab {
+    fn default() -> Self {
+        Self { kind: "shell".into(), title: String::new(), shell: String::new(), cwd: String::new(), group: None, command: String::new() }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LayoutSplit {
+    pub left: usize,
+    pub right: usize,
+    pub ratio: f64,
+}
+
+impl Default for LayoutSplit {
+    fn default() -> Self {
+        Self { left: 0, right: 0, ratio: 0.5 }
+    }
+}
+
+/// Perfil de shell de uma aba salva: um perfil concreto (sem `auto`) ou `ssh:<host>` com host válido.
+fn is_valid_tab_shell(s: &str) -> bool {
+    (is_valid_shell(s) && s != "auto") || s.strip_prefix("ssh:").is_some_and(crate::ssh::is_valid_host)
+}
+
+/// Layouts válidos: nomes únicos, até 20 layouts de até 16 abas, comandos de uma linha com até 500
+/// caracteres só em abas de shell, grupos e divisões que apontam para abas que existem.
+fn sanitize_layouts(list: Vec<SavedLayout>) -> Vec<SavedLayout> {
+    let mut out: Vec<SavedLayout> = Vec::new();
+    for l in list {
+        let name = l.name.trim().to_string();
+        if name.is_empty()
+            || name.chars().count() > 60
+            || l.tabs.is_empty()
+            || out.iter().any(|o| o.name.to_lowercase() == name.to_lowercase())
+        {
+            continue;
+        }
+        let groups: Vec<String> = l
+            .groups
+            .into_iter()
+            .map(|g| g.trim().chars().take(40).collect::<String>())
+            .map(|g| if g.is_empty() { "Grupo".to_string() } else { g })
+            .take(MAX_LAYOUT_TABS)
+            .collect();
+        let tabs: Vec<LayoutTab> = l
+            .tabs
+            .into_iter()
+            .take(MAX_LAYOUT_TABS)
+            .map(|t| {
+                let kind = if t.kind == "claude" { "claude" } else { "shell" };
+                let command = t.command.trim().to_string();
+                let command_ok = kind == "shell"
+                    && command.chars().count() <= MAX_LAYOUT_COMMAND
+                    && !command.chars().any(|c| c.is_control());
+                let shell = t.shell.trim();
+                let cwd = t.cwd.trim();
+                LayoutTab {
+                    kind: kind.into(),
+                    title: t.title.trim().chars().take(200).collect(),
+                    shell: if kind == "shell" && is_valid_tab_shell(shell) { shell.to_string() } else { String::new() },
+                    cwd: if cwd.len() <= 1000 && !cwd.contains('\0') { cwd.to_string() } else { String::new() },
+                    group: t.group.filter(|g| *g < groups.len()),
+                    // Aba SSH não tem o prompt integrado que dispara o comando inicial.
+                    command: if command_ok && !shell.starts_with("ssh:") { command } else { String::new() },
+                }
+            })
+            .collect();
+        let mut used: Vec<usize> = Vec::new();
+        let splits = l
+            .splits
+            .into_iter()
+            .filter(|p| {
+                let ok = p.left != p.right
+                    && p.left < tabs.len()
+                    && p.right < tabs.len()
+                    && !used.contains(&p.left)
+                    && !used.contains(&p.right);
+                if ok {
+                    used.push(p.left);
+                    used.push(p.right);
+                }
+                ok
+            })
+            .map(|p| LayoutSplit { ratio: if p.ratio.is_finite() { p.ratio.clamp(0.2, 0.8) } else { 0.5 }, ..p })
+            .collect();
+        out.push(SavedLayout { name, tabs, groups, splits });
+        if out.len() == MAX_LAYOUTS {
+            break;
+        }
+    }
+    out
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -450,6 +577,7 @@ impl Default for Settings {
             history_search: true,
             tray: TraySettings::default(),
             background: BackgroundSettings::default(),
+            layouts: Vec::new(),
         }
     }
 }
@@ -483,6 +611,8 @@ pub struct SettingsPatch {
     pub tray: Option<TraySettings>,
     /// Substitui a configuração inteira do fundo (validada no apply).
     pub background: Option<BackgroundSettings>,
+    /// Substitui a lista inteira de layouts (validada no apply).
+    pub layouts: Option<Vec<SavedLayout>>,
 }
 
 /// Ids de tema: letras minúsculas, números e hífen, até 40 caracteres.
@@ -573,6 +703,9 @@ impl Settings {
         if let Some(v) = patch.background {
             self.background = sanitize_background(v);
         }
+        if let Some(v) = patch.layouts {
+            self.layouts = sanitize_layouts(v);
+        }
         if let Some(v) = patch.default_shell {
             if is_valid_shell(v.trim()) {
                 self.default_shell = v.trim().to_string();
@@ -612,6 +745,7 @@ impl SettingsStore {
                     s.default_shell = "auto".into();
                 }
                 s.background = sanitize_background(std::mem::take(&mut s.background));
+                s.layouts = sanitize_layouts(std::mem::take(&mut s.layouts));
                 s
             })
             .unwrap_or_default();
@@ -693,6 +827,53 @@ mod tests {
         // Arquivo antigo, sem o campo: desligado.
         let old: Settings = serde_json::from_str("{}").unwrap();
         assert_eq!(old.background, BackgroundSettings::default());
+    }
+
+    #[test]
+    fn sanitizes_layouts() {
+        let tab = |kind: &str, shell: &str, command: &str, group: Option<usize>| LayoutTab {
+            kind: kind.into(),
+            shell: shell.into(),
+            command: command.into(),
+            group,
+            ..Default::default()
+        };
+        let layout = |name: &str| SavedLayout {
+            name: name.into(),
+            tabs: vec![
+                tab("shell", "pwsh", " bun run dev ", Some(0)),
+                tab("claude", "pwsh", "ls", Some(5)),
+                tab("shell", "ssh:-oProxy", "a\nb", None),
+                tab("shell", "ssh:web-1", "ls", None),
+                tab("shell", "auto", &"x".repeat(501), None),
+            ],
+            groups: vec![" Dev ".into()],
+            splits: vec![
+                LayoutSplit { left: 0, right: 1, ratio: 9.0 },
+                LayoutSplit { left: 1, right: 2, ratio: 0.5 },
+                LayoutSplit { left: 2, right: 2, ratio: 0.5 },
+                LayoutSplit { left: 2, right: 9, ratio: 0.5 },
+            ],
+        };
+        let mut s = Settings::default();
+        let mut list = vec![layout(" Dev "), layout("dev"), layout(""), SavedLayout { name: "vazio".into(), ..Default::default() }];
+        list.extend((0..30).map(|i| layout(&format!("l{i}"))));
+        s.apply(SettingsPatch { layouts: Some(list), ..Default::default() });
+        assert_eq!(s.layouts.len(), MAX_LAYOUTS);
+        let l = &s.layouts[0];
+        assert_eq!(l.name, "Dev");
+        assert_eq!(l.groups, vec!["Dev".to_string()]);
+        assert_eq!((l.tabs[0].shell.as_str(), l.tabs[0].command.as_str(), l.tabs[0].group), ("pwsh", "bun run dev", Some(0)));
+        // Claude não leva shell nem comando; grupo inexistente some.
+        assert_eq!((l.tabs[1].shell.as_str(), l.tabs[1].command.as_str(), l.tabs[1].group), ("", "", None));
+        // Host inválido, comando com quebra de linha, `auto` e comando longo viram vazio; SSH não leva comando.
+        assert_eq!((l.tabs[2].shell.as_str(), l.tabs[2].command.as_str()), ("", ""));
+        assert_eq!((l.tabs[3].shell.as_str(), l.tabs[3].command.as_str()), ("ssh:web-1", ""));
+        assert_eq!((l.tabs[4].shell.as_str(), l.tabs[4].command.as_str()), ("", ""));
+        // Divisões: ratio limitado; repetida, de uma aba só ou fora da lista saem.
+        assert_eq!(l.splits, vec![LayoutSplit { left: 0, right: 1, ratio: 0.8 }]);
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert!(old.layouts.is_empty());
     }
 
     #[test]

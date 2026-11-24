@@ -23,6 +23,24 @@ describe('findLinks: arquivos', () => {
     expect(findLinks('veja ../docs/README.md')[0]).toMatchObject({ path: '../docs/README.md', line: undefined })
   })
 
+  test('erros do rustc, da pilha do Node e do Biome', () => {
+    expect(findLinks('  --> src-tauri/src/lib.rs:552:8')[0]).toMatchObject({
+      path: 'src-tauri/src/lib.rs',
+      line: 552,
+      column: 8,
+    })
+    expect(findLinks(String.raw`    at Object.<anonymous> (D:\x\y.js:5:10)`)[0]).toMatchObject({
+      path: String.raw`D:\x\y.js`,
+      line: 5,
+      column: 10,
+    })
+    expect(findLinks('./src/App.tsx:3:1 lint/style/useConst')[0]).toMatchObject({
+      path: './src/App.tsx',
+      line: 3,
+      column: 1,
+    })
+  })
+
   test('sem extensão conhecida não vira link', () => {
     expect(kinds('a/b c/d foo.bar1')).toEqual([])
   })

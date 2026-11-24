@@ -45,6 +45,31 @@ export interface Settings {
   tray: TraySettings
   /** Imagem de fundo (uma ou várias, em slideshow); limites em src-tauri/src/settings.rs. */
   background: BackgroundSettings
+  /** Layouts salvos (abas, grupos e divisões); limites em src-tauri/src/settings.rs. */
+  layouts: SavedLayout[]
+}
+
+/** Um conjunto de abas e painéis guardado para abrir com um clique. */
+export interface SavedLayout {
+  /** 1 a 60 caracteres; único na lista. */
+  name: string
+  /** Até 16 abas. */
+  tabs: LayoutTab[]
+  /** Nomes dos grupos; `LayoutTab.group` é o índice aqui. */
+  groups: string[]
+  /** Telas divididas, por índice em `tabs`. */
+  splits: { left: number; right: number; ratio: number }[]
+}
+
+export interface LayoutTab {
+  kind: SessionKind
+  title: string
+  /** Perfil de shell (`pwsh`, `wsl:Ubuntu`, `ssh:host`...); vazio = o padrão. */
+  shell: string
+  cwd: string
+  group: number | null
+  /** Comando que roda ao abrir (uma linha; só em abas de shell, até 500 caracteres). */
+  command: string
 }
 
 export interface BackgroundSettings {

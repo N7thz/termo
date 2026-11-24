@@ -1,11 +1,13 @@
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuShortcut, MenuTrigger } from '@ui-sdk/react/menu'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, LayoutGrid } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { actionButton, menuContent, menuItem, menuSeparator } from '../../lib/ui'
 import type { SessionKind } from '../../shared/types'
+import { useLayouts } from '../layouts/LayoutsContext'
 import { ModeIcon } from './ModeIcon'
 import { familyOf, resolveDefaultShell } from './modes'
 import { useShells } from './useShells'
+import { useSshHosts } from './useSshHosts'
 
 interface Props {
   /** `defaultShell` das configurações (`auto` marca o primeiro da lista). */
@@ -19,6 +21,7 @@ interface Props {
 }
 
 const CLAUDE = '__claude'
+const MANAGE_LAYOUTS = '__layouts'
 
 /**
  * Menu "nova aba" com todos os modos: cada shell instalado (PowerShell 7, Windows PowerShell, cmd,
@@ -32,9 +35,19 @@ export function NewShellMenu({
   children,
 }: Props) {
   const shells = useShells()
+  const sshHosts = useSshHosts()
+  const layouts = useLayouts()
   const current = resolveDefaultShell(defaultShell, shells)
   return (
-    <Menu onAction={(value) => (value === CLAUDE ? onPick('claude') : onPick('shell', String(value)))}>
+    <Menu
+      onAction={(value) => {
+        const v = String(value)
+        if (v === CLAUDE) return onPick('claude')
+        if (v === MANAGE_LAYOUTS) return layouts?.onManage()
+        if (v.startsWith('layout:')) return layouts?.onOpen(Number(v.slice('layout:'.length)))
+        onPick('shell', v)
+      }}
+    >
       <MenuTrigger className={triggerClassName} aria-label={triggerLabel} title={triggerLabel}>
         {children ?? <ChevronDown size={13} />}
       </MenuTrigger>
@@ -53,12 +66,38 @@ export function NewShellMenu({
             {s.id === current && <MenuShortcut>Ctrl+Shift+T</MenuShortcut>}
           </MenuItem>
         ))}
+        {sshHosts.length > 0 && (
+          <>
+            <MenuSeparator className={menuSeparator} />
+            {sshHosts.map((host) => (
+              <MenuItem key={host} className={menuItem} value={`ssh:${host}`}>
+                <ModeIcon mode="ssh" size={14} />
+                <span className="min-w-0 truncate">SSH: {host}</span>
+              </MenuItem>
+            ))}
+          </>
+        )}
         <MenuSeparator className={menuSeparator} />
         <MenuItem className={menuItem} value={CLAUDE}>
           <ModeIcon mode="claude" size={14} />
           Claude Code
           <MenuShortcut>Ctrl+Shift+K</MenuShortcut>
         </MenuItem>
+        {layouts && (
+          <>
+            <MenuSeparator className={menuSeparator} />
+            {layouts.layouts.map((l, i) => (
+              <MenuItem key={l.name} className={menuItem} value={`layout:${i}`}>
+                <LayoutGrid aria-hidden size={14} className="flex-none text-muted" />
+                <span className="min-w-0 truncate">Layout: {l.name}</span>
+              </MenuItem>
+            ))}
+            <MenuItem className={menuItem} value={MANAGE_LAYOUTS}>
+              <LayoutGrid aria-hidden size={14} className="flex-none text-muted" />
+              Layouts salvos…
+            </MenuItem>
+          </>
+        )}
       </MenuContent>
     </Menu>
   )

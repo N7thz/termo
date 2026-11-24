@@ -18,7 +18,9 @@ import { PathSuggestions, type SuggestionsPosition } from '../autocomplete/PathS
 import { extractQuery } from '../autocomplete/query'
 import { ShellIntegration } from '../autocomplete/shellIntegration'
 import { isTranslucent } from '../background/background'
+import { type BlockExportAnchor, BlockExportMenu } from '../blocks/BlockExportMenu'
 import { BlockFilter } from '../blocks/BlockFilter'
+import { blocksForClaude, type ExportBlock } from '../blocks/blockExport'
 import { blockKeyAction } from '../blocks/blockNav'
 import { CommandBlocks, SAVE_WORKFLOW_EVENT } from '../blocks/commandBlocks'
 import { ImagePreview, type ImagePreviewAnchor } from '../blocks/ImagePreview'
@@ -79,6 +81,10 @@ interface Props {
   git?: GitInfo | null
   /** Comando rodado no primeiro prompt da aba (ex.: `claude --resume <id>`, vindo da página de Sessões). */
   initialCommand?: string
+  /** O que a pessoa digitou nesta aba (para digitar em vários painéis). */
+  onInput?: (data: string) => void
+  /** Manda texto (os blocos selecionados) para uma aba do Claude Code, sem Enter. */
+  onSendToClaude?: (text: string) => void
 }
 
 const highlightColors = (t: ITheme) => ({
@@ -129,6 +135,8 @@ export function TerminalView({
   restoreOutput,
   git = null,
   initialCommand,
+  onInput,
+  onSendToClaude,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
@@ -149,6 +157,8 @@ export function TerminalView({
   const [ai, setAi] = useState<AiPanelState | null>(null)
   /** Prévia das imagens citadas por um bloco (botão da imagem na barra do bloco). */
   const [images, setImages] = useState<{ paths: string[]; anchor: ImagePreviewAnchor } | null>(null)
+  /** Menu de exportar os blocos (botão do bloco ou E com blocos selecionados). */
+  const [exporting, setExporting] = useState<{ blocks: ExportBlock[]; anchor: BlockExportAnchor } | null>(null)
   const aiSeq = useRef(0)
   /** Busca no histórico (Ctrl+R): aberta com a busca inicial, ou null. */
   const [historySearch, setHistorySearch] = useState<{ query: string } | null>(null)
@@ -210,6 +220,8 @@ export function TerminalView({
     onPrompt,
     onAgent,
     onCommandEnd,
+    onInput,
+    onSendToClaude,
   })
   cbRef.current = {
     onTitle,
@@ -222,6 +234,8 @@ export function TerminalView({
     onPrompt,
     onAgent,
     onCommandEnd,
+    onInput,
+    onSendToClaude,
   }
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: o terminal é criado uma vez por aba; a fonte é tratada no efeito abaixo
@@ -309,6 +323,15 @@ export function TerminalView({
       },
       saveWorkflow: (command) => window.dispatchEvent(new CustomEvent(SAVE_WORKFLOW_EVENT, { detail: { command } })),
       findImages: (dir, candidates) => ipc.imageExisting(dir, candidates),
+      sendToClaude: (list) => cbRef.current.onSendToClaude?.(blocksForClaude(list)),
+      exportBlocks: (list, button) => {
+        const w = wrap.getBoundingClientRect()
+        const b = button?.getBoundingClientRect()
+        setExporting({
+          blocks: list,
+          anchor: b ? { right: Math.max(8, w.right - b.right), top: b.bottom - w.top + 6 } : { right: 12, top: 12 },
+        })
+      },
       showImages: (paths, button) => {
         const b = button.getBoundingClientRect()
         const w = wrap.getBoundingClientRect()
@@ -444,11 +467,24 @@ export function TerminalView({
       },
       find: () => openSearchRef.current(),
       command: (text, run) => putCommandRef.current(text, run),
+      pasteText: (text) => {
+        term.focus()
+        term.paste(text)
+      },
       sendText: (text) => {
         term.focus()
         term.paste(text)
         // O Enter separado da colagem: dentro dela o Claude Code trataria como quebra de linha.
         window.setTimeout(() => send('\r'), 120)
+      },
+      write: (data) => {
+        if (exited) return
+        if (data.includes('\r')) {
+          shell.commandSubmitted()
+          hide()
+          clearAttachments()
+        }
+        send(data)
       },
     })
 
@@ -644,6 +680,7 @@ export function TerminalView({
         clearAttachments()
       }
       send(data)
+      cbRef.current.onInput?.(data)
     })
     term.onWriteParsed(refresh)
     term.onResize(({ cols, rows }) => {
@@ -690,7 +727,13 @@ export function TerminalView({
         setPtyId(res.id)
         for (const w of res.warnings) term.write(warn(w))
         if (res.kind !== kind) cbRef.current.onKind(res.kind)
-        setShellFamily(res.shell.startsWith('wsl') ? 'wsl' : (res.shell as 'pwsh' | 'powershell' | 'cmd' | 'bash'))
+        setShellFamily(
+          res.shell.startsWith('wsl')
+            ? 'wsl'
+            : res.shell.startsWith('ssh:')
+              ? 'bash'
+              : (res.shell as 'pwsh' | 'powershell' | 'cmd' | 'bash'),
+        )
         cbRef.current.onShell?.(res.shell)
         term.focus()
       } catch (err) {
@@ -848,6 +891,7 @@ export function TerminalView({
           onSubmit={(text) => {
             clearAttachments()
             submitRef.current(text)
+            onInput?.(`${text.split(/\r?\n/).join('\r')}\r`)
           }}
           onEscape={() => termRef.current?.focus()}
           onClear={() => clearRef.current()}
@@ -896,6 +940,18 @@ export function TerminalView({
           onCopy={(text) => void ipc.writeClipboard(text)}
           onClose={() => {
             setBlockFilter(null)
+            termRef.current?.focus()
+          }}
+        />
+      )}
+      {exporting && (
+        <BlockExportMenu
+          blocks={exporting.blocks}
+          anchor={exporting.anchor}
+          theme={terminalTheme}
+          fontFamily={settings.fontFamily}
+          onClose={() => {
+            setExporting(null)
             termRef.current?.focus()
           }}
         />

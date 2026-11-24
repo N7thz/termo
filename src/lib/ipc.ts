@@ -36,6 +36,8 @@ export const ipc = {
   },
   /** Shells instalados: pwsh, Windows PowerShell, cmd e as distros do WSL. */
   shellList: () => invoke<ShellInfo[]>('shell_list'),
+  /** Hosts do `~/.ssh/config` (sem curingas) para as abas SSH. */
+  sshHosts: () => invoke<string[]>('ssh_hosts'),
   write: (id: number, data: string) => invoke<void>('pty_write', { id, data }),
   resize: (id: number, cols: number, rows: number) => invoke<void>('pty_resize', { id, cols, rows }),
   /** Confirma que `bytes` já foram desenhados (controle de vazão). */
@@ -133,6 +135,9 @@ export const ipc = {
 
   readClipboard: () => invoke<ClipboardContent>('clipboard_read'),
   writeClipboard: (text: string) => invoke<void>('clipboard_write', { text }),
+  /** "Salvar como" de um bloco exportado; devolve o caminho gravado ou `null` se cancelou. */
+  exportSave: (name: string, ext: 'txt' | 'md' | 'png', data: Uint8Array) =>
+    invoke<string | null>('export_save', { name, ext, data: Array.from(data) }),
   openUrl: (url: string) => invoke<void>('open_url', { url }),
 
   /** Painel de navegador ao lado do terminal (webview nativo posicionado em `bounds`, em pixels lógicos). */

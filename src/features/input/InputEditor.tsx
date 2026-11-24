@@ -3,6 +3,9 @@ import { type CSSProperties, type KeyboardEvent, type RefObject, useEffect, useM
 import { ipc } from '../../lib/ipc'
 import type { PathSuggestion } from '../../shared/types'
 import { naturalLanguageRequest } from '../ai/answer'
+import { CompletionList } from '../autocomplete/CompletionList'
+import { type Completion, completeCommand } from '../autocomplete/complete'
+import { loadCommands, nextWord, rememberCommand, type StoredCommand, suggest } from '../autocomplete/historyStore'
 import { PathSuggestions } from '../autocomplete/PathSuggestions'
 import { type Token, type TokenType, tokenize } from './tokenize'
 
@@ -61,6 +64,21 @@ function wordBefore(text: string, caret: number) {
 
 const quoteIfNeeded = (label: string) => (/\s/.test(label) ? `'${label.replace(/'/g, "''")}'` : label)
 
+/** Histórico do PSReadLine, lido uma vez por execução do app: serve de último recurso da sugestão em cinza. */
+let generalHistory: Promise<string[]> | null = null
+const loadGeneralHistory = () => {
+  generalHistory ??= ipc.historyRead(3000).catch(() => [])
+  return generalHistory
+}
+
+/** Autocomplete de comando em andamento: a palavra trocada e a opção que está na linha. */
+interface CommandCycle {
+  start: number
+  end: number
+  items: Completion[]
+  i: number
+}
+
 /**
  * Caixa de comando no estilo do Warp: um textarea transparente por cima de um `<pre>` com os tokens
  * coloridos (mesma fonte e mesmo espaçamento, então o cursor e a seleção alinham com o texto colorido).
@@ -82,6 +100,13 @@ export function InputEditor({
 }: Props) {
   const [text, setText] = useState('')
   const [items, setItems] = useState<PathSuggestion[]>([])
+  // Autocomplete de comando (Tab em `git sta`, `bun run `): lista e opção ativa.
+  const [cycle, setCycle] = useState<{ items: Completion[]; i: number } | null>(null)
+  const cmdCycle = useRef<CommandCycle | null>(null)
+  // Sugestão em cinza: comandos guardados (por pasta) e o histórico geral; o cursor precisa estar no fim.
+  const stored = useRef<StoredCommand[]>([])
+  const [general, setGeneral] = useState<string[]>([])
+  const [atEnd, setAtEnd] = useState(true)
   const boxRef = useRef<HTMLDivElement>(null)
   const [listBottom, setListBottom] = useState(0)
   // Navegação no histórico: `cursor === history.length` é o rascunho atual.
@@ -94,12 +119,27 @@ export function InputEditor({
   const [askError, setAskError] = useState<string | null>(null)
 
   const tokens = useMemo<Token[]>(() => tokenize(text), [text])
+  const ghost =
+    open && atEnd && !asking && !cycle && items.length === 0 ? suggest(text, cwd(), stored.current, general) : ''
+
+  // A cada prompt, relê os comandos guardados (outras abas também gravam).
+  useEffect(() => {
+    if (open) stored.current = loadCommands()
+  }, [open])
+  useEffect(() => {
+    let alive = true
+    void loadGeneralHistory().then((list) => alive && setGeneral(list))
+    return () => {
+      alive = false
+    }
+  }, [])
 
   if (api) {
     api.current = {
       get: () => text,
       set: (next) => {
         setText(next)
+        setAtEnd(true)
         requestAnimationFrame(() => inputRef.current?.setSelectionRange(next.length, next.length))
       },
     }
@@ -108,7 +148,9 @@ export function InputEditor({
   const closeList = () => {
     seq.current++
     completion.current = null
+    cmdCycle.current = null
     setItems([])
+    setCycle(null)
   }
 
   // Fechou (comando rodando, buffer alternativo): some a lista.
@@ -121,6 +163,7 @@ export function InputEditor({
     const next = text.slice(0, start) + value + text.slice(end)
     setText(next)
     const caret = start + value.length
+    setAtEnd(caret === next.length)
     // Depois do render, com o texto novo no textarea.
     requestAnimationFrame(() => inputRef.current?.setSelectionRange(caret, caret))
     return caret
@@ -134,10 +177,45 @@ export function InputEditor({
     completion.current = { ...c, end: caret }
   }
 
+  /** Escreve a opção `i` do autocomplete de comando no lugar da palavra e lembra onde ela termina. */
+  const applyCommand = (c: CommandCycle, space: boolean) => {
+    const item = c.items[c.i]
+    if (!item) return
+    const value = item.kind === 'script' ? quoteIfNeeded(item.value) : item.value
+    // Sem mais opções, o espaço já deixa o cursor pronto para o próximo argumento.
+    const tail = space && !/^\s/.test(text.slice(c.end)) ? ' ' : ''
+    const caret = replaceRange(c.start, c.end, value + tail)
+    cmdCycle.current = { ...c, end: caret - tail.length }
+    setCycle(c.items.length > 1 ? { items: c.items, i: c.i } : null)
+    if (c.items.length > 1) setListBottom((boxRef.current?.offsetHeight ?? 0) + 4)
+  }
+
+  /** Os scripts do package.json só são lidos quando o comando é de um gerenciador de pacotes que os usa. */
+  const scriptsFor = async (before: string, dir: string | null) => {
+    if (!dir || !/(?:^|[\s;|&(])(?:bun|npm)(?:\.cmd)?\s/i.test(before)) return []
+    return (await ipc.nodeInfo(null, dir).catch(() => null))?.scripts ?? []
+  }
+
   const complete = async () => {
     const el = inputRef.current
     const dir = cwd()
-    if (!el || !dir) return
+    if (!el) return
+    const turn = cmdCycle.current
+    if (turn && turn.items.length > 1) {
+      applyCommand({ ...turn, i: (turn.i + 1) % turn.items.length }, false)
+      return
+    }
+    const caretNow = el.selectionStart
+    const known = completeCommand(text, caretNow, await scriptsFor(text.slice(0, caretNow), dir))
+    if (known) {
+      // O texto pode ter mudado durante a espera pelos scripts.
+      if (inputRef.current?.value !== text) return
+      completion.current = null
+      setItems([])
+      applyCommand({ start: known.start, end: caretNow, items: known.items, i: 0 }, known.items.length === 1)
+      return
+    }
+    if (!dir) return
     const active = completion.current
     if (active && active.items.length > 1) {
       apply({ ...active, i: (active.i + 1) % active.items.length })
@@ -167,6 +245,7 @@ export function InputEditor({
       .then((command) => {
         if (mine !== seq.current) return
         setText(command)
+        setAtEnd(true)
         requestAnimationFrame(() => {
           inputRef.current?.focus()
           inputRef.current?.setSelectionRange(command.length, command.length)
@@ -181,6 +260,9 @@ export function InputEditor({
     const request = naturalLanguageRequest(value)
     if (request) return askCommand(request)
     if (value.trim() && history.current[history.current.length - 1] !== value) history.current.push(value)
+    // Alimenta a sugestão em cinza, com a pasta em que o comando vai rodar.
+    rememberCommand(value, cwd())
+    stored.current = loadCommands()
     nav.current = { cursor: history.current.length, draft: '' }
     closeList()
     setText('')
@@ -192,6 +274,14 @@ export function InputEditor({
     if (nav.current.cursor === list.length) nav.current.draft = text
     nav.current.cursor = to
     const next = to === list.length ? nav.current.draft : (list[to] ?? '')
+    setText(next)
+    setAtEnd(true)
+    requestAnimationFrame(() => inputRef.current?.setSelectionRange(next.length, next.length))
+  }
+
+  /** Aceita a sugestão em cinza (tudo, ou só a próxima palavra) e põe o cursor no fim. */
+  const acceptGhost = (all: boolean) => {
+    const next = text + (all ? ghost : nextWord(ghost))
     setText(next)
     requestAnimationFrame(() => inputRef.current?.setSelectionRange(next.length, next.length))
   }
@@ -210,6 +300,28 @@ export function InputEditor({
     const el = e.currentTarget
     const collapsed = el.selectionStart === el.selectionEnd
     const ctrl = e.ctrlKey && !e.altKey && !e.shiftKey
+    const plain = !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey
+    if (ghost && collapsed && el.selectionStart === text.length && (e.key === 'ArrowRight' || e.key === 'End')) {
+      // → e End no fim da linha aceitam tudo; Ctrl+→ aceita uma palavra.
+      if (plain) {
+        e.preventDefault()
+        acceptGhost(true)
+        return
+      }
+      if (ctrl && e.key === 'ArrowRight') {
+        e.preventDefault()
+        acceptGhost(false)
+        return
+      }
+    }
+    if (cycle && plain && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && cmdCycle.current) {
+      // Com a lista aberta, ↑/↓ percorrem as opções em vez do histórico.
+      e.preventDefault()
+      const c = cmdCycle.current
+      const step = e.key === 'ArrowDown' ? 1 : c.items.length - 1
+      applyCommand({ ...c, i: (c.i + step) % c.items.length }, false)
+      return
+    }
     if (ctrl && e.key.toLowerCase() === 'r' && onSearchHistory) {
       e.preventDefault()
       onSearchHistory()
@@ -221,7 +333,7 @@ export function InputEditor({
       void complete()
     } else if (e.key === 'Escape') {
       e.preventDefault()
-      if (items.length > 0) closeList()
+      if (items.length > 0 || cycle) closeList()
       else onEscape()
     } else if (
       e.key === 'ArrowUp' &&
@@ -286,6 +398,11 @@ export function InputEditor({
               {t.text}
             </span>
           ))}
+          {ghost && (
+            <span data-ghost className="text-muted/70">
+              {ghost}
+            </span>
+          )}
           {/* O último \n de um <pre> não ocupa linha sem um caractere depois dele. */}
           {'​'}
         </pre>
@@ -303,12 +420,19 @@ export function InputEditor({
           onChange={(e) => {
             // Qualquer edição encerra o ciclo do Tab.
             completion.current = null
+            cmdCycle.current = null
             seq.current++
             setText(e.target.value)
+            setAtEnd(e.target.selectionStart === e.target.value.length)
+            if (cycle) setCycle(null)
             if (askError) setAskError(null)
             if (items.length > 0) setItems([])
           }}
           onKeyDown={onKeyDown}
+          onSelect={(e) => {
+            const el = e.currentTarget
+            setAtEnd(el.selectionStart === el.selectionEnd && el.selectionEnd === el.value.length)
+          }}
         />
       </div>
       {(asking || askError) && (
@@ -319,6 +443,20 @@ export function InputEditor({
         >
           {asking ? 'Pedindo o comando ao Claude… (Esc cancela)' : 'Não consegui gerar o comando'}
         </span>
+      )}
+      {cycle && (
+        <CompletionList
+          items={cycle.items}
+          active={cycle.i}
+          bottom={listBottom}
+          onPick={(i) => {
+            const c = cmdCycle.current
+            if (!c) return
+            applyCommand({ ...c, i }, false)
+            closeList()
+            inputRef.current?.focus()
+          }}
+        />
       )}
       <PathSuggestions
         items={items}

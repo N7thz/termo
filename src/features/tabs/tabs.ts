@@ -29,6 +29,8 @@ export interface SplitPair {
   left: number
   right: number
   ratio: number
+  /** Um painel ampliado: só a aba ativa do par aparece, sem desfazer a divisão. Não vai para o disco. */
+  zoomed?: boolean
 }
 
 export interface TabsState {
@@ -104,6 +106,15 @@ export type TabsAction =
   | { type: 'set-group'; key: number; group: string | null }
   | { type: 'split'; key: number; with: number }
   | { type: 'unsplit'; key: number }
+  /** Abre as abas de um layout salvo no perfil atual, com os grupos e divisões dele; a primeira fica ativa. */
+  | {
+      type: 'open-layout'
+      tabs: { kind: SessionKind; title: string; cwd?: string; shell?: string; group?: number }[]
+      groups: string[]
+      splits: { left: number; right: number; ratio: number }[]
+    }
+  /** Amplia o painel da aba na tela dividida, ou volta aos dois. */
+  | { type: 'zoom'; key: number }
   | { type: 'split-ratio'; key: number; ratio: number }
   /** `profiles`: perfis que ainda existem (abas e grupos de perfis excluídos ficam de fora). */
   | { type: 'restore'; snapshot: unknown; profiles?: readonly string[] }
@@ -153,7 +164,8 @@ const withoutPairsOf = (pairs: SplitPair[], ...keys: number[]) =>
   pairs.filter((p) => !keys.includes(p.left) && !keys.includes(p.right))
 
 /** Mesma regra do Rust (`settings::is_valid_shell`), sem o `auto`: o que a aba guarda é sempre um shell concreto. */
-export const isShellId = (s: string) => /^(pwsh|powershell|cmd|bash|wsl|wsl:[A-Za-z0-9._-]{1,64})$/.test(s)
+export const isShellId = (s: string) =>
+  /^(pwsh|powershell|cmd|bash|wsl|wsl:[A-Za-z0-9._-]{1,64}|ssh:[A-Za-z0-9_][A-Za-z0-9._-]{0,254})$/.test(s)
 
 export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
   switch (action.type) {
@@ -313,6 +325,46 @@ export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
     }
     case 'unsplit':
       return { ...state, pairs: withoutPairsOf(state.pairs, action.key) }
+    case 'open-layout': {
+      const profile = state.profile
+      const groups = action.groups.slice(0, 16).map((name, i) => ({
+        id: `g${state.nextGroup + i}`,
+        name: name.trim().slice(0, MAX_GROUP_NAME) || 'Grupo',
+        profile,
+        collapsed: false,
+      }))
+      const tabs: Tab[] = action.tabs.slice(0, 16).map((t, i) => {
+        const tab: Tab = { key: state.nextKey + i, kind: t.kind, title: t.title, profile }
+        if (t.cwd) tab.cwd = t.cwd
+        if (t.shell && isShellId(t.shell)) tab.shell = t.shell
+        if (t.group != null && groups[t.group]) tab.group = groups[t.group].id
+        return tab
+      })
+      if (tabs.length === 0) return state
+      const used = new Set<number>()
+      const pairs = action.splits.flatMap((p) => {
+        const left = tabs[p.left]
+        const right = tabs[p.right]
+        if (!left || !right || left === right || used.has(left.key) || used.has(right.key)) return []
+        used.add(left.key)
+        used.add(right.key)
+        return [{ left: left.key, right: right.key, ratio: clampRatio(p.ratio) }]
+      })
+      const next = {
+        ...state,
+        tabs: [...state.tabs, ...tabs],
+        groups: [...state.groups, ...groups],
+        nextKey: state.nextKey + tabs.length,
+        nextGroup: state.nextGroup + groups.length,
+        pairs: [...withoutPairsOf(state.pairs, ...used), ...pairs],
+      }
+      return withActive(next, tabs[0].key)
+    }
+    case 'zoom': {
+      const pair = pairOf(state, action.key)
+      if (!pair) return state
+      return { ...state, pairs: state.pairs.map((p) => (p === pair ? { ...p, zoomed: !p.zoomed } : p)) }
+    }
     case 'split-ratio':
       return {
         ...state,

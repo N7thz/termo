@@ -2,12 +2,13 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Button } from '@ui-sdk/react/button'
 import { Tabs, TabsList, TabsTab, TabsTabIcon } from '@ui-sdk/react/tabs'
 import { Tooltip, TooltipContent, TooltipShortcut, TooltipTrigger } from '@ui-sdk/react/tooltip'
-import { Plus, X } from 'lucide-react'
+import { Plus, Radio, X } from 'lucide-react'
 import { type CSSProperties, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { type AgentState, withAgentState } from './features/agent-status/agentState'
 import { BackgroundLayer, requestNextBackground } from './features/background/BackgroundLayer'
 import { isBackgroundActive, transparentTheme, wantsTransparentTerminal } from './features/background/background'
 import { SAVE_WORKFLOW_EVENT } from './features/blocks/commandBlocks'
+import { broadcastTargets, isTyped } from './features/broadcast/broadcast'
 import { BrowserPanel } from './features/browser/BrowserPanel'
 import { CodeReviewPanel } from './features/code-review/CodeReviewPanel'
 import { TabMenu } from './features/context-menu/TabMenu'
@@ -15,6 +16,11 @@ import { TerminalMenu } from './features/context-menu/TerminalMenu'
 import type { TabMenuAction, TerminalActions, TerminalMenuAction } from './features/context-menu/types'
 import type { Severity } from './features/highlights/matchers'
 import { ResizeEdge, useStoredWidth } from './features/layout/ResizeEdge'
+import { LayoutManager } from './features/layouts/LayoutManager'
+import { LayoutsContext } from './features/layouts/LayoutsContext'
+import { captureLayout, layoutCommands, openLayoutAction } from './features/layouts/layouts'
+import { type FinishedCommand, tabFinished } from './features/notifications/notifications'
+import { TabAlert, type TabAlertState } from './features/notifications/TabAlert'
 import { useNotifier } from './features/notifications/useNotifier'
 import { CommandPalette } from './features/palette/CommandPalette'
 import { createProfile, PROFILE_COLORS, pinFolder, profileColorCss } from './features/profiles/profiles'
@@ -24,8 +30,10 @@ import { SettingsPanel } from './features/settings/SettingsPanel'
 import { ModeChoices } from './features/shell-profiles/ModeChoices'
 import { NewShellMenu } from './features/shell-profiles/NewShellMenu'
 import { useShells } from './features/shell-profiles/useShells'
+import { useSshHosts } from './features/shell-profiles/useSshHosts'
 import { ShortcutsDialog } from './features/shortcuts/ShortcutsDialog'
 import { ClaudeIcon } from './features/tabs/ClaudeIcon'
+import { PaneNotice } from './features/tabs/PaneNotice'
 import { SplitDivider } from './features/tabs/SplitDivider'
 import { actionFor } from './features/tabs/shortcuts'
 import { TabKindIcon } from './features/tabs/TabKindIcon'
@@ -58,7 +66,7 @@ import { useWorkspace } from './features/workspace/useWorkspace'
 import { ipc } from './lib/ipc'
 import { actionButton, tooltip, tooltipKbd } from './lib/ui'
 import { clampFontSize, DEFAULT_SETTINGS } from './shared/settings'
-import type { Profile, SessionKind, Settings, Workflow } from './shared/types'
+import type { Profile, SavedLayout, SessionKind, Settings, Workflow } from './shared/types'
 
 // Feedback no pointer-down (active:), sem esperar o click. Ao fechar, a aba encolhe até sumir.
 const TAB =
@@ -67,36 +75,8 @@ const TAB =
 const TAB_CLOSE =
   'grid size-5 place-items-center rounded-[5px] text-[15px] leading-none opacity-0 [transition:opacity_120ms_ease-out,background-color_120ms_ease-out,scale_300ms_var(--spring)] group-hover/tab:opacity-70 group-data-active/tab:opacity-70 hover:bg-border hover:opacity-100 active:scale-[0.88] active:duration-50 motion-reduce:active:scale-100'
 
-/** Contador de erros (vermelho) ou ponto de aviso (amarelo) numa aba em segundo plano. */
-function TabAlert({
-  alert,
-  colors,
-}: {
-  alert?: { errors: number; warnings: number }
-  colors: { red?: string; yellow?: string }
-}) {
-  if (!alert) return null
-  if (alert.errors > 0) {
-    return (
-      <span
-        className="min-w-4 rounded-full px-1 text-center font-mono text-[10px] leading-4 font-semibold text-white"
-        style={{ background: colors.red }}
-        title={`${alert.errors} erro(s) novo(s)`}
-      >
-        {alert.errors > 99 ? '99+' : alert.errors}
-      </span>
-    )
-  }
-  return (
-    <span
-      className="size-2 rounded-full"
-      style={{ background: colors.yellow }}
-      title={`${alert.warnings} aviso(s) novo(s)`}
-      role="img"
-      aria-label={`${alert.warnings} aviso(s) novo(s)`}
-    />
-  )
-}
+/** Título de uma aba SSH (`ssh:<host>` → `<host>`). */
+const sshTitle = (shellId?: string) => (shellId?.startsWith('ssh:') ? shellId.slice(4) : undefined)
 
 async function toggleFullscreen() {
   const win = getCurrentWindow()
@@ -140,7 +120,7 @@ export function App() {
   const [showThemes, setShowThemes] = useState(false)
   const [showSessions, setShowSessions] = useState(false)
   // Erros/avisos novos em abas em segundo plano; some ao abrir a aba.
-  const [alerts, setAlerts] = useState<ReadonlyMap<number, { errors: number; warnings: number }>>(new Map())
+  const [alerts, setAlerts] = useState<ReadonlyMap<number, TabAlertState>>(new Map())
   const activeRef = useRef(state.active)
   activeRef.current = state.active
 
@@ -153,11 +133,22 @@ export function App() {
       return next
     })
   }, [])
+  /** Comando demorado terminou numa aba que não está à vista: marca a aba até ela ser aberta. */
+  const onTabCommandEnd = (key: number, visible: boolean, cmd: FinishedCommand) => {
+    const finished = tabFinished(cmd, visible)
+    if (!finished) return
+    setAlerts((prev) => {
+      const next = new Map(prev)
+      next.set(key, { ...(prev.get(key) ?? { errors: 0, warnings: 0 }), finished })
+      return next
+    })
+  }
 
   // Estado do Claude Code de cada aba (avatar). "Terminou" vira "pronto" quando a pessoa abre a aba.
   const [agents, setAgents] = useState<ReadonlyMap<number, AgentState>>(new Map())
   const notifier = useNotifier(settings.notifications)
   const installedShells = useShells()
+  const sshHosts = useSshHosts()
   /** Id da saída guardada de cada aba nova (as restauradas já trazem o seu em `tab.outputId`). */
   const outputIds = useRef(new Map<number, string>())
   useEffect(() => {
@@ -211,7 +202,7 @@ export function App() {
       dispatch({
         type: 'open',
         kind,
-        title: kind === 'claude' ? 'Claude Code' : (opts.shell ?? shellName),
+        title: kind === 'claude' ? 'Claude Code' : (opts.shell ?? sshTitle(opts.shellId) ?? shellName),
         cwd: opts.cwd,
         shell: opts.shellId,
         profile: opts.profile,
@@ -355,8 +346,12 @@ export function App() {
     const p = pairOf(state, key)
     return p && (p.left === key ? p.right : p.left)
   }
+  // Zoom: a aba ativa ocupa o cartão; a outra metade fica escondida, com o tamanho de antes (o pty não é redimensionado).
+  const zoomed = split?.zoomed === true
+  const hiddenByZoom = (key: number) => zoomed && key !== state.active && (key === split?.left || key === split?.right)
   const paneStyle = (key: number): CSSProperties | undefined => {
     if (!split) return undefined
+    if (zoomed && key === state.active) return undefined
     if (key === split.left) return { left: 0, width: `${split.ratio * 100}%` }
     if (key === split.right) return { left: `${split.ratio * 100}%`, right: 0 }
     return undefined
@@ -364,6 +359,22 @@ export function App() {
 
   // Ações do xterm de cada aba, para o menu do botão direito.
   const terminalActions = useRef(new Map<number, TerminalActions>())
+
+  // Digitar em vários painéis: o que é digitado na aba ativa vai também para as outras abas do grupo dela
+  // (ou para o par da tela dividida). Fica ligado até desligar; não é salvo.
+  const [broadcast, setBroadcast] = useState(false)
+  const isClaudeTab = (t: Tab) => t.kind === 'claude' || (agents.get(t.key) ?? 'off') !== 'off'
+  const broadcastTo = broadcast ? broadcastTargets(state, state.active, isClaudeTab) : []
+  const receiving = new Set(broadcastTo)
+  // Quem transmite (a aba ativa) e quem recebe ganham a indicação; sem destino, ninguém.
+  const broadcasting = useMemo(
+    () => new Set(broadcastTo.length > 0 && state.active != null ? [state.active, ...broadcastTo] : []),
+    [broadcastTo, state.active],
+  )
+  const forwardInput = (key: number, data: string) => {
+    if (!broadcast || key !== state.active || !isTyped(data)) return
+    for (const target of broadcastTo) terminalActions.current.get(target)?.write?.(data)
+  }
 
   // ---- Workflows: comandos salvos com {{parâmetros}} (paleta, Ctrl+Shift+R e "salvar como workflow" dos blocos) ----
   const [workflowDialog, setWorkflowDialog] = useState<{ open: boolean; initial: Workflow | null }>({
@@ -393,6 +404,32 @@ export function App() {
   }, [])
   /** Comando que a aba nova roda no primeiro prompt (pela chave da aba; vem da página de Sessões). */
   const initialCommands = useRef(new Map<number, string>())
+  // ---- Layouts salvos: abas, grupos, divisões e comandos iniciais do perfil, abertos com um clique ----
+  const [layoutManager, setLayoutManager] = useState<{ open: boolean; saving: boolean }>({ open: false, saving: false })
+  const savedLayouts = settings.layouts ?? []
+  const currentLayout = (): SavedLayout | null => {
+    const snap = captureLayout(
+      state,
+      '',
+      (t) => workspace.info(t.key).cwd ?? t.cwd,
+      (t) => initialCommands.current.get(t.key) ?? '',
+    )
+    return snap.tabs.length > 0 ? snap : null
+  }
+  const saveLayouts = (layouts: SavedLayout[]) => {
+    setSettings((s) => ({ ...s, layouts }))
+    updateSettings({ layouts })
+  }
+  const openLayout = (layout: SavedLayout) => {
+    for (const [key, command] of layoutCommands(layout, state.nextKey)) initialCommands.current.set(key, command)
+    setShowSessions(false)
+    dispatch(openLayoutAction(layout))
+  }
+  const layoutsApi = {
+    layouts: savedLayouts,
+    onOpen: (index: number) => savedLayouts[index] && openLayout(savedLayouts[index]),
+    onManage: () => setLayoutManager({ open: true, saving: false }),
+  }
   /** Abre uma aba na pasta e, se houver, roda o comando nela (`claude attach` / `claude --resume`). */
   // Menu da bandeja: "Nova aba" e "Nova aba com Claude Code" chegam aqui.
   useTrayActions((kind) => openTab(kind))
@@ -410,18 +447,23 @@ export function App() {
     ? `${activeInfo.git.added}:${activeInfo.git.removed}:${activeInfo.git.changed}:${activeInfo.git.untracked}`
     : ''
   /** Texto esperando uma aba do Claude ficar pronta (`key` nula: a próxima aba do Claude que abrir). */
-  const pendingClaude = useRef<{ text: string; key: number | null; at: number } | null>(null)
-  const deliverToClaude = (key: number, text: string) => {
+  const pendingClaude = useRef<{ text: string; key: number | null; at: number; submit: boolean } | null>(null)
+  const deliverToClaude = (key: number, text: string, submit = true) => {
     dispatch({ type: 'activate', key })
     // Um instante para a aba aparecer e o xterm receber o foco antes da colagem.
-    window.setTimeout(() => terminalActions.current.get(key)?.sendText?.(text), 150)
+    window.setTimeout(() => {
+      const actions = terminalActions.current.get(key)
+      if (submit) actions?.sendText?.(text)
+      else actions?.pasteText?.(text)
+    }, 150)
   }
-  const sendToClaude = (text: string) => {
+  /** `submit: false` só cola (blocos mandados como contexto: a pessoa escreve a pergunta e manda). */
+  const sendToClaude = (text: string, submit = true) => {
     const active = tabs.find((t) => t.key === state.active)
     const target = active?.kind === 'claude' ? active : tabs.find((t) => t.kind === 'claude')
     const ready = target && agents.get(target.key) && agents.get(target.key) !== 'off'
-    if (target && ready) return deliverToClaude(target.key, text)
-    pendingClaude.current = { text, key: target?.key ?? null, at: Date.now() }
+    if (target && ready) return deliverToClaude(target.key, text, submit)
+    pendingClaude.current = { text, key: target?.key ?? null, at: Date.now(), submit }
     if (target) dispatch({ type: 'activate', key: target.key })
     else openTab('claude', { cwd: reviewCwd ?? undefined })
   }
@@ -431,7 +473,7 @@ export function App() {
     if (!pending || s !== 'idle' || tab.kind !== 'claude') return
     if (pending.key != null && pending.key !== tab.key) return
     pendingClaude.current = null
-    if (Date.now() - pending.at < 120_000) deliverToClaude(tab.key, pending.text)
+    if (Date.now() - pending.at < 120_000) deliverToClaude(tab.key, pending.text, pending.submit)
   }
 
   const openThemes = useCallback(() => {
@@ -533,6 +575,10 @@ export function App() {
           return activeTab && runTabAction(activeTab, 'duplicate')
         case 'split-tab':
           return activeTab && runTabAction(activeTab, pairOf(state, activeTab.key) ? 'unsplit' : 'split-new')
+        case 'zoom-pane':
+          return state.active != null && dispatch({ type: 'zoom', key: state.active })
+        case 'broadcast':
+          return setBroadcast((v) => !v)
         case 'close-tab':
           return state.active != null && closeTab(state.active)
         case 'next-tab':
@@ -604,414 +650,510 @@ export function App() {
   })
 
   return (
-    <Tabs
-      className="flex h-full bg-frame"
-      activation="manual"
-      value={state.active == null ? null : String(state.active)}
-      onValueChange={(value) => value != null && dispatch({ type: 'activate', key: Number(value) })}
-    >
-      {/* Como no Dia: a lateral ocupa a altura toda, e ela, a barra e o rodapé ficam direto sobre a moldura;
+    <LayoutsContext.Provider value={layoutsApi}>
+      <Tabs
+        className="flex h-full bg-frame"
+        activation="manual"
+        value={state.active == null ? null : String(state.active)}
+        onValueChange={(value) => value != null && dispatch({ type: 'activate', key: Number(value) })}
+      >
+        {/* Como no Dia: a lateral ocupa a altura toda, e ela, a barra e o rodapé ficam direto sobre a moldura;
           só o terminal tem cartão. Fica sempre montada e abre/fecha pela largura (o que sobra fechada, 6px,
           é a margem esquerda), para a animação partir de onde estiver se o atalho for apertado no meio. */}
-      <div
-        className={`relative flex-none overflow-hidden ${sidebarDragging ? '' : '[transition:width_380ms_var(--spring-soft),opacity_200ms_ease-out] motion-reduce:[transition:opacity_150ms_ease]'} ${layout.sidebar ? (layout.sidebarCollapsed ? 'w-14' : '') : 'w-2.5 opacity-0'}`}
-        style={layout.sidebar && !layout.sidebarCollapsed ? { width: sidebarWidth } : undefined}
-        inert={!layout.sidebar}
-      >
-        {/* Arraste a borda direita para mudar a largura da lateral (só aberta; a minimizada é fixa). */}
-        {layout.sidebar && !layout.sidebarCollapsed && (
-          <ResizeEdge
-            side="right"
-            label="Largura da lateral"
-            width={sidebarWidth}
-            min={SIDEBAR_MIN}
-            max={() => Math.min(SIDEBAR_MAX, window.innerWidth - 480)}
-            fallback={SIDEBAR_DEFAULT}
-            onWidth={setSidebarWidth}
-            onCommit={commitSidebarWidth}
-            onDragging={setSidebarDragging}
-          />
-        )}
-        {/* Largura fixa por dentro: ao abrir/fechar, o wrapper anima e corta, sem espremer o conteúdo. */}
-        <div className="h-full" style={layout.sidebarCollapsed ? undefined : { width: sidebarWidth }}>
-          <TabSidebar
-            profiles={profiles}
-            profile={profile}
-            tabs={tabs}
-            active={state.active}
-            info={workspace.info}
-            colors={diffColors}
-            onActivate={(key) => dispatch({ type: 'activate', key })}
-            onClose={closeTab}
-            onNew={(kind, dir, shellId) => openTab(kind, { cwd: dir, shellId })}
-            defaultShell={settings.defaultShell}
-            onTabAction={runTabAction}
-            onSwitchProfile={switchProfile}
-            onAddProfile={addProfile}
-            onEditProfile={editProfile}
-            onDeleteProfile={deleteProfile}
-            onUnpin={(dir) => editProfile({ pinned: profile.pinned.filter((d) => d !== dir) })}
-            closing={closing}
-            renderAlert={(key) => <TabAlert alert={alerts.get(key)} colors={theme.terminal} />}
-            groups={visibleGroups(state)}
-            onGroupToggle={(id) => dispatch({ type: 'group-toggle', id })}
-            onGroupRename={(id, name) => dispatch({ type: 'group-rename', id, name })}
-            onGroupDelete={(id) => dispatch({ type: 'group-delete', id })}
-            partnerOf={partnerOf}
-            agents={agents}
-            onReorder={(key, before, group) => dispatch({ type: 'reorder', key, before, group })}
-            collapsed={layout.sidebarCollapsed}
-            onToggleCollapsed={() =>
-              updateSettings({ layout: { ...layout, sidebarCollapsed: !layout.sidebarCollapsed } })
-            }
-            onSplitWith={(key) =>
-              state.active != null && key !== state.active && dispatch({ type: 'split', key: state.active, with: key })
-            }
-          />
-        </div>
-      </div>
-      <div className="flex min-w-0 flex-1 flex-col">
-        {/* Sem a barra nativa: esta é a barra de título. Arrasta pelo fundo e pelo espaço vazio; duplo clique maximiza. */}
-        <header data-tauri-drag-region className="relative z-5 flex h-10 flex-none items-center gap-2 px-2 select-none">
-          {!layout.sidebar && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    className={`${actionButton} flex-none gap-1.5 text-[12px] font-[600] text-text`}
-                    aria-label={`Perfil ${profile.name}: trocar`}
-                    onClick={() => switchProfile(profiles[(profiles.indexOf(profile) + 1) % profiles.length].id)}
-                  />
-                }
-              >
-                <span className="size-2 rounded-full" style={{ background: profileColorCss(profile.color) }} />
-                {profile.name}
-              </TooltipTrigger>
-              <TooltipContent className={tooltip} sideOffset={6}>
-                Trocar de perfil
-              </TooltipContent>
-            </Tooltip>
+        <div
+          className={`relative flex-none overflow-hidden ${sidebarDragging ? '' : '[transition:width_380ms_var(--spring-soft),opacity_200ms_ease-out] motion-reduce:[transition:opacity_150ms_ease]'} ${layout.sidebar ? (layout.sidebarCollapsed ? 'w-14' : '') : 'w-2.5 opacity-0'}`}
+          style={layout.sidebar && !layout.sidebarCollapsed ? { width: sidebarWidth } : undefined}
+          inert={!layout.sidebar}
+        >
+          {/* Arraste a borda direita para mudar a largura da lateral (só aberta; a minimizada é fixa). */}
+          {layout.sidebar && !layout.sidebarCollapsed && (
+            <ResizeEdge
+              side="right"
+              label="Largura da lateral"
+              width={sidebarWidth}
+              min={SIDEBAR_MIN}
+              max={() => Math.min(SIDEBAR_MAX, window.innerWidth - 480)}
+              fallback={SIDEBAR_DEFAULT}
+              onWidth={setSidebarWidth}
+              onCommit={commitSidebarWidth}
+              onDragging={setSidebarDragging}
+            />
           )}
-          <TabsList
-            className={`flex min-w-0 gap-0.5 overflow-x-auto py-0.5 [scrollbar-width:none] ${layout.sidebar ? 'hidden' : ''}`}
-            aria-label="Abas"
-          >
-            {tabs.map((tab, index) => (
-              <TabMenu
-                key={tab.key}
-                first={index === 0}
-                last={index === tabs.length - 1}
-                alone={tabs.length === 1}
-                groups={visibleGroups(state).filter((g) => g.id !== tab.group)}
-                inGroup={!!tab.group}
-                split={partnerOf(tab.key) != null}
-                canSplitWithActive={
-                  state.active != null && tab.key !== state.active && partnerOf(tab.key) !== state.active
-                }
-                onAction={(action) => runTabAction(tab, action)}
-                trigger={
-                  <div
-                    data-active={tab.key === state.active || undefined}
-                    data-closing={closing.has(tab.key) || undefined}
-                    className={TAB}
-                    onAuxClick={(e) => e.button === 1 && closeTab(tab.key)}
-                    title={tab.title}
-                  />
-                }
-              >
-                <TabsTab
-                  className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-start outline-none"
-                  value={String(tab.key)}
-                >
-                  <TabsTabIcon className="flex">
-                    <TabKindIcon kind={tab.kind} shell={tab.shell} agent={agents.get(tab.key)} />
-                  </TabsTabIcon>
-                  <span className="flex-1 truncate">{tab.title}</span>
-                  <TabAlert alert={alerts.get(tab.key)} colors={theme.terminal} />
-                </TabsTab>
-                {/* Fora do tab (botão dentro de botão é inválido) e fora da ordem de Tab: pelo teclado é Ctrl+Shift+W. */}
-                <Button
-                  className={TAB_CLOSE}
-                  tabIndex={-1}
-                  aria-label={`Fechar ${tab.title}`}
-                  onClick={() => closeTab(tab.key)}
-                >
-                  <X size={12} />
-                </Button>
-              </TabMenu>
-            ))}
-          </TabsList>
-          <span data-tauri-drag-region className="flex-1 self-stretch" />
-          {layout.diffBadge && activeInfo.git && (
-            <Button
-              className="rounded-md hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-accent"
-              aria-label="Abrir a revisão de código"
-              title="Revisão de código (Ctrl+Shift+G)"
-              onClick={() => setShowReview((v) => !v)}
-            >
-              <GitDiff git={activeInfo.git} colors={diffColors} className="px-1" />
-            </Button>
-          )}
-          <div className="flex gap-1">
-            {/* Os atalhos são ligados em actionFor; o shortcut do Tooltip só mostra e anuncia. */}
-            <Tooltip shortcut="mod+shift+t">
-              <TooltipTrigger
-                render={<Button className={actionButton} aria-label="Nova aba" onClick={() => openTab('shell')} />}
-              >
-                <Plus size={15} />
-              </TooltipTrigger>
-              <TooltipContent className={tooltip} sideOffset={6}>
-                Nova aba <TooltipShortcut className={tooltipKbd} />
-              </TooltipContent>
-            </Tooltip>
-            <NewShellMenu defaultShell={settings.defaultShell} onPick={(kind, shellId) => openTab(kind, { shellId })} />
-            <SessionsIndicator onOpen={() => setShowSessions((v) => !v)} />
-            <UsageBattery />
-            <UpdateButton />
-            <Tooltip shortcut="mod+shift+k">
-              <TooltipTrigger
-                render={
-                  <Button
-                    className={`${actionButton} text-[12px] font-[560] tracking-[0.01em] text-claude`}
-                    onClick={() => openTab('claude')}
-                  />
-                }
-              >
-                <ClaudeIcon size={13} /> Claude
-              </TooltipTrigger>
-              <TooltipContent className={tooltip} sideOffset={6}>
-                Nova aba com Claude Code <TooltipShortcut className={tooltipKbd} />
-              </TooltipContent>
-            </Tooltip>
-            <SettingsPanel
-              open={showSettings}
-              onOpenChange={setShowSettings}
-              settings={settings}
-              onChange={updateSettings}
-              onOpenThemes={openThemes}
-              onOpenShortcuts={() => {
-                setShowSettings(false)
-                setShowShortcuts(true)
-              }}
-              onOpenWorkflows={() => {
-                setShowSettings(false)
-                setWorkflowManager({ open: true, draft: null })
-              }}
+          {/* Largura fixa por dentro: ao abrir/fechar, o wrapper anima e corta, sem espremer o conteúdo. */}
+          <div className="h-full" style={layout.sidebarCollapsed ? undefined : { width: sidebarWidth }}>
+            <TabSidebar
+              profiles={profiles}
+              profile={profile}
+              tabs={tabs}
+              active={state.active}
+              info={workspace.info}
+              colors={diffColors}
+              onActivate={(key) => dispatch({ type: 'activate', key })}
+              onClose={closeTab}
+              onNew={(kind, dir, shellId) => openTab(kind, { cwd: dir, shellId })}
+              defaultShell={settings.defaultShell}
+              onTabAction={runTabAction}
+              onSwitchProfile={switchProfile}
+              onAddProfile={addProfile}
+              onEditProfile={editProfile}
+              onDeleteProfile={deleteProfile}
+              onUnpin={(dir) => editProfile({ pinned: profile.pinned.filter((d) => d !== dir) })}
+              closing={closing}
+              renderAlert={(key) => <TabAlert alert={alerts.get(key)} colors={theme.terminal} />}
+              groups={visibleGroups(state)}
+              onGroupToggle={(id) => dispatch({ type: 'group-toggle', id })}
+              onGroupRename={(id, name) => dispatch({ type: 'group-rename', id, name })}
+              onGroupDelete={(id) => dispatch({ type: 'group-delete', id })}
+              partnerOf={partnerOf}
+              broadcasting={broadcasting}
+              agents={agents}
+              onReorder={(key, before, group) => dispatch({ type: 'reorder', key, before, group })}
+              collapsed={layout.sidebarCollapsed}
+              onToggleCollapsed={() =>
+                updateSettings({ layout: { ...layout, sidebarCollapsed: !layout.sidebarCollapsed } })
+              }
+              onSplitWith={(key) =>
+                state.active != null &&
+                key !== state.active &&
+                dispatch({ type: 'split', key: state.active, with: key })
+              }
             />
           </div>
-          <WindowControls />
-        </header>
-
-        <div className={`flex min-h-0 flex-1 gap-2.5 pr-2.5 ${layout.statusBar ? '' : 'pb-2.5'}`}>
-          {/* O cartão: o terminal recuado da borda, com cantos arredondados e sombra suave. */}
-          {/* Aba arrastada da lateral e solta aqui: abre ao lado da ativa (ver useTabDrag). */}
-          <main
-            data-drop-split
-            className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-[10px] bg-bg shadow-card outline-accent [transition:outline-color_140ms_ease-out] data-drop-active:outline-2 data-drop-active:-outline-offset-2"
-          >
-            {/* Imagem de fundo atrás das abas (o xterm fica transparente; ver features/background). */}
-            <BackgroundLayer settings={settings.background} target="terminal" />
-            {state.tabs.map((tab) => (
-              // Painel próprio (não o TabsPanel): na tela dividida duas abas ficam visíveis ao mesmo tempo.
-              <div
-                key={tab.key}
-                role="tabpanel"
-                aria-label={tab.title}
-                className={`absolute inset-y-0 ${paneStyle(tab.key) ? '' : 'inset-x-0'} ${split && paneStyle(tab.key) && tab.key !== state.active ? 'opacity-80' : ''} [transition:opacity_160ms_ease-out]`}
-                style={paneStyle(tab.key)}
-              >
-                <TerminalMenu
-                  actions={() => terminalActions.current.get(tab.key)}
-                  onAction={(action) => runTerminalAction(tab.key, action)}
-                >
-                  <TerminalView
-                    kind={tab.kind}
-                    shell={tab.shell}
-                    onShell={(shell) =>
-                      tab.shell !== shell && dispatch({ type: 'update', key: tab.key, patch: { shell } })
-                    }
-                    initialCommand={initialCommands.current.get(tab.key)}
-                    active={tab.key === state.active}
-                    visible={tab.key === state.active || paneStyle(tab.key) != null}
-                    onFocus={() => tab.key !== state.active && dispatch({ type: 'activate', key: tab.key })}
-                    settings={settings}
-                    terminalTheme={terminalTheme}
-                    cwd={tab.cwd || profileOf(tab)?.cwd || cwd}
-                    onTitle={(title) => dispatch({ type: 'update', key: tab.key, patch: { title } })}
-                    onKind={(kind) =>
-                      dispatch({
-                        type: 'update',
-                        key: tab.key,
-                        patch: { kind, title: kind === 'claude' ? 'Claude Code' : shellName },
-                      })
-                    }
-                    onClose={() => dispatch({ type: 'close', key: tab.key })}
-                    onSeverity={(severity) => onSeverity(tab.key, severity)}
-                    onAgent={(s) => {
-                      setAgents((m) => withAgentState(m, tab.key, s))
-                      onClaudeState(tab, s)
-                      notifier.agent(tab.key, tab.title, s)
-                    }}
-                    onCommandEnd={(cmd) => notifier.command(cmd)}
-                    outputId={outputIdOf(tab)}
-                    restoreOutput={keepOutput && tab.outputId != null}
-                    onActions={(actions) =>
-                      actions ? terminalActions.current.set(tab.key, actions) : terminalActions.current.delete(tab.key)
-                    }
-                    onCwd={(dir) => workspace.reportCwd(tab.key, dir)}
-                    onPrompt={() => workspace.reportPrompt(tab.key)}
-                    git={workspace.info(tab.key).git}
-                  />
-                </TerminalMenu>
-              </div>
-            ))}
-            {split && (
-              <SplitDivider
-                ratio={split.ratio}
-                onRatio={(ratio) => dispatch({ type: 'split-ratio', key: split.left, ratio })}
-              />
-            )}
-            {tabs.length === 0 && (
-              <div className="absolute inset-0 grid animate-fade-in place-items-center motion-reduce:animate-none">
-                <div className="flex flex-col items-center gap-3 text-[13px] text-muted">
-                  <span>Nenhuma aba no perfil {profile.name}.</span>
-                  <ModeChoices
-                    defaultShell={settings.defaultShell}
-                    onPick={(kind, shellId) => openTab(kind, { shellId })}
-                  />
-                </div>
-              </div>
-            )}
-            {showSessions && (
-              <SessionsPage
-                active
-                cwd={state.active != null ? workspace.info(state.active).cwd : null}
-                onClose={() => setShowSessions(false)}
-                onOpen={openTabWithCommand}
-              />
-            )}
-            {showThemes && (
-              <ThemesPage
-                value={settings.theme}
-                onChange={(id) => updateSettings({ theme: id })}
-                onPreview={setPreviewTheme}
-                onClose={closeThemes}
-              />
-            )}
-          </main>
-          <BrowserPanel linkTarget={settings.linkTarget} />
-          <CodeReviewPanel
-            open={showReview}
-            cwd={reviewCwd}
-            version={reviewVersion}
-            colors={diffColors}
-            fontFamily={settings.fontFamily}
-            onClose={() => setShowReview(false)}
-            onSendToClaude={sendToClaude}
-          />
         </div>
-        {layout.statusBar && (
-          <StatusBar
-            info={activeInfo}
-            kind={tabs.find((t) => t.key === state.active)?.kind}
-            shell={tabs.find((t) => t.key === state.active)?.shell}
-            shellName={shellName}
-            colors={diffColors}
-            onSearch={() => setShowPalette(true)}
-            searchKeys="Ctrl+Shift+P"
-          />
-        )}
-      </div>
-      <ShortcutsDialog open={showShortcuts} onOpenChange={setShowShortcuts} />
-      <WorkflowDialog
-        open={workflowDialog.open}
-        onOpenChange={(open) => setWorkflowDialog((d) => ({ ...d, open }))}
-        workflows={settings.workflows}
-        initial={workflowDialog.initial}
-        canRun={tabs.find((t) => t.key === state.active)?.kind === 'shell'}
-        onSubmit={sendWorkflow}
-        onAdd={(w) => saveWorkflows([...settings.workflows, w])}
-        onManage={() => {
-          setWorkflowDialog((d) => ({ ...d, open: false }))
-          setWorkflowManager({ open: true, draft: null })
-        }}
-      />
-      <WorkflowManager
-        open={workflowManager.open}
-        onOpenChange={(open) => setWorkflowManager((m) => ({ ...m, open }))}
-        workflows={settings.workflows}
-        draft={workflowManager.draft}
-        onChange={saveWorkflows}
-      />
-      <CommandPalette
-        open={showPalette}
-        onOpenChange={setShowPalette}
-        tabs={state.tabs}
-        active={state.active}
-        info={workspace.info}
-        actions={[
-          { id: 'new-shell', label: 'Nova aba', keys: 'mod+shift+t', run: () => openTab('shell') },
-          { id: 'new-claude', label: 'Nova aba com Claude Code', keys: 'mod+shift+k', run: () => openTab('claude') },
-          // Um item por shell instalado: "Nova aba: Prompt de Comando", "Nova aba: Ubuntu (WSL)"...
-          ...installedShells.map((s) => ({
-            id: `new-shell-${s.id}`,
-            label: `Nova aba: ${s.label}`,
-            run: () => openTab('shell', { shellId: s.id }),
-          })),
-          { id: 'themes', label: 'Temas', keys: 'mod+shift+,', run: openThemes },
-          { id: 'settings', label: 'Configurações', keys: 'mod+,', run: () => setShowSettings(true) },
-          {
-            id: 'new-window',
-            label: 'Nova janela',
-            keys: 'mod+shift+n',
-            run: () => void ipc.newWindow(state.active != null ? workspace.info(state.active).cwd : cwd),
-          },
-          {
-            id: 'code-review',
-            label: showReview ? 'Fechar a revisão de código' : 'Revisão de código',
-            keys: 'mod+shift+g',
-            run: () => setShowReview((v) => !v),
-          },
-          { id: 'sessions', label: 'Sessões do Claude Code', keys: 'mod+shift+a', run: () => setShowSessions(true) },
-          {
-            id: 'sidebar',
-            label: layout.sidebar ? 'Ocultar abas na lateral' : 'Mostrar abas na lateral',
-            keys: 'mod+shift+b',
-            run: () => updateSettings({ layout: { ...layout, sidebar: !layout.sidebar } }),
-          },
-          {
-            id: 'collapse-sidebar',
-            label: layout.sidebarCollapsed ? 'Expandir a lateral' : 'Minimizar a lateral',
-            keys: 'mod+alt+b',
-            run: () =>
-              updateSettings({ layout: { ...layout, sidebar: true, sidebarCollapsed: !layout.sidebarCollapsed } }),
-          },
-          { id: 'shortcuts', label: 'Atalhos de teclado', keys: 'f1', run: () => setShowShortcuts(true) },
-          ...(isBackgroundActive(settings.background) && settings.background.images.length > 1
-            ? [{ id: 'background-next', label: 'Próxima imagem de fundo', run: requestNextBackground }]
-            : []),
-          {
-            id: 'workflows',
-            label: 'Workflows (comandos salvos)',
-            keys: 'mod+shift+r',
-            run: () => setWorkflowDialog({ open: true, initial: null }),
-          },
-          ...profiles
-            .filter((p) => p.id !== profile.id)
-            .map((p) => ({
-              id: `profile-${p.id}`,
-              label: `Trocar para o perfil ${p.name}`,
-              run: () => switchProfile(p.id),
+        <div className="flex min-w-0 flex-1 flex-col">
+          {/* Sem a barra nativa: esta é a barra de título. Arrasta pelo fundo e pelo espaço vazio; duplo clique maximiza. */}
+          <header
+            data-tauri-drag-region
+            className="relative z-5 flex h-10 flex-none items-center gap-2 px-2 select-none"
+          >
+            {!layout.sidebar && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      className={`${actionButton} flex-none gap-1.5 text-[12px] font-[600] text-text`}
+                      aria-label={`Perfil ${profile.name}: trocar`}
+                      onClick={() => switchProfile(profiles[(profiles.indexOf(profile) + 1) % profiles.length].id)}
+                    />
+                  }
+                >
+                  <span className="size-2 rounded-full" style={{ background: profileColorCss(profile.color) }} />
+                  {profile.name}
+                </TooltipTrigger>
+                <TooltipContent className={tooltip} sideOffset={6}>
+                  Trocar de perfil
+                </TooltipContent>
+              </Tooltip>
+            )}
+            <TabsList
+              className={`flex min-w-0 gap-0.5 overflow-x-auto py-0.5 [scrollbar-width:none] ${layout.sidebar ? 'hidden' : ''}`}
+              aria-label="Abas"
+            >
+              {tabs.map((tab, index) => (
+                <TabMenu
+                  key={tab.key}
+                  first={index === 0}
+                  last={index === tabs.length - 1}
+                  alone={tabs.length === 1}
+                  groups={visibleGroups(state).filter((g) => g.id !== tab.group)}
+                  inGroup={!!tab.group}
+                  split={partnerOf(tab.key) != null}
+                  canSplitWithActive={
+                    state.active != null && tab.key !== state.active && partnerOf(tab.key) !== state.active
+                  }
+                  onAction={(action) => runTabAction(tab, action)}
+                  trigger={
+                    <div
+                      data-active={tab.key === state.active || undefined}
+                      data-closing={closing.has(tab.key) || undefined}
+                      className={TAB}
+                      onAuxClick={(e) => e.button === 1 && closeTab(tab.key)}
+                      title={tab.title}
+                    />
+                  }
+                >
+                  <TabsTab
+                    className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-start outline-none"
+                    value={String(tab.key)}
+                  >
+                    <TabsTabIcon className="flex">
+                      <TabKindIcon kind={tab.kind} shell={tab.shell} agent={agents.get(tab.key)} />
+                    </TabsTabIcon>
+                    <span className="flex-1 truncate">{tab.title}</span>
+                    {broadcasting.has(tab.key) && (
+                      <Radio
+                        size={12}
+                        className="flex-none text-accent"
+                        aria-label="Recebendo o que é digitado"
+                        role="img"
+                      />
+                    )}
+                    <TabAlert alert={alerts.get(tab.key)} colors={theme.terminal} />
+                  </TabsTab>
+                  {/* Fora do tab (botão dentro de botão é inválido) e fora da ordem de Tab: pelo teclado é Ctrl+Shift+W. */}
+                  <Button
+                    className={TAB_CLOSE}
+                    tabIndex={-1}
+                    aria-label={`Fechar ${tab.title}`}
+                    onClick={() => closeTab(tab.key)}
+                  >
+                    <X size={12} />
+                  </Button>
+                </TabMenu>
+              ))}
+            </TabsList>
+            <span data-tauri-drag-region className="flex-1 self-stretch" />
+            {layout.diffBadge && activeInfo.git && (
+              <Button
+                className="rounded-md hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-accent"
+                aria-label="Abrir a revisão de código"
+                title="Revisão de código (Ctrl+Shift+G)"
+                onClick={() => setShowReview((v) => !v)}
+              >
+                <GitDiff git={activeInfo.git} colors={diffColors} className="px-1" />
+              </Button>
+            )}
+            <div className="flex gap-1">
+              {/* Os atalhos são ligados em actionFor; o shortcut do Tooltip só mostra e anuncia. */}
+              <Tooltip shortcut="mod+shift+t">
+                <TooltipTrigger
+                  render={<Button className={actionButton} aria-label="Nova aba" onClick={() => openTab('shell')} />}
+                >
+                  <Plus size={15} />
+                </TooltipTrigger>
+                <TooltipContent className={tooltip} sideOffset={6}>
+                  Nova aba <TooltipShortcut className={tooltipKbd} />
+                </TooltipContent>
+              </Tooltip>
+              <NewShellMenu
+                defaultShell={settings.defaultShell}
+                onPick={(kind, shellId) => openTab(kind, { shellId })}
+              />
+              <SessionsIndicator onOpen={() => setShowSessions((v) => !v)} />
+              <UsageBattery />
+              <UpdateButton />
+              <Tooltip shortcut="mod+shift+k">
+                <TooltipTrigger
+                  render={
+                    <Button
+                      className={`${actionButton} text-[12px] font-[560] tracking-[0.01em] text-claude`}
+                      onClick={() => openTab('claude')}
+                    />
+                  }
+                >
+                  <ClaudeIcon size={13} /> Claude
+                </TooltipTrigger>
+                <TooltipContent className={tooltip} sideOffset={6}>
+                  Nova aba com Claude Code <TooltipShortcut className={tooltipKbd} />
+                </TooltipContent>
+              </Tooltip>
+              <SettingsPanel
+                open={showSettings}
+                onOpenChange={setShowSettings}
+                settings={settings}
+                onChange={updateSettings}
+                onOpenThemes={openThemes}
+                onOpenShortcuts={() => {
+                  setShowSettings(false)
+                  setShowShortcuts(true)
+                }}
+                onOpenWorkflows={() => {
+                  setShowSettings(false)
+                  setWorkflowManager({ open: true, draft: null })
+                }}
+              />
+            </div>
+            <WindowControls />
+          </header>
+
+          <div className={`flex min-h-0 flex-1 gap-2.5 pr-2.5 ${layout.statusBar ? '' : 'pb-2.5'}`}>
+            {/* O cartão: o terminal recuado da borda, com cantos arredondados e sombra suave. */}
+            {/* Aba arrastada da lateral e solta aqui: abre ao lado da ativa (ver useTabDrag). */}
+            <main
+              data-drop-split
+              className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-[10px] bg-bg shadow-card outline-accent [transition:outline-color_140ms_ease-out] data-drop-active:outline-2 data-drop-active:-outline-offset-2"
+            >
+              {/* Imagem de fundo atrás das abas (o xterm fica transparente; ver features/background). */}
+              <BackgroundLayer settings={settings.background} target="terminal" />
+              {state.tabs.map((tab) => (
+                // Painel próprio (não o TabsPanel): na tela dividida duas abas ficam visíveis ao mesmo tempo.
+                <div
+                  key={tab.key}
+                  role="tabpanel"
+                  aria-label={tab.title}
+                  className={`absolute inset-y-0 ${paneStyle(tab.key) ? '' : 'inset-x-0'} ${split && paneStyle(tab.key) && tab.key !== state.active ? 'opacity-80' : ''} ${hiddenByZoom(tab.key) ? 'pointer-events-none' : ''} [transition:opacity_160ms_ease-out]`}
+                  style={paneStyle(tab.key)}
+                >
+                  <TerminalMenu
+                    actions={() => terminalActions.current.get(tab.key)}
+                    onAction={(action) => runTerminalAction(tab.key, action)}
+                  >
+                    <TerminalView
+                      kind={tab.kind}
+                      shell={tab.shell}
+                      onShell={(shell) =>
+                        tab.shell !== shell && dispatch({ type: 'update', key: tab.key, patch: { shell } })
+                      }
+                      initialCommand={initialCommands.current.get(tab.key)}
+                      onInput={(data) => forwardInput(tab.key, data)}
+                      active={tab.key === state.active}
+                      visible={tab.key === state.active || (paneStyle(tab.key) != null && !hiddenByZoom(tab.key))}
+                      onFocus={() => tab.key !== state.active && dispatch({ type: 'activate', key: tab.key })}
+                      settings={settings}
+                      terminalTheme={terminalTheme}
+                      cwd={tab.cwd || profileOf(tab)?.cwd || cwd}
+                      onTitle={(title) =>
+                        // O ssh.exe põe o próprio caminho no título: a aba SSH mantém o nome do host.
+                        !(tab.shell?.startsWith('ssh:') && /ssh(\.exe)?$/i.test(title)) &&
+                        dispatch({ type: 'update', key: tab.key, patch: { title } })
+                      }
+                      onKind={(kind) =>
+                        dispatch({
+                          type: 'update',
+                          key: tab.key,
+                          patch: { kind, title: kind === 'claude' ? 'Claude Code' : shellName },
+                        })
+                      }
+                      onClose={() => dispatch({ type: 'close', key: tab.key })}
+                      onSeverity={(severity) => onSeverity(tab.key, severity)}
+                      onAgent={(s) => {
+                        setAgents((m) => withAgentState(m, tab.key, s))
+                        onClaudeState(tab, s)
+                        notifier.agent(tab.key, tab.title, s)
+                      }}
+                      onSendToClaude={(text) => sendToClaude(text, false)}
+                      onCommandEnd={(cmd) => {
+                        notifier.command(cmd)
+                        onTabCommandEnd(
+                          tab.key,
+                          tab.key === activeRef.current || (paneStyle(tab.key) != null && !hiddenByZoom(tab.key)),
+                          cmd,
+                        )
+                      }}
+                      outputId={outputIdOf(tab)}
+                      restoreOutput={keepOutput && tab.outputId != null}
+                      onActions={(actions) =>
+                        actions
+                          ? terminalActions.current.set(tab.key, actions)
+                          : terminalActions.current.delete(tab.key)
+                      }
+                      onCwd={(dir) => workspace.reportCwd(tab.key, dir)}
+                      onPrompt={() => workspace.reportPrompt(tab.key)}
+                      git={workspace.info(tab.key).git}
+                    />
+                  </TerminalMenu>
+                </div>
+              ))}
+              {/* Quem recebe o que é digitado ganha uma borda no tom de destaque. */}
+              {state.tabs.map(
+                (tab) =>
+                  (receiving.has(tab.key) || (broadcastTo.length > 0 && tab.key === state.active)) &&
+                  !hiddenByZoom(tab.key) && (
+                    <span
+                      key={`bc-${tab.key}`}
+                      aria-hidden
+                      className={`pointer-events-none absolute inset-y-0 z-10 rounded-[10px] border-2 border-accent/60 ${paneStyle(tab.key) ? '' : 'inset-x-0'}`}
+                      style={paneStyle(tab.key)}
+                    />
+                  ),
+              )}
+              <PaneNotice
+                hiddenPanes={zoomed ? 1 : 0}
+                broadcast={broadcast ? broadcastTo.length + (broadcastTo.length > 0 ? 1 : 0) || 1 : null}
+                onUnzoom={() => state.active != null && dispatch({ type: 'zoom', key: state.active })}
+                onStopBroadcast={() => setBroadcast(false)}
+              />
+              {split && !zoomed && (
+                <SplitDivider
+                  ratio={split.ratio}
+                  onRatio={(ratio) => dispatch({ type: 'split-ratio', key: split.left, ratio })}
+                />
+              )}
+              {tabs.length === 0 && (
+                <div className="absolute inset-0 grid animate-fade-in place-items-center motion-reduce:animate-none">
+                  <div className="flex flex-col items-center gap-3 text-[13px] text-muted">
+                    <span>Nenhuma aba no perfil {profile.name}.</span>
+                    <ModeChoices
+                      defaultShell={settings.defaultShell}
+                      onPick={(kind, shellId) => openTab(kind, { shellId })}
+                    />
+                  </div>
+                </div>
+              )}
+              {showSessions && (
+                <SessionsPage
+                  active
+                  cwd={state.active != null ? workspace.info(state.active).cwd : null}
+                  onClose={() => setShowSessions(false)}
+                  onOpen={openTabWithCommand}
+                />
+              )}
+              {showThemes && (
+                <ThemesPage
+                  value={settings.theme}
+                  onChange={(id) => updateSettings({ theme: id })}
+                  onPreview={setPreviewTheme}
+                  onClose={closeThemes}
+                />
+              )}
+            </main>
+            <BrowserPanel linkTarget={settings.linkTarget} />
+            <CodeReviewPanel
+              open={showReview}
+              cwd={reviewCwd}
+              version={reviewVersion}
+              colors={diffColors}
+              fontFamily={settings.fontFamily}
+              onClose={() => setShowReview(false)}
+              onSendToClaude={sendToClaude}
+            />
+          </div>
+          {layout.statusBar && (
+            <StatusBar
+              info={activeInfo}
+              kind={tabs.find((t) => t.key === state.active)?.kind}
+              shell={tabs.find((t) => t.key === state.active)?.shell}
+              shellName={shellName}
+              colors={diffColors}
+              onSearch={() => setShowPalette(true)}
+              searchKeys="Ctrl+Shift+P"
+            />
+          )}
+        </div>
+        <ShortcutsDialog open={showShortcuts} onOpenChange={setShowShortcuts} />
+        <WorkflowDialog
+          open={workflowDialog.open}
+          onOpenChange={(open) => setWorkflowDialog((d) => ({ ...d, open }))}
+          workflows={settings.workflows}
+          initial={workflowDialog.initial}
+          canRun={tabs.find((t) => t.key === state.active)?.kind === 'shell'}
+          onSubmit={sendWorkflow}
+          onAdd={(w) => saveWorkflows([...settings.workflows, w])}
+          onManage={() => {
+            setWorkflowDialog((d) => ({ ...d, open: false }))
+            setWorkflowManager({ open: true, draft: null })
+          }}
+        />
+        <WorkflowManager
+          open={workflowManager.open}
+          onOpenChange={(open) => setWorkflowManager((m) => ({ ...m, open }))}
+          workflows={settings.workflows}
+          draft={workflowManager.draft}
+          onChange={saveWorkflows}
+        />
+        <CommandPalette
+          open={showPalette}
+          onOpenChange={setShowPalette}
+          tabs={state.tabs}
+          active={state.active}
+          info={workspace.info}
+          actions={[
+            { id: 'new-shell', label: 'Nova aba', keys: 'mod+shift+t', run: () => openTab('shell') },
+            { id: 'new-claude', label: 'Nova aba com Claude Code', keys: 'mod+shift+k', run: () => openTab('claude') },
+            // Um item por shell instalado: "Nova aba: Prompt de Comando", "Nova aba: Ubuntu (WSL)"...
+            ...sshHosts.map((host) => ({
+              id: `new-ssh-${host}`,
+              label: `Nova aba SSH: ${host}`,
+              run: () => openTab('shell', { shellId: `ssh:${host}` }),
             })),
-          { id: 'new-profile', label: 'Novo perfil', run: addProfile },
-        ]}
-        onActivateTab={(key) => dispatch({ type: 'activate', key })}
-        workflows={settings.workflows}
-        onWorkflow={(w) => setWorkflowDialog({ open: true, initial: w })}
-        onGoToFolder={(dir) => void ipc.writeClipboard(`cd '${dir.replace(/'/g, "''")}'`)}
-      />
-      {/* Imagem sobre a janela inteira, translúcida e sem pegar cliques. */}
-      <BackgroundLayer settings={settings.background} target="window" />
-    </Tabs>
+            ...installedShells.map((s) => ({
+              id: `new-shell-${s.id}`,
+              label: `Nova aba: ${s.label}`,
+              run: () => openTab('shell', { shellId: s.id }),
+            })),
+            { id: 'themes', label: 'Temas', keys: 'mod+shift+,', run: openThemes },
+            { id: 'settings', label: 'Configurações', keys: 'mod+,', run: () => setShowSettings(true) },
+            {
+              id: 'new-window',
+              label: 'Nova janela',
+              keys: 'mod+shift+n',
+              run: () => void ipc.newWindow(state.active != null ? workspace.info(state.active).cwd : cwd),
+            },
+            {
+              id: 'code-review',
+              label: showReview ? 'Fechar a revisão de código' : 'Revisão de código',
+              keys: 'mod+shift+g',
+              run: () => setShowReview((v) => !v),
+            },
+            { id: 'sessions', label: 'Sessões do Claude Code', keys: 'mod+shift+a', run: () => setShowSessions(true) },
+            {
+              id: 'sidebar',
+              label: layout.sidebar ? 'Ocultar abas na lateral' : 'Mostrar abas na lateral',
+              keys: 'mod+shift+b',
+              run: () => updateSettings({ layout: { ...layout, sidebar: !layout.sidebar } }),
+            },
+            {
+              id: 'collapse-sidebar',
+              label: layout.sidebarCollapsed ? 'Expandir a lateral' : 'Minimizar a lateral',
+              keys: 'mod+alt+b',
+              run: () =>
+                updateSettings({ layout: { ...layout, sidebar: true, sidebarCollapsed: !layout.sidebarCollapsed } }),
+            },
+            {
+              id: 'broadcast',
+              label: broadcast
+                ? 'Parar de digitar em vários painéis'
+                : 'Digitar em vários painéis (grupo ou tela dividida)',
+              keys: 'mod+alt+i',
+              run: () => setBroadcast((v) => !v),
+            },
+            ...(split
+              ? [
+                  {
+                    id: 'zoom-pane',
+                    label: zoomed ? 'Voltar aos dois painéis' : 'Ampliar o painel atual',
+                    keys: 'mod+shift+enter',
+                    run: () => state.active != null && dispatch({ type: 'zoom', key: state.active }),
+                  },
+                ]
+              : []),
+            { id: 'layouts', label: 'Layouts salvos', run: () => setLayoutManager({ open: true, saving: false }) },
+            {
+              id: 'layout-save',
+              label: 'Salvar o layout atual (abas, grupos e divisões)',
+              run: () => setLayoutManager({ open: true, saving: true }),
+            },
+            ...savedLayouts.map((l, i) => ({
+              id: `layout-${i}`,
+              label: `Abrir layout: ${l.name}`,
+              run: () => openLayout(l),
+            })),
+            { id: 'shortcuts', label: 'Atalhos de teclado', keys: 'f1', run: () => setShowShortcuts(true) },
+            ...(isBackgroundActive(settings.background) && settings.background.images.length > 1
+              ? [{ id: 'background-next', label: 'Próxima imagem de fundo', run: requestNextBackground }]
+              : []),
+            {
+              id: 'workflows',
+              label: 'Workflows (comandos salvos)',
+              keys: 'mod+shift+r',
+              run: () => setWorkflowDialog({ open: true, initial: null }),
+            },
+            ...profiles
+              .filter((p) => p.id !== profile.id)
+              .map((p) => ({
+                id: `profile-${p.id}`,
+                label: `Trocar para o perfil ${p.name}`,
+                run: () => switchProfile(p.id),
+              })),
+            { id: 'new-profile', label: 'Novo perfil', run: addProfile },
+          ]}
+          onActivateTab={(key) => dispatch({ type: 'activate', key })}
+          workflows={settings.workflows}
+          onWorkflow={(w) => setWorkflowDialog({ open: true, initial: w })}
+          onGoToFolder={(dir) => void ipc.writeClipboard(`cd '${dir.replace(/'/g, "''")}'`)}
+        />
+        {/* Imagem sobre a janela inteira, translúcida e sem pegar cliques. */}
+        <BackgroundLayer settings={settings.background} target="window" />
+        <LayoutManager
+          open={layoutManager.open}
+          onOpenChange={(open) => setLayoutManager((m) => ({ ...m, open }))}
+          layouts={savedLayouts}
+          current={layoutManager.open ? currentLayout() : null}
+          startSaving={layoutManager.saving}
+          onChange={saveLayouts}
+          onOpenLayout={openLayout}
+        />
+      </Tabs>
+    </LayoutsContext.Provider>
   )
 }

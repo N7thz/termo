@@ -301,6 +301,23 @@ pub fn git_bash_args(rc: Option<&str>) -> Vec<String> {
 /// `auto` com um aviso. `claude` presente: a aba do Claude Code sempre roda no PowerShell.
 pub fn plan(requested: &str, cwd: PathBuf, claude: Option<&Path>, hooks: Option<&Path>, predictions: bool) -> Plan {
     let mut warnings = Vec::new();
+    // Aba SSH (`ssh:<host>`): roda só `ssh <host>`; o host passa pela validação antes de virar argumento.
+    if claude.is_none() {
+        if let Some(host) = requested.strip_prefix("ssh:") {
+            match (crate::ssh::is_valid_host(host), crate::ssh::find_ssh()) {
+                (true, Some(program)) => {
+                    return Plan { program, args: vec![host.to_string()], cwd, shell_id: requested.to_string(), warnings }
+                }
+                (false, _) => warnings.push("Host SSH inválido".to_string()),
+                (_, None) => warnings.push("ssh não encontrado (instale o cliente OpenSSH do Windows)".to_string()),
+            }
+            warnings.push("abrindo o shell padrão.".to_string());
+            let program = shell::detect_shell();
+            let id = if shell::shell_name(&program).eq_ignore_ascii_case("pwsh") { "pwsh" } else { "powershell" };
+            let args = shell::shell_args(&program, None, hooks, predictions);
+            return Plan { program, args, cwd, shell_id: id.to_string(), warnings };
+        }
+    }
     let mut wanted = if is_valid_shell(requested) { requested.to_string() } else { "auto".to_string() };
     if claude.is_some() {
         wanted = "auto".into();
@@ -463,6 +480,17 @@ mod tests {
     fn invalid_profile_falls_back_to_auto() {
         let p = plan("wsl:a; rm", PathBuf::from("."), None, None, false);
         assert!(matches!(p.shell_id.as_str(), "pwsh" | "powershell"));
+    }
+
+    #[test]
+    fn ssh_plan_runs_only_ssh_with_a_valid_host() {
+        let p = plan("ssh:-oProxyCommand=x", PathBuf::from("."), None, None, false);
+        assert!(matches!(p.shell_id.as_str(), "pwsh" | "powershell"));
+        assert!(p.warnings.iter().any(|w| w.contains("inválido")));
+        if crate::ssh::find_ssh().is_some() {
+            let p = plan("ssh:web-1", PathBuf::from("."), None, None, false);
+            assert_eq!((p.shell_id.as_str(), p.args), ("ssh:web-1", vec!["web-1".to_string()]));
+        }
     }
 
     #[test]

@@ -7,6 +7,7 @@ mod files;
 mod git;
 mod hotkey;
 mod history;
+mod export;
 mod images;
 mod logging;
 mod node;
@@ -20,6 +21,7 @@ mod settings;
 mod shell;
 mod tray;
 mod shells;
+mod ssh;
 mod updater;
 mod usage;
 mod window;
@@ -143,6 +145,12 @@ async fn shell_list() -> Vec<shells::ShellInfo> {
     shells::detect()
 }
 
+/// Hosts do `~/.ssh/config` (sem curingas) para o menu das abas SSH.
+#[tauri::command]
+async fn ssh_hosts() -> Vec<String> {
+    ssh::hosts()
+}
+
 #[tauri::command]
 fn pty_write(ptys: State<Ptys>, id: u32, data: String) -> Result<(), String> {
     ptys.write(id, &data)
@@ -235,6 +243,15 @@ async fn image_preview(path: String) -> Result<images::Preview, String> {
 fn image_open(app: AppHandle, path: String) -> Result<(), String> {
     images::check_openable(&path)?;
     app.opener().open_path(path, None::<&str>).map_err(|e| e.to_string())
+}
+
+/// Salva um bloco exportado (`txt`, `md` ou `png`) no caminho escolhido no "Salvar como". `None`: cancelou.
+#[tauri::command]
+async fn export_save(app: AppHandle, name: String, ext: String, data: Vec<u8>) -> Result<Option<String>, String> {
+    export::check(&ext, data.len())?;
+    tauri::async_runtime::spawn_blocking(move || export::save(&app, &name, &ext, &data))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Imagem da área de transferência (print, imagem copiada) gravada como PNG numa pasta temporária,
@@ -634,6 +651,7 @@ pub fn run() {
             launch_info,
             pty_create,
             shell_list,
+            ssh_hosts,
             pty_write,
             pty_resize,
             pty_ack,
@@ -650,6 +668,7 @@ pub fn run() {
             image_existing,
             image_preview,
             image_open,
+            export_save,
             clipboard_save_image,
             search_files,
             history_read,

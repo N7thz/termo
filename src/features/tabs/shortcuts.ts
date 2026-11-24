@@ -6,6 +6,8 @@ export type AppAction =
   | 'new-claude'
   | 'duplicate-tab'
   | 'split-tab'
+  | 'zoom-pane'
+  | 'broadcast'
   | 'close-tab'
   | 'next-tab'
   | 'prev-tab'
@@ -99,6 +101,20 @@ export const SHORTCUTS: readonly Shortcut[] = [
     keys: ['mod+shift+e'],
     action: 'split-tab',
     match: (e) => ctrlShift(e) && key(e) === 'e',
+  },
+  {
+    group: 'Abas',
+    label: 'Ampliar o painel atual da tela dividida (ou voltar)',
+    keys: ['mod+shift+enter'],
+    action: 'zoom-pane',
+    match: (e) => ctrlShift(e) && e.key === 'Enter',
+  },
+  {
+    group: 'Abas',
+    label: 'Digitar em vários painéis (grupo ou tela dividida)',
+    keys: ['mod+alt+i'],
+    action: 'broadcast',
+    match: (e) => ctrlAlt(e) && e.code === 'KeyI',
   },
   {
     group: 'Abas',

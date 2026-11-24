@@ -67,6 +67,9 @@ src/                 frontend (React + xterm.js)
   features/scrollback  texto de cada aba guardado e devolvido ao reabrir
   features/updater   botão de versão nova na barra de título
   features/workflows  comandos salvos com `{{parâmetros}}`: formulário, escape para o PowerShell e gerenciador
+  features/autocomplete  sugestão em cinza (histórico por pasta) e autocomplete de git/bun/npm/cargo/winget/docker
+  features/layouts   layouts salvos (abas, grupos, divisões, pastas e comandos)
+  features/broadcast  digitar em vários painéis
 scripts/release.ts   versão numa fonte só e conferência da tag no workflow
 scripts/updater-manifest.ts  latest.json do atualizador para o instalador assinado pelo SignPath
 src-tauri/           backend (Rust)
@@ -86,6 +89,8 @@ src-tauri/           backend (Rust)
   src/hotkey.rs      atalho global que mostra/minimiza o Termo
   src/updater.rs     atualização pelas releases do GitHub (assinada; instalar é um clique)
   src/logging.rs     log em arquivo (tauri-plugin-log) e registro de pânicos com backtrace
+  src/ssh.rs         hosts do ~/.ssh/config para as abas SSH (sem curingas, nomes validados)
+  src/export.rs      "Salvar como" dos blocos exportados (.txt, .md, PNG)
   resources/         conpty.dll e OpenConsole.exe (ConPTY moderno, copiados ao lado do .exe)
 ```
 
@@ -109,7 +114,7 @@ src-tauri/           backend (Rust)
 - Larguras ajustáveis: arraste a borda da lateral das abas, do painel de revisão ou do navegador. Na lateral e na revisão, as setas do teclado também ajustam e o duplo clique volta ao padrão. A largura fica guardada
 - Lateral minimizável (Ctrl+Alt+B ou o botão no topo dela): uma faixa estreita só com os ícones das abas, que continua com arrastar, grupos e o menu da aba. Ctrl+Shift+B esconde a lateral inteira
 - Abas na lateral: arrastar muda a ordem (as outras abrem espaço, como no Chrome) e entra ou sai de grupos; soltar sobre o terminal divide a tela. O menu da aba tem "Dividir a tela com" para juntar duas abas já abertas
-- Navegação nos blocos: Ctrl+↑/↓ seleciona o bloco anterior/próximo e o destaca; com um bloco selecionado, Ctrl+C copia a saída, Ctrl+Shift+C o comando, Enter reabre o comando na linha do shell, `/` (ou Ctrl+Shift+L, ou o botão do funil) filtra a saída por texto ou regex, mostrando só as linhas que batem (a saída original não muda) e Esc sai
+- Navegação nos blocos: Ctrl+↑/↓ seleciona o bloco anterior/próximo e o destaca (Shift+↑/↓ estende para vários); com um bloco selecionado, Ctrl+C copia a saída, Ctrl+Shift+C o comando, Enter reabre o comando na linha do shell, `/` (ou Ctrl+Shift+L, ou o botão do funil) filtra a saída por texto ou regex, mostrando só as linhas que batem (a saída original não muda) e Esc sai
 - Perfis de shell: o `+` tem uma seta com PowerShell 7, Windows PowerShell, cmd, Git Bash e as distros do WSL; o padrão vem de `defaultShell` (Configurações). A aba guarda o shell e a restauração reabre com ele. No WSL o bash recebe a integração por um `--rcfile` temporário (o `.bashrc` não é alterado) e a linha de contexto mostra só a pasta. O Git Bash (o `bin\bash.exe` do Git for Windows, achado pelas pastas de instalação ou pelo `git` do PATH) abre com a mesma integração, carregando antes o `/etc/profile` e o `~/.bash_profile` como um login faria; tem blocos, pasta e branch. No cmd há pasta e prompt, mas não blocos por comando (o cmd não expõe o comando nem o código de saída). A aba do Claude Code sempre usa o PowerShell
 - Caixa de comando com highlight; `# o que você quer fazer` + Enter vira um comando do PowerShell (não executa sozinho)
 - Ctrl+R busca no histórico: lista sobreposta com busca aproximada sobre os comandos da aba e o histórico do PSReadLine; Tab alterna "só nesta pasta"; Enter põe o comando na linha, Shift+Enter roda. Nas configurações dá para devolver o Ctrl+R ao shell
@@ -127,6 +132,17 @@ src-tauri/           backend (Rust)
 - Bateria do uso do Claude na barra de título, com mascote em pixel art. Os limites vêm do `statusLine` das abas do Claude (quem já tem um `statusLine` próprio continua com ele, e a bateria fica sem dados)
 - Avatar de estado por aba do Claude (pensando, trabalhando, esperando, bloqueado, pronto), pelos hooks do Claude Code
 - Revisão de código (Ctrl+Shift+G ou clique no +N −M): arquivos alterados com o diff (palavras alteradas em destaque, linhas longas quebradas ou rolagem lateral), índice de arquivos, recolher/expandir tudo, J/K para ir de arquivo em arquivo e N/P de trecho em trecho; stage por arquivo ou de tudo, descartar, abrir no editor, comentários por linha enviados ao Claude Code e "Revisar com o Claude". No rodapé, a caixa de commit: a mensagem pode ser escrita pelo Claude (`claude -p`, a partir do diff do stage e dos últimos commits) e "Commitar" commita só o que está no stage, com os hooks do repositório
+- Sugestão enquanto digita (no editor de entrada): o resto do comando aparece em cinza, tirado dos comandos rodados naquela pasta (depois dos de qualquer pasta e do histórico do PSReadLine); → ou End aceitam tudo, Ctrl+→ uma palavra. Linhas que parecem ter senha ou token não são guardadas
+- Autocomplete por comando (Tab no editor de entrada): subcomandos e flags de `git`, `bun`, `npm`, `cargo`, `winget` e `docker`, e os scripts do `package.json` da pasta depois de `bun run`/`npm run`; Tab ou ↑/↓ percorrem as opções
+- Blocos para o Claude: com um ou vários blocos selecionados (Shift+↑/↓ estende a seleção), Ctrl+Enter ou o botão do balão cola comando, pasta, código de saída e saída numa aba do Claude Code, sem enviar, para você escrever a pergunta
+- Exportar blocos (botão da seta ou E com blocos selecionados): copiar como Markdown (ou M direto), salvar como `.txt` ou como imagem PNG com a fonte e as cores do tema
+- Aviso na aba: um comando de 10 s ou mais que termina numa aba escondida marca a aba com ✓ ou ✕ até você abri-la
+- Erros clicáveis na saída: `arquivo:linha:coluna`, o `-->` do rustc, o `(linha,coluna)` do tsc e as pilhas do Node abrem no VS Code na posição certa
+- Marcadores na barra de rolagem: linhas de erro e aviso, blocos que falharam e resultados da busca
+- Layouts salvos: guarde as abas, grupos, divisões, pastas e um comando inicial por aba do perfil e abra tudo com um clique, pela seta do + ou pela paleta
+- Digitar em vários painéis (Ctrl+Alt+I): o que você digita na aba vai também para as outras abas de shell do grupo, ou para o par da tela dividida, com indicação nas abas
+- Abas SSH: os hosts do `~/.ssh/config` aparecem na seta do +, e abrem uma aba rodando `ssh <host>`, com cor própria
+- Zoom do painel (Ctrl+Shift+Enter): maximiza o painel atual da tela dividida sem desfazer a divisão; o mesmo atalho volta
 - Sessões do Claude Code (Ctrl+Shift+A ou o indicador na barra de título, com quantas estão trabalhando e esperando você): modelo e esforço, plano com as etapas e o tempo de cada uma, arquivos em edição e reservas (esquecer/liberar), abrir a sessão numa aba (`claude attach` ou `claude --resume`) e o histórico, lidos do painel do coord
 
 ## Roadmap
@@ -138,29 +154,7 @@ src-tauri/           backend (Rust)
 4. ~~IA: linguagem natural vira comando, botão "explicar erro"~~
 5. ~~Painéis divididos e várias janelas~~
 
-### Próximas ideias
-
-Prioridade: começar pelo 6 e pelo 8, que são os de uso mais frequente e aproveitam o histórico, os blocos e o envio ao Claude que já existem.
-
-Mais impacto para o dia a dia:
-
-6. Sugestão de comando enquanto digita (estilo fish): o resto do comando em cinza, tirado do histórico da pasta; → aceita
-7. Autocomplete que conhece os comandos: subcomandos e flags de `git`, `bun`, `npm`, `cargo`, `winget` e `docker`, e os scripts do `package.json` depois de `bun run`
-8. Enviar o bloco para o Claude: um ou vários blocos (comando, saída e código de saída) como contexto para uma aba do Claude Code aberta
-9. Erro clicável na saída: `src/foo.ts:42:7` e as mensagens do rustc e do tsc abrem no editor, na linha e coluna certas
-
-Fluxo de trabalho:
-
-10. Layouts salvos: um conjunto de abas e painéis com pastas e comandos (ex.: `bun run dev` + Claude + git), aberto com um clique
-11. Digitar em vários painéis ao mesmo tempo: o mesmo texto vai para todos os painéis de um grupo
-12. Abas SSH nos perfis: os hosts do `~/.ssh/config` na seta do `+`, com modo e cor próprios
-13. Avisar na aba quando um comando demorado termina enquanto você olha outra aba
-
-Polimento:
-
-14. Zoom do painel (Ctrl+Shift+Enter): maximiza o painel atual sem desfazer a divisão
-15. Marcadores na barra de rolagem: blocos com erro e resultados da busca
-16. Exportar o bloco: copiar como Markdown, salvar como `.txt` ou como imagem PNG
+6. ~~Próximas ideias: sugestão enquanto digita, autocomplete por comando, blocos para o Claude, layouts, digitar em vários painéis, SSH, avisos, zoom do painel e exportar blocos~~
 
 ## Licença
 

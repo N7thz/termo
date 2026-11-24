@@ -46,6 +46,22 @@ export function commandNotice(
   return { title, body: `${cmd.command.trim()} · ${formatSeconds(cmd.durationMs)}` }
 }
 
+/** Comando a partir de quantos segundos marca a aba em segundo plano ao terminar (independe dos avisos do Windows). */
+export const TAB_DONE_SECS = 10
+
+/** Marca de "comando terminou" de uma aba em segundo plano (some ao abrir a aba). */
+export interface TabFinished {
+  ok: boolean
+  command: string
+  durationMs: number
+}
+
+/** O comando que terminou merece marcar a aba? Só se ela não está à vista e ele demorou. */
+export function tabFinished(cmd: FinishedCommand, tabVisible: boolean): TabFinished | null {
+  if (tabVisible || !cmd.command.trim() || cmd.durationMs < TAB_DONE_SECS * 1000) return null
+  return { ok: cmd.exitCode === 0 || cmd.exitCode == null, command: cmd.command.trim(), durationMs: cmd.durationMs }
+}
+
 export function formatSeconds(ms: number): string {
   const s = Math.round(ms / 1000)
   if (s < 60) return `${s} s`

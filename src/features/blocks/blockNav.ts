@@ -16,7 +16,28 @@ export function stepSelection(count: number, current: number | null, dir: Direct
   return current + 1 >= count ? null : current + 1
 }
 
-export type BlockKeyAction = 'prev' | 'next' | 'copy-output' | 'copy-command' | 'reopen' | 'filter' | 'clear'
+/** Shift+↑/↓: move a ponta da seleção de vários blocos (fica dentro da lista, não sai dela). */
+export function extendFocus(count: number, focus: number, dir: Direction): number {
+  return Math.min(count - 1, Math.max(0, focus + (dir === 'prev' ? -1 : 1)))
+}
+
+export type BlockKeyAction =
+  | 'prev'
+  | 'next'
+  /** Shift+↑/↓: estende a seleção para vários blocos seguidos. */
+  | 'extend-prev'
+  | 'extend-next'
+  | 'copy-output'
+  | 'copy-command'
+  | 'reopen'
+  | 'filter'
+  | 'clear'
+  /** Ctrl+Enter: manda os blocos selecionados ao Claude Code. */
+  | 'send-claude'
+  /** M: copia os blocos selecionados como Markdown. */
+  | 'copy-markdown'
+  /** E: abre o menu de exportar (Markdown, .txt, PNG). */
+  | 'export'
 
 /** O que importa de um KeyboardEvent (facilita testar sem DOM). */
 export interface KeyLike {
@@ -29,7 +50,8 @@ export interface KeyLike {
 
 /**
  * Traduz uma tecla numa ação sobre os blocos, ou `null` quando a tecla não é dos blocos.
- * Ctrl+↑/↓ funcionam sempre (sem seleção, Ctrl+↑ seleciona o último bloco); o resto só com um bloco selecionado.
+ * Ctrl+↑/↓ funcionam sempre (sem seleção, Ctrl+↑ seleciona o último bloco); o resto só com um bloco selecionado:
+ * Shift+↑/↓ estende a seleção, Ctrl+Enter manda ao Claude, M copia como Markdown e E abre o exportar.
  * `hasTextSelection`: com texto selecionado no xterm, Ctrl+C continua copiando a seleção.
  */
 export function blockKeyAction(e: KeyLike, hasSelection: boolean, hasTextSelection: boolean): BlockKeyAction | null {
@@ -39,6 +61,7 @@ export function blockKeyAction(e: KeyLike, hasSelection: boolean, hasTextSelecti
     if (key === 'arrowup') return 'prev'
     if (key === 'arrowdown') return hasSelection ? 'next' : null
     if (key === 'c' && hasSelection && !hasTextSelection) return 'copy-output'
+    if (key === 'enter' && hasSelection) return 'send-claude'
     return null
   }
   if (!hasSelection) return null
@@ -47,8 +70,14 @@ export function blockKeyAction(e: KeyLike, hasSelection: boolean, hasTextSelecti
     if (key === 'l') return 'filter'
     return null
   }
-  if (e.shiftKey) return null
+  if (e.shiftKey) {
+    if (key === 'arrowup') return 'extend-prev'
+    if (key === 'arrowdown') return 'extend-next'
+    return null
+  }
   if (key === 'escape') return 'clear'
+  if (key === 'm') return 'copy-markdown'
+  if (key === 'e') return 'export'
   if (key === 'enter') return 'reopen'
   if (key === '/') return 'filter'
   return null

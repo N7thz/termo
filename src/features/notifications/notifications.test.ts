@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { NotificationSettings } from '../../shared/types'
-import { agentNotice, commandNotice, formatSeconds } from './notifications'
+import { agentNotice, commandNotice, formatSeconds, tabFinished } from './notifications'
 
 const on: NotificationSettings = { enabled: true, claude: true, commands: true, commandSecs: 30 }
 
@@ -41,4 +41,18 @@ test('formatSeconds', () => {
   expect(formatSeconds(120_000)).toBe('2 min')
   expect(formatSeconds(125_000)).toBe('2 min 5 s')
   expect(formatSeconds(3_900_000)).toBe('1 h 5 min')
+})
+
+describe('tabFinished', () => {
+  const cmd = { command: ' cargo build ', exitCode: 0, durationMs: 12_000 }
+  test('marca a aba escondida quando um comando demorado termina', () => {
+    expect(tabFinished(cmd, false)).toEqual({ ok: true, command: 'cargo build', durationMs: 12_000 })
+    expect(tabFinished({ ...cmd, exitCode: 101 }, false)?.ok).toBe(false)
+    expect(tabFinished({ ...cmd, exitCode: null }, false)?.ok).toBe(true)
+  })
+  test('não marca aba à vista, comando rápido ou linha vazia', () => {
+    expect(tabFinished(cmd, true)).toBeNull()
+    expect(tabFinished({ ...cmd, durationMs: 9_999 }, false)).toBeNull()
+    expect(tabFinished({ ...cmd, command: '  ' }, false)).toBeNull()
+  })
 })

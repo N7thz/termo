@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { blockKeyAction, filterOutput, type KeyLike, matchedText, stepSelection } from './blockNav'
+import { blockKeyAction, extendFocus, filterOutput, type KeyLike, matchedText, stepSelection } from './blockNav'
 import { decodeCommand, findImagePaths, formatDuration, joinRows, tail } from './blocks'
 
 test('decodifica o comando do OSC 633;E', () => {
@@ -90,6 +90,24 @@ describe('navegação entre blocos', () => {
     expect(blockKeyAction(ev('/'), true, false)).toBe('filter')
     expect(blockKeyAction(ev('L', { ctrlKey: true, shiftKey: true }), true, false)).toBe('filter')
     expect(blockKeyAction(ev('C', { ctrlKey: true, shiftKey: true }), true, false)).toBe('copy-command')
+  })
+
+  test('vários blocos: Shift+↑/↓ estende, Ctrl+Enter manda ao Claude, M e E exportam', () => {
+    expect(blockKeyAction(ev('ArrowUp', { shiftKey: true }), true, false)).toBe('extend-prev')
+    expect(blockKeyAction(ev('ArrowDown', { shiftKey: true }), true, false)).toBe('extend-next')
+    expect(blockKeyAction(ev('ArrowUp', { shiftKey: true }), false, false)).toBeNull()
+    expect(blockKeyAction(ev('Enter', { ctrlKey: true }), true, false)).toBe('send-claude')
+    expect(blockKeyAction(ev('Enter', { ctrlKey: true }), false, false)).toBeNull()
+    expect(blockKeyAction(ev('m'), true, false)).toBe('copy-markdown')
+    expect(blockKeyAction(ev('e'), true, false)).toBe('export')
+    expect(blockKeyAction(ev('e'), false, false)).toBeNull()
+  })
+
+  test('extendFocus fica dentro da lista', () => {
+    expect(extendFocus(5, 2, 'prev')).toBe(1)
+    expect(extendFocus(5, 0, 'prev')).toBe(0)
+    expect(extendFocus(5, 4, 'next')).toBe(4)
+    expect(extendFocus(5, 3, 'next')).toBe(4)
   })
 
   test('Ctrl+C copia a saída só sem texto selecionado e com bloco', () => {

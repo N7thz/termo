@@ -49,6 +49,7 @@ export const DEFAULT_SETTINGS: Settings = {
     changeSecs: 0,
     shuffle: false,
   },
+  layouts: [],
 }
 
 /** Mesmos limites do Rust (MAX_PROFILES / MAX_PINNED em src-tauri/src/settings.rs). */

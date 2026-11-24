@@ -1,4 +1,4 @@
-import { Container, DollarSign, SquareChevronRight, SquareTerminal, Terminal } from 'lucide-react'
+import { Container, DollarSign, Server, SquareChevronRight, SquareTerminal, Terminal } from 'lucide-react'
 import { ClaudeIcon } from '../tabs/ClaudeIcon'
 import { MODE_TONE, type TerminalMode } from './modes'
 
@@ -25,6 +25,8 @@ export function ModeIcon({
       return <DollarSign aria-hidden size={size} className={cls} style={style} />
     case 'wsl':
       return <Container aria-hidden size={size} className={cls} style={style} />
+    case 'ssh':
+      return <Server aria-hidden size={size} className={cls} style={style} />
     default:
       return <SquareTerminal aria-hidden size={size} className={cls} style={style} />
   }
