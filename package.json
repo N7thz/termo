@@ -19,7 +19,8 @@
     "format": "biome check --write .",
     "test": "bun test src && cargo test --manifest-path src-tauri/Cargo.toml",
     "test:web": "bun test src",
-    "check": "bun run typecheck && bun run lint && bun run test"
+    "check": "bun run typecheck && bun run lint && bun run test",
+    "release": "bun scripts/release.ts"
   },
   "dependencies": {
     "@fontsource/jetbrains-mono": "^5.3.0",

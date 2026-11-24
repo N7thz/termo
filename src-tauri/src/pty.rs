@@ -173,7 +173,7 @@ impl PtyManager {
             },
         );
         if let Err(e) = watched {
-            eprintln!("termo: sem vigia de estado do Claude na sessão {id}: {e}");
+            log::warn!("sem vigia de estado do Claude na sessão {id}: {e}");
         }
 
         let exit_code = Arc::new(Mutex::new(None::<u32>));

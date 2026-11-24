@@ -17,9 +17,33 @@ bun run dev          # app em modo desenvolvimento
 bun run dev:claude   # já abre na aba do Claude Code
 bun run build        # instalador NSIS em src-tauri/target/release/bundle/nsis
 bun run check        # typecheck, Biome e testes (bun test + cargo test)
+bun run release 0.2.0  # nova versão: atualiza os arquivos, commita e cria a tag v0.2.0
 ```
 
 O executável aceita `--claude`, para abrir no Claude Code, e `--cwd <pasta>` ou uma pasta solta, para abrir nela.
+
+## Publicar uma versão
+
+1. `bun run release 0.2.0`: a versão fica igual em `package.json`, `Cargo.toml`, `Cargo.lock` e `tauri.conf.json`; o script commita (`chore: versão 0.2.0`) e cria a tag `v0.2.0`. Recusa se houver mudança não commitada ou se a tag já existir
+2. `git push && git push origin v0.2.0`
+3. O workflow `release.yml` confere se a tag bate com a versão (`bun run release --check`), roda `bun run check`, compila o instalador e cria a release como **rascunho**, com as notas geradas pelos commits
+4. Confira o rascunho no GitHub e publique. Só depois disso o atualizador dos usuários enxerga a versão nova
+
+Segredos do repositório: `TAURI_SIGNING_PRIVATE_KEY` (conteúdo de `~/.tauri/termo.key`) e, se a chave tiver senha, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+
+### Assinatura de código (SignPath)
+
+Sem ela o Windows mostra o aviso do SmartScreen ("editor desconhecido") ao abrir o instalador. O workflow já está pronto e liga a assinatura sozinho quando a variável `SIGNPATH_ORGANIZATION_ID` existe; sem ela, a release sai como antes, sem assinatura de código.
+
+1. Peça o plano gratuito para open source em [signpath.org](https://signpath.org) (o repositório precisa ser público e ter licença OSI, que a MIT é)
+2. No SignPath: crie o projeto `termo` ligado a este repositório, com uma _artifact configuration_ que assina o `.exe` dentro do zip que o GitHub envia (`<zip-file><pe-file path="*.exe" /></zip-file>`), e a política de assinatura `release-signing`. Cadastre o GitHub como _trusted build system_
+3. No GitHub (Settings → Secrets and variables → Actions): o segredo `SIGNPATH_API_TOKEN` (token de um usuário CI do SignPath, com permissão de enviar na política) e a variável `SIGNPATH_ORGANIZATION_ID`. Se o projeto ou a política tiverem outros nomes, as variáveis `SIGNPATH_PROJECT_SLUG` e `SIGNPATH_POLICY_SLUG`
+
+Com a assinatura ligada, o instalador vai para o SignPath antes de gerar o `.sig` do atualizador (a assinatura de código muda os bytes do arquivo), e o `latest.json` sai de `scripts/updater-manifest.ts`.
+
+### Logs
+
+O Termo grava o log em `%LOCALAPPDATA%\dev.termo.app\logs\termo.log` (até 2 MB, mais um arquivo antigo). Pânicos no Rust entram lá com o backtrace; anexe o arquivo ao relatar um problema.
 
 ## Estrutura
 
@@ -43,6 +67,8 @@ src/                 frontend (React + xterm.js)
   features/scrollback  texto de cada aba guardado e devolvido ao reabrir
   features/updater   botão de versão nova na barra de título
   features/workflows  comandos salvos com `{{parâmetros}}`: formulário, escape para o PowerShell e gerenciador
+scripts/release.ts   versão numa fonte só e conferência da tag no workflow
+scripts/updater-manifest.ts  latest.json do atualizador para o instalador assinado pelo SignPath
 src-tauri/           backend (Rust)
   src/pty.rs         sessões ConPTY, saída em lotes, controle de vazão por ack
   src/shell.rs       shell, Claude Code, pasta inicial e linha de comando
@@ -59,6 +85,7 @@ src-tauri/           backend (Rust)
   src/notify.rs      avisos do Windows e piscar na barra de tarefas
   src/hotkey.rs      atalho global que mostra/minimiza o Termo
   src/updater.rs     atualização pelas releases do GitHub (assinada; instalar é um clique)
+  src/logging.rs     log em arquivo (tauri-plugin-log) e registro de pânicos com backtrace
   resources/         conpty.dll e OpenConsole.exe (ConPTY moderno, copiados ao lado do .exe)
 ```
 
@@ -95,7 +122,7 @@ src-tauri/           backend (Rust)
 - Scripts do `package.json` na linha de contexto, como o NPM Scripts do VS Code: um clique roda `npm run`/`bun run`/`pnpm run`... com o gerenciador do projeto
 - Modo bandeja (Configurações → Avisos e sistema): ícone na bandeja do Windows (clique mostra/esconde; menu com nova aba, Claude Code, nova janela e sair), fechar ou minimizar a janela principal manda para a bandeja com as abas rodando, iniciar com o Windows e, nesse caso, ficar só na bandeja
 - Reabrir as abas com o texto que tinham: o fim da saída de cada aba de shell (até 1000 linhas, com cores) é guardado a cada 10 s e volta ao reabrir, acima de um separador
-- Atualização automática: ao abrir, procura versão nova nas releases do GitHub; um botão na barra de título instala e reinicia. Para publicar, suba uma tag `v*` (workflow `release.yml`) com o segredo `TAURI_SIGNING_PRIVATE_KEY` no repositório
+- Atualização automática: ao abrir, procura versão nova nas releases do GitHub; um botão na barra de título instala e reinicia. Para publicar, veja [Publicar uma versão](#publicar-uma-versão)
 - Painéis divididos (Ctrl+Shift+E) e várias janelas (Ctrl+Shift+N)
 - Bateria do uso do Claude na barra de título, com mascote em pixel art. Os limites vêm do `statusLine` das abas do Claude (quem já tem um `statusLine` próprio continua com ele, e a bateria fica sem dados)
 - Avatar de estado por aba do Claude (pensando, trabalhando, esperando, bloqueado, pronto), pelos hooks do Claude Code
@@ -110,3 +137,31 @@ src-tauri/           backend (Rust)
 3. ~~Highlights na saída (caminhos, erros), temas e prévia de imagem nos blocos~~
 4. ~~IA: linguagem natural vira comando, botão "explicar erro"~~
 5. ~~Painéis divididos e várias janelas~~
+
+### Próximas ideias
+
+Prioridade: começar pelo 6 e pelo 8, que são os de uso mais frequente e aproveitam o histórico, os blocos e o envio ao Claude que já existem.
+
+Mais impacto para o dia a dia:
+
+6. Sugestão de comando enquanto digita (estilo fish): o resto do comando em cinza, tirado do histórico da pasta; → aceita
+7. Autocomplete que conhece os comandos: subcomandos e flags de `git`, `bun`, `npm`, `cargo`, `winget` e `docker`, e os scripts do `package.json` depois de `bun run`
+8. Enviar o bloco para o Claude: um ou vários blocos (comando, saída e código de saída) como contexto para uma aba do Claude Code aberta
+9. Erro clicável na saída: `src/foo.ts:42:7` e as mensagens do rustc e do tsc abrem no editor, na linha e coluna certas
+
+Fluxo de trabalho:
+
+10. Layouts salvos: um conjunto de abas e painéis com pastas e comandos (ex.: `bun run dev` + Claude + git), aberto com um clique
+11. Digitar em vários painéis ao mesmo tempo: o mesmo texto vai para todos os painéis de um grupo
+12. Abas SSH nos perfis: os hosts do `~/.ssh/config` na seta do `+`, com modo e cor próprios
+13. Avisar na aba quando um comando demorado termina enquanto você olha outra aba
+
+Polimento:
+
+14. Zoom do painel (Ctrl+Shift+Enter): maximiza o painel atual sem desfazer a divisão
+15. Marcadores na barra de rolagem: blocos com erro e resultados da busca
+16. Exportar o bloco: copiar como Markdown, salvar como `.txt` ou como imagem PNG
+
+## Licença
+
+[MIT](LICENSE)

@@ -8,6 +8,7 @@ mod git;
 mod hotkey;
 mod history;
 mod images;
+mod logging;
 mod node;
 mod notify;
 mod paths;
@@ -553,7 +554,11 @@ pub fn run() {
     let cli = shell::parse_cli(std::env::args());
     let background = std::env::args().any(|a| a == tray::BACKGROUND_ARG);
 
+    logging::install_panic_hook();
+
     let app = tauri::Builder::default()
+        // Primeiro, para registrar também o que os outros plugins logam ao subir.
+        .plugin(logging::plugin())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         // Só o seletor de pasta ("Escolher pasta…" da linha de contexto); nada de ler ou gravar arquivos.
@@ -570,17 +575,17 @@ pub fn run() {
             app.manage(store);
             app.manage(updater::PendingUpdate::default());
             if let Err(e) = hotkey::apply(app.handle(), "", &initial.global_hotkey) {
-                eprintln!("atalho global: {e}");
+                log::warn!("atalho global: {e}");
             }
             if initial.auto_update {
                 updater::check_on_startup(app.handle().clone());
             }
             if let Err(e) = tray::build(app.handle(), &initial.tray) {
-                eprintln!("bandeja: {e}");
+                log::warn!("bandeja: {e}");
             }
             // O registro pode ter sido mudado por fora (Gerenciador de Tarefas): vale o que está salvo.
             if let Err(e) = tray::apply_autostart(app.handle(), initial.tray.launch_at_login) {
-                eprintln!("{e}");
+                log::warn!("início com o Windows: {e}");
             }
             // Aberto pelo Windows no login, com "ficar só na bandeja": a janela principal nem aparece.
             if background && initial.tray.starts_hidden() {

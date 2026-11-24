@@ -31,6 +31,20 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "publisher": "N7thz",
+    "copyright": "Copyright (c) 2026 N7thz. Licença MIT.",
+    "license": "MIT",
+    "licenseFile": "../LICENSE",
+    "homepage": "https://github.com/N7thz/termo",
+    "category": "DeveloperTool",
+    "shortDescription": "Terminal moderno com blocos, painéis e atalho para o Claude Code",
+    "longDescription": "Terminal para Windows com comandos em blocos, painéis divididos, navegador embutido, perfis de shell (PowerShell, cmd, WSL) e integração com o Claude Code.",
+    "windows": {
+      "nsis": {
+        "languages": ["PortugueseBR"],
+        "installMode": "currentUser"
+      }
+    },
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"],
     "resources": {
       "resources/conpty.dll": "conpty.dll",

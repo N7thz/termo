@@ -1,9 +1,16 @@
 name: Release
 
-# Uma tag `v0.2.0` (com a mesma versão em package.json, Cargo.toml e tauri.conf.json) gera o instalador
-# assinado e o `latest.json` que a atualização automática do Termo lê.
+# Uma tag `v0.2.0` criada por `bun run release 0.2.0` gera o instalador e o `latest.json` que a
+# atualização automática do Termo lê. A release sai como rascunho: confira e publique no GitHub.
+# Enquanto não for publicada, o atualizador não a enxerga (ele lê a release mais recente publicada).
+#
 # Segredos do repositório: TAURI_SIGNING_PRIVATE_KEY (conteúdo de ~/.tauri/termo.key) e, se a chave
 # tiver senha, TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
+#
+# Assinatura de código (SignPath, tira o aviso do SmartScreen): liga sozinha quando a variável
+# SIGNPATH_ORGANIZATION_ID existe no repositório. Precisa também do segredo SIGNPATH_API_TOKEN e,
+# se os nomes no SignPath forem outros, das variáveis SIGNPATH_PROJECT_SLUG e SIGNPATH_POLICY_SLUG.
+# O passo a passo está no README, em "Assinatura de código".
 
 on:
   push:
@@ -11,6 +18,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   release:
@@ -25,7 +33,17 @@ jobs:
         with:
           workspaces: src-tauri
       - run: bun install --frozen-lockfile
-      - uses: tauri-apps/tauri-action@v0
+
+      - name: Conferir se a tag bate com a versão do código
+        run: bun run release --check ${{ github.ref_name }}
+      # O tauri::generate_context! dos testes do Rust exige a pasta do frontend compilado.
+      - run: bun run build:web
+      - name: Typecheck, lint e testes
+        run: bun run check
+
+      # ---- Sem assinatura de código: o tauri-action compila, gera o .sig e o latest.json e cria a release.
+      - if: vars.SIGNPATH_ORGANIZATION_ID == ''
+        uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -33,8 +51,49 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Termo ${{ github.ref_name }}
-          releaseBody: Veja as mudanças nos commits desde a versão anterior.
-          releaseDraft: false
+          releaseDraft: true
+          generateReleaseNotes: true
           # Os artefatos de atualização (.sig e latest.json) só aqui: o build do CI não tem a chave.
           args: --config {"bundle":{"createUpdaterArtifacts":true}}
           includeUpdaterJson: true
+
+      # ---- Com assinatura de código: compila, a SignPath assina o instalador e só depois sai o .sig do
+      # atualizador, porque a assinatura de código muda os bytes do arquivo.
+      - if: vars.SIGNPATH_ORGANIZATION_ID != ''
+        name: Compilar o instalador
+        run: bun run build
+      - if: vars.SIGNPATH_ORGANIZATION_ID != ''
+        id: unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: termo-setup-sem-assinatura
+          path: src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+      - if: vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'termo' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+      - if: vars.SIGNPATH_ORGANIZATION_ID != ''
+        name: Assinatura do atualizador e latest.json
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          exe=$(ls signed/*.exe | head -n 1)
+          bunx tauri signer sign "$exe"
+          bun scripts/updater-manifest.ts "$exe" "${{ github.ref_name }}" > signed/latest.json
+      - if: vars.SIGNPATH_ORGANIZATION_ID != ''
+        name: Criar a release (rascunho)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" signed/*.exe signed/*.exe.sig signed/latest.json \
+            --draft --generate-notes --title "Termo ${{ github.ref_name }}"
