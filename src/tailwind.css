@@ -173,3 +173,10 @@
     scrollbar-color: var(--border) transparent;
   }
 }
+
+/* O xterm 6 deixa o .xterm-viewport preto (#000) no CSS dele e passou a pintar a cor do tema em outro
+   elemento (o scrollable). Com o fundo opaco, nada muda; com imagem de fundo, o preto tapava a imagem.
+   Fica fora do @layer: regra em camada perde para o CSS sem camada do xterm. */
+.xterm .xterm-viewport {
+  background-color: transparent;
+}
