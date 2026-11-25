@@ -7,6 +7,7 @@ import { type ReactNode, useState } from 'react'
 import { actionButton } from '../../lib/ui'
 import type { BackgroundSettings, Settings } from '../../shared/types'
 import { requestNextBackground } from './BackgroundLayer'
+import { BackgroundPreview, BackgroundThumb } from './BackgroundPreview'
 import {
   addImages,
   BG_BLUR_MAX,
@@ -53,6 +54,9 @@ export function BackgroundSettingsSection({ settings, onChange, switchClass, thu
   // Sliders: o valor anda junto com o dedo; salva ao soltar (cada gravação passa pelo Rust e pelo disco).
   const [opacity, setOpacity] = useState(bg.opacity)
   const [blur, setBlur] = useState(bg.blur)
+  // Imagem mostrada na prévia: a clicada na lista, ou a primeira.
+  const [picked, setPicked] = useState<string | null>(null)
+  const previewPath = picked && bg.images.includes(picked) ? picked : bg.images[0]
 
   const pick = async () => {
     const picked = await openDialog({
@@ -81,15 +85,26 @@ export function BackgroundSettingsSection({ settings, onChange, switchClass, thu
         </Switch>
       </span>
 
+      {previewPath && <BackgroundPreview path={previewPath} settings={bg} opacity={opacity} blur={blur} />}
+
       {bg.images.length > 0 && (
         <ul className="m-0 flex list-none flex-col gap-0.5 p-0" aria-label="Imagens de fundo">
           {bg.images.map((path) => (
             <li
               key={path}
-              className="group flex h-7 items-center gap-2 rounded-[7px] pr-1 pl-2.5 text-[12.5px] hover:bg-surface-hover"
+              className={`group flex h-8 items-center gap-1 rounded-[7px] pr-1 text-[12.5px] hover:bg-surface-hover ${path === previewPath ? 'bg-surface-hover' : ''}`}
               title={path}
             >
-              <span className="min-w-0 flex-1 truncate">{fileName(path)}</span>
+              <button
+                type="button"
+                aria-pressed={path === previewPath}
+                aria-label={`Ver ${fileName(path)} na prévia`}
+                className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-[7px] pl-1.5 text-left focus-visible:outline-2 focus-visible:outline-accent"
+                onClick={() => setPicked(path)}
+              >
+                <BackgroundThumb path={path} />
+                <span className="min-w-0 flex-1 truncate">{fileName(path)}</span>
+              </button>
               <button
                 type="button"
                 aria-label={`Remover ${fileName(path)}`}

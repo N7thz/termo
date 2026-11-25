@@ -15,8 +15,11 @@ export function trimToFit(text: string, max = MAX_CHARS): string {
   return cut < 0 ? text.slice(text.length - max) : text.slice(cut + 1)
 }
 
-/** Separador escrito depois do texto restaurado, antes do shell novo. */
-export const RESTORED_BANNER = '\r\n\x1b[2m── fim da sessão anterior ──\x1b[0m\r\n'
+/**
+ * Separador escrito depois do texto restaurado, antes do shell novo: uma nota curta, apagada e em itálico,
+ * sem a régua de traços (que pesava como um bloco no meio da saída).
+ */
+export const RESTORED_BANNER = '\r\n\x1b[2;3m↑ sessão anterior\x1b[0m\r\n'
 
 /**
  * Guarda o fim da saída da aba a cada 10 s (só se mudou) e ao fechar, e devolve o texto da última

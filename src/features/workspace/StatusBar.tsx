@@ -3,8 +3,8 @@ import { Folder, Search } from 'lucide-react'
 import { ipc } from '../../lib/ipc'
 import type { SessionKind } from '../../shared/types'
 import { BranchPicker } from '../git-branch/BranchPicker'
-import { modeLabel } from '../shell-profiles/modes'
 import { TabKindIcon } from '../tabs/TabKindIcon'
+import { modeName } from './format'
 import { type DiffColors, GitDiff } from './GitDiff'
 import type { TabInfo } from './useWorkspace'
 
@@ -25,9 +25,13 @@ const chip =
   'inline-flex h-7 min-w-0 items-center gap-1.5 rounded-[7px] border border-border bg-surface px-2 text-muted shadow-[inset_0_1px_0_var(--highlight)]'
 const item = `${chip} [transition:background-color_140ms_ease-out,color_140ms_ease-out,scale_300ms_var(--spring)] hover:bg-surface-hover hover:text-text active:scale-[0.96] active:duration-50 data-open:bg-surface-hover data-open:text-text focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent motion-reduce:active:scale-100`
 
-/** Rodapé com a pasta, a branch e as alterações da aba ativa, como nos editores. */
+/**
+ * Rodapé com as alterações (+/-), a busca e o modo da aba ativa. A pasta e a branch só aparecem no Claude
+ * Code: nas abas de shell elas já estão na linha de contexto dentro do terminal (ContextBar).
+ */
 export function StatusBar({ info, kind, shell, shellName, colors, onSearch, searchKeys }: Props) {
-  const { cwd, git } = info
+  const { git } = info
+  const cwd = kind === 'claude' ? info.cwd : null
   return (
     <footer className="flex h-10 flex-none items-center gap-1.5 px-2.5 py-1.5 text-[12.5px] tracking-[0.005em] select-none">
       {cwd && (
@@ -49,7 +53,7 @@ export function StatusBar({ info, kind, shell, shellName, colors, onSearch, sear
       </Button>
       <span className={chip}>
         <TabKindIcon kind={kind ?? 'shell'} shell={shell} size={14} />
-        {kind === 'claude' || shell ? modeLabel(kind ?? 'shell', shell) : shellName}
+        {modeName(kind ?? 'shell', shell, shellName)}
       </span>
     </footer>
   )

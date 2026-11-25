@@ -9,7 +9,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { type ITheme, Terminal } from '@xterm/xterm'
 import { useEffect, useRef, useState } from 'react'
 import { ipc } from '../../lib/ipc'
-import type { GitInfo, PathSuggestion, SessionKind, Settings } from '../../shared/types'
+import type { GitInfo, PathSuggestion, SessionKind, Settings, TabLaunch } from '../../shared/types'
 import type { AgentState } from '../agent-status/agentState'
 import { AiPanel, type AiPanelState } from '../ai/AiPanel'
 import { AttachmentStrip } from '../attachments/AttachmentStrip'
@@ -81,6 +81,8 @@ interface Props {
   git?: GitInfo | null
   /** Comando rodado no primeiro prompt da aba (ex.: `claude --resume <id>`, vindo da página de Sessões). */
   initialCommand?: string
+  /** Aba do Claude aberta pela linha de comando (`termo.exe --claude ... -- <args>`): repassada ao claude. */
+  launch?: TabLaunch
   /** O que a pessoa digitou nesta aba (para digitar em vários painéis). */
   onInput?: (data: string) => void
   /** Manda texto (os blocos selecionados) para uma aba do Claude Code, sem Enter. */
@@ -135,6 +137,7 @@ export function TerminalView({
   restoreOutput,
   git = null,
   initialCommand,
+  launch,
   onInput,
   onSendToClaude,
 }: Props) {
@@ -703,7 +706,7 @@ export function TerminalView({
       if (disposed) return
       try {
         const res = await ipc.createSession(
-          { kind, cols: term.cols, rows: term.rows, cwd, shell: shellProfile },
+          { kind, cols: term.cols, rows: term.rows, cwd, shell: shellProfile, launch },
           (ev) => {
             if (ev.kind === 'data') {
               // Confirma só depois de desenhar: é o que segura o backend quando a saída é enorme.
@@ -717,6 +720,8 @@ export function TerminalView({
               exited = true
               setDead(true)
               hide()
+              // Sessão aberta pelo coord: a aba some junto com o claude (ou com o fechar-sessao.ps1).
+              if (launch?.closeOnExit) return cbRef.current.onClose()
               const code = ev.code == null ? '' : ` (código ${ev.code})`
               term.write(`\r\n${dim(`[processo encerrado${code}: pressione qualquer tecla para fechar a aba]`)}\r\n`)
             }
@@ -811,7 +816,8 @@ export function TerminalView({
 
   return (
     <div
-      className={`absolute inset-0 flex flex-col pt-3 pr-2 pb-3 pl-5 ${visible ? 'visible' : 'invisible'}`}
+      // `pointer-events-auto`: a área do menu de contexto (TerminalMenu) em volta não pega cliques; só a aba visível pega.
+      className={`pointer-events-auto absolute inset-0 flex flex-col pt-3 pr-2 pb-3 pl-5 ${visible ? 'visible' : 'invisible'}`}
       data-terminal-active={active || undefined}
       ref={wrapRef}
     >

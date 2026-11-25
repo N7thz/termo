@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "dev.termo.app",
   "build": {
-    "beforeDevCommand": "bun run dev:web",
+    "beforeDevCommand": "bun run build:cli && bun run dev:web",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "bun run build:web",
+    "beforeBuildCommand": "bun run build:cli && bun run build:web",
     "frontendDist": "../dist"
   },
   "app": {
@@ -48,7 +48,8 @@
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"],
     "resources": {
       "resources/conpty.dll": "conpty.dll",
-      "resources/OpenConsole.exe": "OpenConsole.exe"
+      "resources/OpenConsole.exe": "OpenConsole.exe",
+      "../cli/target/release/termo.exe": "bin/termo.exe"
     }
   },
   "plugins": {

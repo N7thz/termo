@@ -1,6 +1,8 @@
 mod agent_status;
 mod ai;
 mod browser;
+mod cli;
+mod control;
 mod coord;
 mod editor;
 mod files;
@@ -57,6 +59,8 @@ struct CreateSessionOptions {
     cwd: Option<String>,
     /// Perfil de shell da aba (`pwsh`, `cmd`, `wsl:<distro>`...). Sem ele, vale `defaultShell`.
     shell: Option<String>,
+    /// Aba do Claude aberta pela linha de comando: argumentos extras, pedido inicial e se fecha ao sair.
+    launch: Option<cli::TabLaunch>,
 }
 
 #[derive(Serialize)]
@@ -77,6 +81,8 @@ struct LaunchInfo {
     open_claude_first: bool,
     cwd: Option<String>,
     shell_name: String,
+    /// Aba do Claude pedida na linha de comando (`--title`, `--prompt-file`, `-- <args>`).
+    launch: Option<cli::ClaudeLaunch>,
 }
 
 #[derive(Serialize)]
@@ -93,6 +99,7 @@ fn launch_info(cli: State<CliArgs>, settings: State<SettingsStore>) -> LaunchInf
         open_claude_first: cli.claude || s.start_with_claude,
         cwd: cli.cwd.clone().or_else(|| Some(s.default_cwd).filter(|c| !c.is_empty())),
         shell_name: shell::shell_name(&shell::detect_shell()),
+        launch: cli.launch.clone(),
     }
 }
 
@@ -121,14 +128,20 @@ fn pty_create(
 
     let current = settings.get();
     let requested = opts.shell.as_deref().unwrap_or(&current.default_shell);
-    let plan = shells::plan(
+    let mut plan = shells::plan(
         requested,
         cwd,
         claude.as_deref(),
         agent_status::settings_file().as_deref(),
         current.shell_predictions,
     );
-    warnings.extend(plan.warnings);
+    warnings.extend(std::mem::take(&mut plan.warnings));
+    if let (Some(_), Some(launch)) = (&claude, &opts.launch) {
+        let powershell = shell::is_powershell(&plan.program);
+        if let Err(e) = cli::apply(&mut plan.args, powershell, launch) {
+            warnings.push(e);
+        }
+    }
     let spec = SpawnSpec { shell: &plan.program, args: plan.args, cwd: plan.cwd, cols: opts.cols, rows: opts.rows };
     let id = ptys.spawn(webview.label(), spec, move |ev| on_event.send(ev).is_ok())?;
     Ok(CreateSessionResult {
@@ -574,6 +587,13 @@ pub fn run() {
     logging::install_panic_hook();
 
     let app = tauri::Builder::default()
+        // Antes de tudo: um segundo termo.exe só repassa o argv para este e sai.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            // `Termo.exe run ...`, `Termo.exe tabs`...: subcomandos da CLI; o resto (--claude, --cwd) é do cli.rs.
+            if !control::subcommand(app, &argv, &cwd) {
+                cli::forward(app, argv, cwd)
+            }
+        }))
         // Primeiro, para registrar também o que os outros plugins logam ao subir.
         .plugin(logging::plugin())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -617,6 +637,10 @@ pub fn run() {
             app.manage(node::VersionCache::default());
             app.manage::<Ptys>(Arc::new(PtyManager::default()));
             app.manage(cli);
+            // `termo open/run/tabs/send...` (cliente em cli/) fala com esta instância por 127.0.0.1.
+            if let Err(e) = control::serve(app.handle(), &dir) {
+                log::warn!("controle pela linha de comando: {e}");
+            }
             Ok(())
         })
         // Recarregar a página (Ctrl+R, HMR, travamento) não pode deixar shells órfãos.
@@ -691,6 +715,8 @@ pub fn run() {
             scrollback_prune,
             coord_agents,
             coord_state,
+            control::cli_reply,
+            control::cli_install_path,
             coord_act,
             claude_usage,
             claude_line,
@@ -712,6 +738,7 @@ pub fn run() {
 
     app.run(|handle, event| {
         if let RunEvent::Exit = event {
+            control::cleanup(handle);
             if let Some(ptys) = handle.try_state::<Ptys>() {
                 ptys.kill_all();
             }

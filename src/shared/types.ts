@@ -200,6 +200,23 @@ export interface CreateSessionOptions {
   cwd?: string
   /** Perfil de shell da aba (`pwsh`, `powershell`, `cmd`, `bash`, `wsl`, `wsl:<distro>`). Sem ele, vale `defaultShell`. */
   shell?: string
+  /** Aba do Claude aberta pela linha de comando: argumentos extras, pedido inicial e se fecha ao sair. */
+  launch?: TabLaunch
+}
+
+/** O que a aba do Claude repassa ao `claude` quando foi aberta por `termo.exe --claude ... -- <args>`. */
+export interface TabLaunch {
+  args: string[]
+  /** Arquivo com o primeiro pedido, lido dentro do shell. */
+  promptFile?: string | null
+  /** A aba fecha quando o claude termina (sessões abertas pelo coord). */
+  closeOnExit?: boolean
+}
+
+/** Aba do Claude pedida por `termo.exe --claude --title ... --prompt-file ... -- <args>` (src-tauri/src/cli.rs). */
+export interface ClaudeLaunch extends TabLaunch {
+  cwd: string | null
+  title: string | null
 }
 
 export interface CreateSessionResult {
@@ -231,6 +248,8 @@ export interface LaunchInfo {
   openClaudeFirst: boolean
   cwd: string | null
   shellName: string
+  /** Aba do Claude pedida na linha de comando, além das abas de abertura. */
+  launch: ClaudeLaunch | null
 }
 
 export interface PathSuggestion {

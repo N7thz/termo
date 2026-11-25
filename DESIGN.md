@@ -49,6 +49,12 @@ movimento com mola e respeito a "reduzir movimento". A cor aparece pouco e signi
   caminho na linha, entre aspas no formato do shell (imagem copiada vira PNG em %TEMP%\termo-paste), e
   mostra uma faixa de miniaturas acima da linha de comando; Enter limpa a faixa. No Claude Code o Ctrl+V
   continua anexando pelo próprio Claude, agora com a miniatura. Arrastar solta na aba com foco.
+- 2026-11-24: Configurações saíram do popover de 320px e viraram tela própria sobre o terminal (como Temas
+  e Sessões): lateral com as seções (Geral, Terminal, Fonte, Imagem de fundo, Destaques, Avisos e sistema)
+  que acompanha a rolagem, conteúdo em cartões de até 680px e busca no cabeçalho (Ctrl+F, sem acento,
+  com "Nada encontrado" + Limpar). Escolhido pelo usuário: lateral + conteúdo, com busca. Salva na hora;
+  o cabeçalho mostra "Salvo" por ~2 s ou "Não deu para salvar · Tentar de novo". Esc limpa a busca e depois
+  fecha. Temas abre por cima e volta para a tela. Abaixo de 768px a lateral some e fica a busca.
 
 ## Open questions
 

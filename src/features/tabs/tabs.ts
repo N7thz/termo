@@ -14,6 +14,24 @@ export interface Tab {
   shell?: string
   /** Id da saída guardada desta aba (veio da sessão salva): reabre com o texto que ela tinha. */
   outputId?: string
+  /**
+   * Nome dado à aba (pela pessoa ou pelo Claude, com `termo title`). Vale no lugar do `title`, que é o
+   * automático (o que o processo põe no título do terminal) e continua sendo atualizado por baixo.
+   */
+  label?: string
+}
+
+/** Maior nome de aba aceito (a lateral corta antes, mas o `termo tabs` mostra inteiro). */
+export const MAX_TAB_LABEL = 80
+
+/** Nome limpo para a aba: uma linha só, sem espaços sobrando; vazio tira o nome. */
+export function cleanLabel(raw: string | null | undefined): string | undefined {
+  const label = (raw ?? '')
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: tira caracteres de controle do nome
+    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return label ? label.slice(0, MAX_TAB_LABEL) : undefined
 }
 
 /** Grupo de abas com nome, como as pastas da lateral do Arc/Dia. */
@@ -61,6 +79,8 @@ export interface SessionSnapshot {
     shell?: string
     /** Id da saída guardada (`scrollback/<id>.txt`). */
     output?: string
+    /** Nome dado à aba (veja `Tab.label`). */
+    label?: string
   }[]
   /** Índice (em `tabs`) da aba ativa de cada perfil. */
   active: Record<string, number>
@@ -87,6 +107,8 @@ export type TabsAction =
   | { type: 'activate'; key: number }
   | { type: 'cycle'; delta: 1 | -1 }
   | { type: 'update'; key: number; patch: Partial<Omit<Tab, 'key' | 'profile' | 'cwd' | 'group'>> }
+  /** Dá nome à aba (ou tira, com `null`/vazio): veja `Tab.label`. */
+  | { type: 'rename'; key: number; label: string | null }
   | { type: 'move'; key: number; delta: 1 | -1 }
   /**
    * Arrastar: põe a aba logo antes de `before` (e no grupo dela). Sem `before`, vai para o fim do
@@ -221,6 +243,19 @@ export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
     }
     case 'update':
       return { ...state, tabs: state.tabs.map((t) => (t.key === action.key ? { ...t, ...action.patch } : t)) }
+    case 'rename': {
+      const label = cleanLabel(action.label)
+      const tab = state.tabs.find((t) => t.key === action.key)
+      if (!tab || tab.label === label) return state
+      return {
+        ...state,
+        tabs: state.tabs.map((t) => {
+          if (t.key !== action.key) return t
+          const { label: _old, ...rest } = t
+          return label ? { ...rest, label } : rest
+        }),
+      }
+    }
     case 'move': {
       // Troca de lugar com a vizinha de tela, se as duas estiverem no mesmo grupo (ou as duas soltas).
       const mine = visibleTabs(state)
@@ -412,6 +447,7 @@ export function snapshot(
         ...(t.group ? { group: t.group } : {}),
         ...(t.shell ? { shell: t.shell } : {}),
         ...(output && isOutputId(output) ? { output } : {}),
+        ...(t.label ? { label: t.label } : {}),
       }
     }),
     active,
@@ -481,6 +517,8 @@ export function restore(raw: unknown, base: TabsState = initialTabs, allowed?: R
     // Snapshots antigos não têm o campo: a aba abre com o shell padrão.
     if (typeof t.shell === 'string' && isShellId(t.shell)) tab.shell = t.shell
     if (typeof t.output === 'string' && isOutputId(t.output)) tab.outputId = t.output
+    const label = cleanLabel(str(t.label, 1000))
+    if (label) tab.label = label
     tabs.push(tab)
   })
   if (tabs.length === 0) return base

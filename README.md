@@ -20,7 +20,24 @@ bun run check        # typecheck, Biome e testes (bun test + cargo test)
 bun run release 0.2.0  # nova versão: atualiza os arquivos, commita e cria a tag v0.2.0
 ```
 
-O executável aceita `--claude`, para abrir no Claude Code, e `--cwd <pasta>` ou uma pasta solta, para abrir nela.
+O executável aceita `--claude`, para abrir no Claude Code, e `--cwd <pasta>` ou uma pasta solta, para abrir nela. Com o Termo já aberto, a chamada vai para ele (instância única) e vira uma aba. Para a aba do Claude também valem `--title <nome>`, `--prompt-file <arquivo>` (primeira mensagem), `--close-on-exit` (fecha a aba quando o Claude sai) e `-- <argumentos do claude>`; é assim que o coord abre as sessões. O comando `termo` (abaixo) repassa essas flags ao app.
+
+## Linha de comando: `termo`
+
+O comando `termo` controla o Termo aberto, como o `code` do VS Code. Ele vem no instalador em `<instalação>\bin\termo.exe`; para usar em qualquer terminal, rode "Instalar o comando termo no PATH" na paleta (Ctrl+Shift+P) e abra um terminal novo. Se o Termo estiver fechado, o comando abre ele antes.
+
+```
+termo .                        aba nova nesta pasta (termo D:\projeto também)
+termo open [pasta] --shell cmd aba nova com outro perfil (pwsh, cmd, git-bash, wsl:Ubuntu...)
+termo split [pasta]            aba nova em tela dividida com a ativa
+termo run bun dev              aba nova que roda o comando (--cwd <pasta>, --split)
+termo claude [pasta] "texto"   aba do Claude Code; o texto vai como primeira mensagem
+termo tabs [--json]            lista as abas (número, tipo, título, pasta; * = ativa)
+termo send --tab 3 "git pull"  escreve na aba e tecla Enter (--no-enter só cola)
+termo focus [N] / close N      traz o Termo para a frente (e ativa a aba) / fecha a aba
+```
+
+Como funciona: ao abrir, o app escuta em 127.0.0.1 numa porta livre e grava a porta e um token em `%APPDATA%\dev.termo.app\control.json` (`src-tauri/src/control.rs`); o cliente (`cli/`, binário de console só com std e serde_json) manda os argumentos e a pasta atual e mostra a resposta. Os mesmos subcomandos também funcionam como `Termo.exe run ...`, pela instância única, só que sem resposta. `bun run build:cli` compila o cliente (o `tauri dev`/`build` já chama).
 
 ## Publicar uma versão
 
@@ -81,6 +98,7 @@ src-tauri/           backend (Rust)
   src/usage.rs       limites do Claude e a linha de status de cada aba (modelo, esforço, contexto, custo)
   src/review.rs      arquivos alterados, diff, stage e descartar (caminhos validados)
   src/coord.rs       leitura do painel do coord (127.0.0.1:4747)
+  src/control.rs     controle pela linha de comando: servidor local do `termo` (abrir aba, rodar, listar, mandar texto)
   src/window.rs      várias janelas (`termo-<n>`), cada uma com abas e painel próprios
   src/node.rs        versão do Node da aba e versões do fnm/nvm-windows/Volta
   src/images.rs      imagens citadas na saída dos blocos (prévia em `data:`, só arquivos de imagem)
@@ -123,7 +141,8 @@ src-tauri/           backend (Rust)
 - Atalho global (Configurações → Avisos e sistema): grava uma combinação como Alt+F12; de qualquer programa ela traz o Termo para a frente, e com ele na frente minimiza
 - Modos do terminal com cara própria: PowerShell 7, Windows PowerShell, cmd, WSL, Git Bash e Claude Code têm ícone e tom do tema próprios na aba, na lateral, na paleta e na barra de status, e uma faixa fina no topo do terminal. A seta do `+`, o canto do botão Shell da lateral, a tela sem abas e a paleta ("Nova aba: <modo>") abrem uma aba em qualquer modo
 - Imagens na entrada: colar uma imagem (print) ou arrastar arquivos para a janela põe o caminho na linha, entre aspas no formato do shell (a imagem colada vira um PNG em `%TEMP%	ermo-paste`), e mostra miniaturas acima da linha de comando (clique abre no visualizador; Enter limpa). Vale para a linha do terminal, a caixa estilo Warp e a aba do Claude Code, onde o Ctrl+V continua anexando pelo próprio Claude
-- Imagem de fundo (como a extensão Background do VS Code): uma ou várias imagens atrás do texto do terminal ou por cima da janela, com opacidade, desfoque, ajuste e troca automática
+- Imagem de fundo (como a extensão Background do VS Code): uma ou várias imagens atrás do texto do terminal ou por cima da janela, com opacidade, desfoque, ajuste e troca automática. Nas Configurações cada imagem da lista tem miniatura e um clique mostra a prévia com a opacidade, o desfoque e o ajuste escolhidos
+- Configurações em tela própria, sobre o terminal: lateral com as seções (Geral, Terminal, Fonte, Imagem de fundo, Destaques, Avisos e sistema) e busca no cabeçalho (Ctrl+F, sem diferença de acento). Salva na hora; Esc limpa a busca e depois fecha
 - Scripts do `package.json` na linha de contexto, como o NPM Scripts do VS Code: um clique roda `npm run`/`bun run`/`pnpm run`... com o gerenciador do projeto
 - Modo bandeja (Configurações → Avisos e sistema): ícone na bandeja do Windows (clique mostra/esconde; menu com nova aba, Claude Code, nova janela e sair), fechar ou minimizar a janela principal manda para a bandeja com as abas rodando, iniciar com o Windows e, nesse caso, ficar só na bandeja
 - Reabrir as abas com o texto que tinham: o fim da saída de cada aba de shell (até 1000 linhas, com cores) é guardado a cada 10 s e volta ao reabrir, acima de um separador

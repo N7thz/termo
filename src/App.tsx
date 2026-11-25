@@ -1,3 +1,4 @@
+import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Button } from '@ui-sdk/react/button'
 import { Tabs, TabsList, TabsTab, TabsTabIcon } from '@ui-sdk/react/tabs'
@@ -10,6 +11,7 @@ import { isBackgroundActive, transparentTheme, wantsTransparentTerminal } from '
 import { SAVE_WORKFLOW_EVENT } from './features/blocks/commandBlocks'
 import { broadcastTargets, isTyped } from './features/broadcast/broadcast'
 import { BrowserPanel } from './features/browser/BrowserPanel'
+import { installCliOnPath, useCliActions } from './features/cli/useCliActions'
 import { CodeReviewPanel } from './features/code-review/CodeReviewPanel'
 import { TabMenu } from './features/context-menu/TabMenu'
 import { TerminalMenu } from './features/context-menu/TerminalMenu'
@@ -26,7 +28,8 @@ import { CommandPalette } from './features/palette/CommandPalette'
 import { createProfile, PROFILE_COLORS, pinFolder, profileColorCss } from './features/profiles/profiles'
 import { SessionsIndicator } from './features/sessions/SessionsIndicator'
 import { SessionsPage } from './features/sessions/SessionsPage'
-import { SettingsPanel } from './features/settings/SettingsPanel'
+import { useInterfaceZoom } from './features/settings/interfaceSize'
+import { SettingsButton, SettingsPage } from './features/settings/SettingsPage'
 import { ModeChoices } from './features/shell-profiles/ModeChoices'
 import { NewShellMenu } from './features/shell-profiles/NewShellMenu'
 import { useShells } from './features/shell-profiles/useShells'
@@ -59,6 +62,7 @@ import { UsageBattery } from './features/usage-battery/UsageBattery'
 import { WindowControls } from './features/window/WindowControls'
 import { WorkflowDialog } from './features/workflows/WorkflowDialog'
 import { WorkflowManager } from './features/workflows/WorkflowManager'
+import { tabLabel } from './features/workspace/format'
 import { GitDiff } from './features/workspace/GitDiff'
 import { StatusBar } from './features/workspace/StatusBar'
 import { TabSidebar } from './features/workspace/TabSidebar'
@@ -66,7 +70,7 @@ import { useWorkspace } from './features/workspace/useWorkspace'
 import { ipc } from './lib/ipc'
 import { actionButton, tooltip, tooltipKbd } from './lib/ui'
 import { clampFontSize, DEFAULT_SETTINGS } from './shared/settings'
-import type { Profile, SavedLayout, SessionKind, Settings, Workflow } from './shared/types'
+import type { ClaudeLaunch, Profile, SavedLayout, SessionKind, Settings, Workflow } from './shared/types'
 
 // Feedback no pointer-down (active:), sem esperar o click. Ao fechar, a aba encolhe até sumir.
 const TAB =
@@ -104,6 +108,8 @@ export function App() {
   const [cwd, setCwd] = useState<string>()
   const [showSettings, setShowSettings] = useState(false)
   const [ready, setReady] = useState(false)
+  /** Aba do Claude pedida na linha de comando da primeira abertura, esperando o app ficar pronto. */
+  const pendingLaunch = useRef<ClaudeLaunch | null>(null)
   const [closing, setClosing] = useState<ReadonlySet<number>>(new Set())
   const settingsRef = useRef(settings)
   settingsRef.current = settings
@@ -197,12 +203,13 @@ export function App() {
         after?: number
         group?: string
         splitWith?: number
+        title?: string
       } = {},
     ) =>
       dispatch({
         type: 'open',
         kind,
-        title: kind === 'claude' ? 'Claude Code' : (opts.shell ?? sshTitle(opts.shellId) ?? shellName),
+        title: opts.title ?? (kind === 'claude' ? 'Claude Code' : (opts.shell ?? sshTitle(opts.shellId) ?? shellName)),
         cwd: opts.cwd,
         shell: opts.shellId,
         profile: opts.profile,
@@ -225,10 +232,13 @@ export function App() {
         setShellName(info.shellName)
         setCwd((extra ? WINDOW_CWD : info.cwd) ?? undefined)
         const ids = (s.profiles?.length ? s.profiles : DEFAULT_SETTINGS.profiles).map((p) => p.id)
+        // Aba pedida na linha de comando (termo.exe --claude --title ...): abre quando o app estiver pronto.
+        if (!extra && info.launch) pendingLaunch.current = info.launch
         if (!extra && s.restoreSession && restore(saved, initialTabs, new Set(ids)).tabs.length > 0) {
           dispatch({ type: 'restore', snapshot: saved, profiles: ids })
           return
         }
+        if (pendingLaunch.current) return
         const first = s.profiles?.[0]?.id
         if (first) dispatch({ type: 'switch-profile', profile: first })
         openTab(!extra && info.openClaudeFirst ? 'claude' : 'shell', {
@@ -404,6 +414,27 @@ export function App() {
   }, [])
   /** Comando que a aba nova roda no primeiro prompt (pela chave da aba; vem da página de Sessões). */
   const initialCommands = useRef(new Map<number, string>())
+  // ---- Abas do Claude pedidas pela linha de comando (termo.exe --claude ...; o coord abre as sessões assim) ----
+  /** Pedido de cada aba aberta assim (pela chave da aba). Não entra na sessão salva. */
+  const launches = useRef(new Map<number, ClaudeLaunch>())
+  const openLaunch = (l: ClaudeLaunch) => {
+    launches.current.set(state.nextKey, l)
+    setShowSessions(false)
+    openTab('claude', { cwd: l.cwd ?? undefined, title: l.title ?? undefined })
+  }
+  const openLaunchRef = useRef(openLaunch)
+  openLaunchRef.current = openLaunch
+  useEffect(() => {
+    if (!ready || !pendingLaunch.current) return
+    const l = pendingLaunch.current
+    pendingLaunch.current = null
+    openLaunchRef.current(l)
+  }, [ready])
+  useEffect(() => {
+    if (!IS_MAIN_WINDOW) return
+    const off = listen<ClaudeLaunch>('termo-launch', (e) => openLaunchRef.current(e.payload))
+    return () => void off.then((f) => f())
+  }, [])
   // ---- Layouts salvos: abas, grupos, divisões e comandos iniciais do perfil, abertos com um clique ----
   const [layoutManager, setLayoutManager] = useState<{ open: boolean; saving: boolean }>({ open: false, saving: false })
   const savedLayouts = settings.layouts ?? []
@@ -425,6 +456,7 @@ export function App() {
     setShowSessions(false)
     dispatch(openLayoutAction(layout))
   }
+
   const layoutsApi = {
     layouts: savedLayouts,
     onOpen: (index: number) => savedLayouts[index] && openLayout(savedLayouts[index]),
@@ -467,6 +499,30 @@ export function App() {
     if (target) dispatch({ type: 'activate', key: target.key })
     else openTab('claude', { cwd: reviewCwd ?? undefined })
   }
+  // ---- Linha de comando (`termo open/run/claude/tabs/send...`): pedidos vindos do control.rs ----
+  const stateRef = useRef(state)
+  stateRef.current = state
+  useCliActions(
+    {
+      state: () => stateRef.current,
+      tabCwd: (key) => workspace.info(key).cwd,
+      openShell: ({ cwd: dir, shellId, command, splitWith }) => {
+        if (command) initialCommands.current.set(stateRef.current.nextKey, command)
+        setShowSessions(false)
+        openTab('shell', { cwd: dir, shellId, splitWith })
+      },
+      openClaude: (dir, prompt) => {
+        if (prompt)
+          pendingClaude.current = { text: prompt, key: stateRef.current.nextKey, at: Date.now(), submit: true }
+        setShowSessions(false)
+        openTab('claude', { cwd: dir })
+      },
+      activate: (key) => dispatch({ type: 'activate', key }),
+      close: closeTab,
+      actions: (key) => terminalActions.current.get(key),
+    },
+    IS_MAIN_WINDOW,
+  )
   /** O Claude da aba ficou pronto: entrega o texto pendente (vale por 2 minutos). */
   const onClaudeState = (tab: { key: number; kind: SessionKind }, s: AgentState) => {
     const pending = pendingClaude.current
@@ -552,12 +608,21 @@ export function App() {
     }
   }
 
-  const updateSettings = useCallback((patch: Partial<Settings>) => {
-    ipc
-      .setSettings(patch)
-      .then(setSettings)
-      .catch((err) => console.error('[termo] falha ao salvar configurações', err))
-  }, [])
+  /** Grava e devolve a promessa (a tela de configurações mostra "Salvo" ou o erro). */
+  const saveSettings = useCallback(
+    (patch: Partial<Settings>) =>
+      ipc.setSettings(patch).then(setSettings, (err) => {
+        console.error('[termo] falha ao salvar configurações', err)
+        throw err
+      }),
+    [],
+  )
+  const updateSettings = useCallback(
+    (patch: Partial<Settings>) => void saveSettings(patch).catch(() => undefined),
+    [saveSettings],
+  )
+  // Tamanho da interface (zoom do webview): vale com a tela de configurações aberta ou não.
+  useInterfaceZoom(settings.interfaceSize)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -658,8 +723,8 @@ export function App() {
         onValueChange={(value) => value != null && dispatch({ type: 'activate', key: Number(value) })}
       >
         {/* Como no Dia: a lateral ocupa a altura toda, e ela, a barra e o rodapé ficam direto sobre a moldura;
-          só o terminal tem cartão. Fica sempre montada e abre/fecha pela largura (o que sobra fechada, 6px,
-          é a margem esquerda), para a animação partir de onde estiver se o atalho for apertado no meio. */}
+        só o terminal tem cartão. Fica sempre montada e abre/fecha pela largura (o que sobra fechada, 6px,
+        é a margem esquerda), para a animação partir de onde estiver se o atalho for apertado no meio. */}
         <div
           className={`relative flex-none overflow-hidden ${sidebarDragging ? '' : '[transition:width_380ms_var(--spring-soft),opacity_200ms_ease-out] motion-reduce:[transition:opacity_150ms_ease]'} ${layout.sidebar ? (layout.sidebarCollapsed ? 'w-14' : '') : 'w-2.5 opacity-0'}`}
           style={layout.sidebar && !layout.sidebarCollapsed ? { width: sidebarWidth } : undefined}
@@ -685,9 +750,9 @@ export function App() {
               profiles={profiles}
               profile={profile}
               tabs={tabs}
+              shellName={shellName}
               active={state.active}
               info={workspace.info}
-              colors={diffColors}
               onActivate={(key) => dispatch({ type: 'activate', key })}
               onClose={closeTab}
               onNew={(kind, dir, shellId) => openTab(kind, { cwd: dir, shellId })}
@@ -768,7 +833,7 @@ export function App() {
                       data-closing={closing.has(tab.key) || undefined}
                       className={TAB}
                       onAuxClick={(e) => e.button === 1 && closeTab(tab.key)}
-                      title={tab.title}
+                      title={tabLabel(tab, shellName)}
                     />
                   }
                 >
@@ -779,7 +844,7 @@ export function App() {
                     <TabsTabIcon className="flex">
                       <TabKindIcon kind={tab.kind} shell={tab.shell} agent={agents.get(tab.key)} />
                     </TabsTabIcon>
-                    <span className="flex-1 truncate">{tab.title}</span>
+                    <span className="flex-1 truncate">{tabLabel(tab, shellName)}</span>
                     {broadcasting.has(tab.key) && (
                       <Radio
                         size={12}
@@ -794,7 +859,7 @@ export function App() {
                   <Button
                     className={TAB_CLOSE}
                     tabIndex={-1}
-                    aria-label={`Fechar ${tab.title}`}
+                    aria-label={`Fechar ${tabLabel(tab, shellName)}`}
                     onClick={() => closeTab(tab.key)}
                   >
                     <X size={12} />
@@ -803,7 +868,8 @@ export function App() {
               ))}
             </TabsList>
             <span data-tauri-drag-region className="flex-1 self-stretch" />
-            {layout.diffBadge && activeInfo.git && (
+            {/* O diff da aba ativa fica na barra de status; o selo do topo só aparece sem ela. */}
+            {layout.diffBadge && !layout.statusBar && activeInfo.git && (
               <Button
                 className="rounded-md hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-accent"
                 aria-label="Abrir a revisão de código"
@@ -813,25 +879,36 @@ export function App() {
                 <GitDiff git={activeInfo.git} colors={diffColors} className="px-1" />
               </Button>
             )}
-            <div className="flex gap-1">
-              {/* Os atalhos são ligados em actionFor; o shortcut do Tooltip só mostra e anuncia. */}
-              <Tooltip shortcut="mod+shift+t">
-                <TooltipTrigger
-                  render={<Button className={actionButton} aria-label="Nova aba" onClick={() => openTab('shell')} />}
-                >
-                  <Plus size={15} />
-                </TooltipTrigger>
-                <TooltipContent className={tooltip} sideOffset={6}>
-                  Nova aba <TooltipShortcut className={tooltipKbd} />
-                </TooltipContent>
-              </Tooltip>
-              <NewShellMenu
-                defaultShell={settings.defaultShell}
-                onPick={(kind, shellId) => openTab(kind, { shellId })}
-              />
+            {/* Status primeiro (sessões, uso do Claude, atualização), separado das ações por um fio. */}
+            <div className="flex items-center gap-1">
               <SessionsIndicator onOpen={() => setShowSessions((v) => !v)} />
               <UsageBattery />
               <UpdateButton />
+            </div>
+            <span aria-hidden className="mx-1 h-4 w-px flex-none bg-hairline" />
+            <div className="flex gap-1">
+              {/* Com a lateral, abrir aba fica no "Nova aba" dela; o + e o menu de modos só sem a lateral. */}
+              {!layout.sidebar && (
+                <>
+                  {/* Os atalhos são ligados em actionFor; o shortcut do Tooltip só mostra e anuncia. */}
+                  <Tooltip shortcut="mod+shift+t">
+                    <TooltipTrigger
+                      render={
+                        <Button className={actionButton} aria-label="Nova aba" onClick={() => openTab('shell')} />
+                      }
+                    >
+                      <Plus size={15} />
+                    </TooltipTrigger>
+                    <TooltipContent className={tooltip} sideOffset={6}>
+                      Nova aba <TooltipShortcut className={tooltipKbd} />
+                    </TooltipContent>
+                  </Tooltip>
+                  <NewShellMenu
+                    defaultShell={settings.defaultShell}
+                    onPick={(kind, shellId) => openTab(kind, { shellId })}
+                  />
+                </>
+              )}
               <Tooltip shortcut="mod+shift+k">
                 <TooltipTrigger
                   render={
@@ -847,19 +924,12 @@ export function App() {
                   Nova aba com Claude Code <TooltipShortcut className={tooltipKbd} />
                 </TooltipContent>
               </Tooltip>
-              <SettingsPanel
+              <SettingsButton
                 open={showSettings}
-                onOpenChange={setShowSettings}
-                settings={settings}
-                onChange={updateSettings}
-                onOpenThemes={openThemes}
-                onOpenShortcuts={() => {
-                  setShowSettings(false)
-                  setShowShortcuts(true)
-                }}
-                onOpenWorkflows={() => {
-                  setShowSettings(false)
-                  setWorkflowManager({ open: true, draft: null })
+                onToggle={() => {
+                  setShowThemes(false)
+                  setShowSessions(false)
+                  setShowSettings((v) => !v)
                 }}
               />
             </div>
@@ -880,7 +950,7 @@ export function App() {
                 <div
                   key={tab.key}
                   role="tabpanel"
-                  aria-label={tab.title}
+                  aria-label={tabLabel(tab, shellName)}
                   className={`absolute inset-y-0 ${paneStyle(tab.key) ? '' : 'inset-x-0'} ${split && paneStyle(tab.key) && tab.key !== state.active ? 'opacity-80' : ''} ${hiddenByZoom(tab.key) ? 'pointer-events-none' : ''} [transition:opacity_160ms_ease-out]`}
                   style={paneStyle(tab.key)}
                 >
@@ -895,6 +965,7 @@ export function App() {
                         tab.shell !== shell && dispatch({ type: 'update', key: tab.key, patch: { shell } })
                       }
                       initialCommand={initialCommands.current.get(tab.key)}
+                      launch={launches.current.get(tab.key)}
                       onInput={(data) => forwardInput(tab.key, data)}
                       active={tab.key === state.active}
                       visible={tab.key === state.active || (paneStyle(tab.key) != null && !hiddenByZoom(tab.key))}
@@ -905,6 +976,8 @@ export function App() {
                       onTitle={(title) =>
                         // O ssh.exe põe o próprio caminho no título: a aba SSH mantém o nome do host.
                         !(tab.shell?.startsWith('ssh:') && /ssh(\.exe)?$/i.test(title)) &&
+                        // Aba com nome dado na linha de comando (sessões do coord): o nome fica.
+                        !launches.current.get(tab.key)?.title &&
                         dispatch({ type: 'update', key: tab.key, patch: { title } })
                       }
                       onKind={(kind) =>
@@ -980,6 +1053,22 @@ export function App() {
                   </div>
                 </div>
               )}
+              {showSettings && (
+                <SettingsPage
+                  settings={settings}
+                  onChange={saveSettings}
+                  onClose={() => {
+                    setShowSettings(false)
+                    requestAnimationFrame(() =>
+                      document.querySelector<HTMLElement>('[data-terminal-active] .xterm-helper-textarea')?.focus(),
+                    )
+                  }}
+                  // Temas abre por cima e, ao fechar, volta para cá.
+                  onOpenThemes={() => setShowThemes(true)}
+                  onOpenShortcuts={() => setShowShortcuts(true)}
+                  onOpenWorkflows={() => setWorkflowManager({ open: true, draft: null })}
+                />
+              )}
               {showSessions && (
                 <SessionsPage
                   active
@@ -1049,7 +1138,13 @@ export function App() {
           info={workspace.info}
           actions={[
             { id: 'new-shell', label: 'Nova aba', keys: 'mod+shift+t', run: () => openTab('shell') },
-            { id: 'new-claude', label: 'Nova aba com Claude Code', keys: 'mod+shift+k', run: () => openTab('claude') },
+            {
+              id: 'new-claude',
+              label: 'Nova aba com Claude Code',
+              keys: 'mod+shift+k',
+              run: () => openTab('claude'),
+            },
+            { id: 'install-cli', label: 'Instalar o comando termo no PATH', run: () => void installCliOnPath() },
             // Um item por shell instalado: "Nova aba: Prompt de Comando", "Nova aba: Ubuntu (WSL)"...
             ...sshHosts.map((host) => ({
               id: `new-ssh-${host}`,
@@ -1075,7 +1170,12 @@ export function App() {
               keys: 'mod+shift+g',
               run: () => setShowReview((v) => !v),
             },
-            { id: 'sessions', label: 'Sessões do Claude Code', keys: 'mod+shift+a', run: () => setShowSessions(true) },
+            {
+              id: 'sessions',
+              label: 'Sessões do Claude Code',
+              keys: 'mod+shift+a',
+              run: () => setShowSessions(true),
+            },
             {
               id: 'sidebar',
               label: layout.sidebar ? 'Ocultar abas na lateral' : 'Mostrar abas na lateral',

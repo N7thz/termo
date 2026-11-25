@@ -14,10 +14,11 @@
     "dev:web": "vite",
     "build": "tauri build",
     "build:web": "vite build",
+    "build:cli": "cargo build --release --manifest-path cli/Cargo.toml",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "biome check .",
     "format": "biome check --write .",
-    "test": "bun test src && cargo test --manifest-path src-tauri/Cargo.toml",
+    "test": "bun test src && bun run build:cli && cargo test --manifest-path src-tauri/Cargo.toml && cargo test --manifest-path cli/Cargo.toml",
     "test:web": "bun test src",
     "check": "bun run typecheck && bun run lint && bun run test",
     "release": "bun scripts/release.ts"

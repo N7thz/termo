@@ -25,7 +25,12 @@ export function TerminalMenu({ children, actions, onAction }: Props) {
       }}
       onAction={(value) => onAction(value as TerminalMenuAction)}
     >
-      <MenuContextTrigger ref={areaRef} className="absolute inset-0">
+      {/*
+        Sem cliques na área em si: as abas ficam empilhadas e a área de uma aba escondida, que vem depois no
+        DOM, tapava os botões da aba ativa (sessão restaurada com a ativa no meio). O clique direito no terminal
+        visível (pointer-events-auto) ainda sobe até aqui e abre o menu.
+      */}
+      <MenuContextTrigger ref={areaRef} className="pointer-events-none absolute inset-0">
         {children}
       </MenuContextTrigger>
       {/* O foco volta ao xterm, não à área do gatilho, que não é focável. */}

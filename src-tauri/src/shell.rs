@@ -136,18 +136,14 @@ pub fn is_internal_env(key: &str) -> bool {
 pub struct CliArgs {
     pub claude: bool,
     pub cwd: Option<String>,
+    /// Aba do Claude com título, pedido ou argumentos próprios (`termo.exe --claude --title ... -- ...`).
+    pub launch: Option<crate::cli::ClaudeLaunch>,
 }
 
 /// Lê `--claude` e `--cwd <pasta>` (ou uma pasta solta, como no "Abrir aqui").
 pub fn parse_cli<I: IntoIterator<Item = String>>(args: I) -> CliArgs {
-    let args: Vec<String> = args.into_iter().skip(1).collect();
-    let mut out = CliArgs { claude: args.iter().any(|a| a == "--claude"), cwd: None };
-    if let Some(i) = args.iter().position(|a| a == "--cwd") {
-        out.cwd = args.get(i + 1).cloned();
-    } else {
-        out.cwd = args.iter().find(|a| !a.starts_with('-') && Path::new(a).is_dir()).cloned();
-    }
-    out
+    let argv: Vec<String> = args.into_iter().collect();
+    CliArgs { claude: crate::cli::wants_claude(&argv), cwd: crate::cli::cwd_of(&argv), launch: crate::cli::parse_launch(&argv) }
 }
 
 #[cfg(test)]
@@ -219,7 +215,7 @@ mod tests {
     #[test]
     fn parses_cli() {
         let a = parse_cli(["termo".into(), "--claude".into(), "--cwd".into(), "D:\\x".into()]);
-        assert_eq!(a, CliArgs { claude: true, cwd: Some("D:\\x".into()) });
+        assert_eq!(a, CliArgs { claude: true, cwd: Some("D:\\x".into()), launch: None });
     }
 
     #[test]

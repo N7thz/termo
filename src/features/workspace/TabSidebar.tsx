@@ -1,5 +1,5 @@
 import { Button } from '@ui-sdk/react/button'
-import { Tooltip, TooltipContent, TooltipShortcut, TooltipTrigger } from '@ui-sdk/react/tooltip'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@ui-sdk/react/tooltip'
 import {
   ChevronDown,
   ChevronRight,
@@ -12,10 +12,10 @@ import {
   X,
 } from 'lucide-react'
 import { type ReactNode, useRef, useState } from 'react'
-import { tooltip, tooltipKbd } from '../../lib/ui'
+import { tooltip } from '../../lib/ui'
 import { MAX_PROFILES } from '../../shared/settings'
 import type { Profile, SessionKind } from '../../shared/types'
-import type { AgentState } from '../agent-status/agentState'
+import { AGENT_LABEL, type AgentState } from '../agent-status/agentState'
 import { TabMenu } from '../context-menu/TabMenu'
 import type { TabMenuAction } from '../context-menu/types'
 import { ProfileEditor } from '../profiles/ProfileEditor'
@@ -23,8 +23,8 @@ import { isPinned, profileColorCss } from '../profiles/profiles'
 import { NewShellMenu } from '../shell-profiles/NewShellMenu'
 import { TabKindIcon } from '../tabs/TabKindIcon'
 import { MAX_GROUP_NAME, type Tab, type TabGroup } from '../tabs/tabs'
-import { folderName, shortPath } from './format'
-import { type DiffColors, GitBranch, GitDiff } from './GitDiff'
+import { folderName, tabLabel } from './format'
+import { GitBranch } from './GitDiff'
 import { type DropTarget, useFlip, useTabDrag } from './useTabDrag'
 import type { TabInfo } from './useWorkspace'
 
@@ -35,13 +35,14 @@ interface Props {
   tabs: readonly Tab[]
   active: number | null
   info: (key: number) => TabInfo
-  colors: DiffColors
   onActivate: (key: number) => void
   onClose: (key: number) => void
   /** Aba nova no perfil atual; com `cwd`, abre naquela pasta; com `shellId`, naquele shell. */
   onNew: (kind: SessionKind, cwd?: string, shellId?: string) => void
-  /** `defaultShell` das configurações: ícone do botão Shell e item marcado no menu de modos. */
+  /** `defaultShell` das configurações: item marcado no menu de modos. */
   defaultShell: string
+  /** Nome do shell padrão: título das abas cujo shell só manda o caminho do executável. */
+  shellName: string
   onTabAction: (tab: Tab, action: TabMenuAction) => void
   onSwitchProfile: (id: string) => void
   onAddProfile: () => void
@@ -194,46 +195,12 @@ const CARD_CLOSE = `${CLOSE} top-2 right-2`
 
 const SECTION = 'px-2 pt-3 pb-1 text-[10.5px] font-semibold tracking-[0.06em] text-muted uppercase'
 
-/** Bloco grande da grade de favoritos (como os sites fixados no topo da lateral do Dia). */
-function Favorite({
-  label,
-  keys,
-  icon,
-  onClick,
-}: {
-  label: string
-  keys: string
-  icon: ReactNode
-  onClick: () => void
-}) {
-  return (
-    <Tooltip shortcut={keys}>
-      <TooltipTrigger
-        render={
-          <Button
-            className="flex h-14 w-full flex-col items-center justify-center gap-1.5 rounded-[12px] bg-highlight text-[11.5px] leading-none tracking-[0.01em] text-muted shadow-[inset_0_0_0_1px_var(--hairline)] [transition:background-color_140ms_ease-out,color_140ms_ease-out,scale_300ms_var(--spring)] hover:bg-surface-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent active:scale-[0.96] motion-reduce:active:scale-100"
-            onClick={onClick}
-          />
-        }
-      >
-        {icon}
-        {label}
-      </TooltipTrigger>
-      <TooltipContent className={tooltip} sideOffset={6}>
-        Nova aba: {label} <TooltipShortcut className={tooltipKbd} />
-      </TooltipContent>
-    </Tooltip>
-  )
-}
-
 /**
- * Lateral no estilo do Dia: perfil no topo, favoritos em blocos, pastas fixadas, as abas do perfil,
- * "Nova aba" e, embaixo, os pontos para trocar de perfil.
+ * Lateral no estilo do Dia: perfil no topo, pastas fixadas, as abas do perfil, "Nova aba" (o jeito
+ * de abrir aba, com o menu de modos) e, embaixo, os pontos para trocar de perfil.
  */
 export function TabSidebar(props: Props) {
-  const { profiles, profile, tabs, active, info, colors, onActivate, onClose, onNew, onTabAction, renderAlert } = props
-  // Ícone do botão Shell: o modo que o Ctrl+Shift+T abre (`auto` cai no PowerShell 7).
-  const defaultFamily = props.defaultShell === 'auto' ? undefined : props.defaultShell
+  const { profiles, profile, tabs, active, info, onActivate, onClose, onNew, onTabAction, renderAlert } = props
   const { closing } = props
 
   // Sentido da troca de perfil: o conteúdo entra pela direita indo para um ponto à direita, e vice-versa,
@@ -274,6 +241,9 @@ export function TabSidebar(props: Props) {
   const renderTab = (tab: Tab) => {
     const index = tabs.indexOf(tab)
     const { cwd, git } = info(tab.key)
+    const folder = cwd ?? tab.cwd
+    const label = tabLabel(tab, props.shellName)
+    const agent = props.agents?.get(tab.key)
     const isActive = tab.key === active
     const partner = props.partnerOf(tab.key)
     return (
@@ -307,13 +277,16 @@ export function TabSidebar(props: Props) {
           type="button"
           className="absolute inset-0 rounded-lg outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
           aria-current={isActive ? 'page' : undefined}
-          aria-label={`${tab.title}${cwd ? `, ${cwd}` : ''}`}
+          aria-label={`${label}${folder ? `, ${folder}` : ''}`}
           onClick={() => onActivate(tab.key)}
         />
-        {/* Cartão de três linhas, como no Warp: título, pasta e branch com o diff. */}
+        {/*
+          Cartão de duas linhas em todas as abas: o título e, embaixo, pasta · branch. O diff não cabe junto na
+          largura da lateral: o da aba ativa fica na barra de status (ou no topo, sem ela).
+        */}
         <span className="pointer-events-none flex items-center gap-2.5 pr-6">
-          <TabKindIcon kind={tab.kind} shell={tab.shell} size={16} agent={props.agents?.get(tab.key)} />
-          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{tab.title}</span>
+          <TabKindIcon kind={tab.kind} shell={tab.shell} size={16} agent={agent} />
+          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{label}</span>
           {props.broadcasting?.has(tab.key) && (
             <Radio size={13} className="flex-none text-accent" aria-label="Recebendo o que é digitado" role="img" />
           )}
@@ -322,22 +295,33 @@ export function TabSidebar(props: Props) {
           )}
           {renderAlert?.(tab.key)}
         </span>
-        {cwd && (
-          <span className="pointer-events-none truncate pl-6.5 text-[11.5px]" title={cwd}>
-            {shortPath(cwd, 2)}
-          </span>
-        )}
-        {git && (
-          <span className="pointer-events-none flex items-center gap-2 pl-6.5 text-[11.5px]">
-            <GitBranch git={git} className="min-w-0" />
-            <GitDiff git={git} colors={colors} className="ml-auto" />
-          </span>
-        )}
+        <span className="pointer-events-none flex min-w-0 items-center gap-1.5 pl-6.5 text-[11.5px]">
+          {folder ? (
+            // Com pouco espaço, a pasta encolhe antes do branch.
+            <span className="min-w-0 shrink-[2] truncate" title={folder}>
+              {folderName(folder)}
+            </span>
+          ) : (
+            // Sem pasta (Claude Code recém-aberto): o estado no lugar, para o cartão manter as duas linhas.
+            <span className="min-w-0 truncate">
+              {tab.kind === 'claude' ? AGENT_LABEL[agent && agent !== 'off' ? agent : 'idle'] : 'Iniciando…'}
+            </span>
+          )}
+          {git && (
+            <>
+              <span aria-hidden className="flex-none opacity-50">
+                ·
+              </span>
+              {/* Sem o ícone: o "·" já separa, e no cartão estreito o espaço vai para o nome do branch. */}
+              <GitBranch git={git} className="min-w-0 [&>span:first-of-type]:min-w-[3ch] [&>svg:first-child]:hidden" />
+            </>
+          )}
+        </span>
         <Button
           className={CARD_CLOSE}
           data-no-drag
           tabIndex={-1}
-          aria-label={`Fechar ${tab.title}`}
+          aria-label={`Fechar ${label}`}
           onClick={() => onClose(tab.key)}
         >
           <X size={12} />
@@ -349,6 +333,7 @@ export function TabSidebar(props: Props) {
   const renderRailTab = (tab: Tab) => {
     const index = tabs.indexOf(tab)
     const { cwd } = info(tab.key)
+    const label = tabLabel(tab, props.shellName)
     const isActive = tab.key === active
     const partner = props.partnerOf(tab.key)
     return (
@@ -382,8 +367,8 @@ export function TabSidebar(props: Props) {
           type="button"
           className="absolute inset-0 rounded-[10px] outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
           aria-current={isActive ? 'page' : undefined}
-          aria-label={`${tab.title}${cwd ? `, ${cwd}` : ''}`}
-          title={`${tab.title}${cwd ? `\n${cwd}` : ''}${partner != null ? '\nEm tela dividida' : ''}`}
+          aria-label={`${label}${cwd ? `, ${cwd}` : ''}`}
+          title={`${label}${cwd ? `\n${cwd}` : ''}${partner != null ? '\nEm tela dividida' : ''}`}
           onClick={() => onActivate(tab.key)}
         />
         <span className="pointer-events-none">
@@ -408,7 +393,8 @@ export function TabSidebar(props: Props) {
 
   const profileDots = (vertical: boolean) => (
     <div
-      className={`flex flex-none items-center justify-center gap-1 ${vertical ? 'flex-col py-2' : 'h-11'}`}
+      // Aberta, na mesma altura (h-10) e linha da barra de status: o rodapé lê como uma faixa só.
+      className={`flex flex-none items-center justify-center gap-1 ${vertical ? 'flex-col py-2' : 'h-10'}`}
       role="toolbar"
       aria-label="Perfis"
       aria-orientation={vertical ? 'vertical' : 'horizontal'}
@@ -478,14 +464,6 @@ export function TabSidebar(props: Props) {
       >
         <div data-tauri-drag-region className="flex h-10 w-full flex-none items-center justify-center">
           <CollapseButton collapsed onClick={props.onToggleCollapsed} />
-        </div>
-        <div className="flex flex-none flex-col items-center gap-1.5">
-          <RailButton label="Nova aba: Shell (Ctrl+Shift+T)" onClick={() => onNew('shell')}>
-            <TabKindIcon kind="shell" shell={defaultFamily} size={17} />
-          </RailButton>
-          <RailButton label="Nova aba: Claude Code (Ctrl+Shift+K)" onClick={() => onNew('claude')}>
-            <TabKindIcon kind="claude" size={17} />
-          </RailButton>
         </div>
         <nav
           ref={navRef}
@@ -562,32 +540,6 @@ export function TabSidebar(props: Props) {
         <CollapseButton collapsed={false} onClick={props.onToggleCollapsed} />
       </div>
 
-      <div className="grid flex-none grid-cols-2 gap-2">
-        <div className="relative">
-          <Favorite
-            label="Shell"
-            keys="mod+shift+t"
-            icon={<TabKindIcon kind="shell" shell={defaultFamily} size={16} />}
-            onClick={() => onNew('shell')}
-          />
-          {/* Canto do botão: os outros modos (cmd, WSL, Windows PowerShell). */}
-          <NewShellMenu
-            defaultShell={props.defaultShell}
-            onPick={(kind, shellId) => onNew(kind, undefined, shellId)}
-            triggerClassName="absolute top-1 right-1 grid size-5 place-items-center rounded-md text-muted outline-none hover:bg-surface-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent data-open:bg-surface-hover data-open:text-text"
-            triggerLabel="Nova aba em outro modo"
-          >
-            <ChevronDown aria-hidden size={12} />
-          </NewShellMenu>
-        </div>
-        <Favorite
-          label="Claude Code"
-          keys="mod+shift+k"
-          icon={<TabKindIcon kind="claude" size={16} />}
-          onClick={() => onNew('claude')}
-        />
-      </div>
-
       <nav
         ref={navRef}
         className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto pb-2"
@@ -622,8 +574,8 @@ export function TabSidebar(props: Props) {
             </>
           )}
 
-          {/* A linha que separa o que é fixo do que é aberto, como no Dia. */}
-          <hr className="mx-1 my-2 h-px flex-none border-0 bg-hairline" />
+          {/* A linha que separa o que é fixo do que é aberto, como no Dia (sem fixadas, não há o que separar). */}
+          {profile.pinned.length > 0 && <hr className="mx-1 my-2 h-px flex-none border-0 bg-hairline" />}
 
           <div className="flex flex-col gap-1.5">
             {props.groups.map((group) => {
