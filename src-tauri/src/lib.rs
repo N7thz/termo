@@ -27,6 +27,7 @@ mod ssh;
 mod updater;
 mod usage;
 mod window;
+mod worktree;
 
 use std::sync::Arc;
 
@@ -225,6 +226,30 @@ async fn git_switch(cwd: String, branch: String) -> Result<(), String> {
 #[tauri::command]
 async fn git_create_branch(cwd: String, branch: String) -> Result<(), String> {
     git::create_branch(std::path::Path::new(&cwd), &branch)
+}
+
+/// Cópias (`git worktree`) do repositório da pasta.
+#[tauri::command]
+async fn worktree_list(cwd: String) -> Result<worktree::WorktreeList, String> {
+    worktree::list(std::path::Path::new(&cwd))
+}
+
+/// Cria a cópia `<nome>` na branch `termo/<nome>`, ao lado do repositório.
+#[tauri::command]
+async fn worktree_create(cwd: String, name: String) -> Result<worktree::Worktree, String> {
+    worktree::create(std::path::Path::new(&cwd), &name)
+}
+
+/// Junta a cópia na branch da pasta principal e a remove; devolve quantos commits entraram.
+#[tauri::command]
+async fn worktree_merge(cwd: String, path: String) -> Result<u32, String> {
+    worktree::merge(std::path::Path::new(&cwd), &path)
+}
+
+/// Apaga a cópia, os commits e as alterações dela.
+#[tauri::command]
+async fn worktree_discard(cwd: String, path: String) -> Result<(), String> {
+    worktree::discard(std::path::Path::new(&cwd), &path)
 }
 
 /// Versão do node que o shell da aba resolve (`node` vem do prompt) e se a pasta é um projeto Node.
@@ -687,6 +712,10 @@ pub fn run() {
             git_branches,
             git_switch,
             git_create_branch,
+            worktree_list,
+            worktree_create,
+            worktree_merge,
+            worktree_discard,
             node_info,
             node_versions,
             image_existing,

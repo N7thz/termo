@@ -68,7 +68,7 @@ pub fn filter_overrides(config_names: &str) -> Vec<String> {
 }
 
 /// Como `git`, mas devolve a mensagem de erro do git quando o comando falha.
-fn git_full(cwd: &Path, args: &[&str]) -> Result<String, String> {
+pub(crate) fn git_full(cwd: &Path, args: &[&str]) -> Result<String, String> {
     let mut cmd = Command::new("git");
     cmd.arg("-C").arg(cwd).args(safety_args(cwd)).args(args).env("GIT_OPTIONAL_LOCKS", "0");
     #[cfg(windows)]

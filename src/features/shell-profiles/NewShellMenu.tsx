@@ -1,9 +1,10 @@
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuShortcut, MenuTrigger } from '@ui-sdk/react/menu'
-import { ChevronDown, LayoutGrid } from 'lucide-react'
+import { ChevronDown, GitBranch, LayoutGrid } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { actionButton, menuContent, menuItem, menuSeparator } from '../../lib/ui'
 import type { SessionKind } from '../../shared/types'
 import { useLayouts } from '../layouts/LayoutsContext'
+import { useOpenWorktrees } from '../worktree/WorktreeContext'
 import { ModeIcon } from './ModeIcon'
 import { familyOf, resolveDefaultShell } from './modes'
 import { useShells } from './useShells'
@@ -22,6 +23,7 @@ interface Props {
 
 const CLAUDE = '__claude'
 const MANAGE_LAYOUTS = '__layouts'
+const WORKTREE = '__worktree'
 
 /**
  * Menu "nova aba" com todos os modos: cada shell instalado (PowerShell 7, Windows PowerShell, cmd,
@@ -37,6 +39,7 @@ export function NewShellMenu({
   const shells = useShells()
   const sshHosts = useSshHosts()
   const layouts = useLayouts()
+  const openWorktrees = useOpenWorktrees()
   const current = resolveDefaultShell(defaultShell, shells)
   return (
     <Menu
@@ -44,6 +47,7 @@ export function NewShellMenu({
         const v = String(value)
         if (v === CLAUDE) return onPick('claude')
         if (v === MANAGE_LAYOUTS) return layouts?.onManage()
+        if (v === WORKTREE) return openWorktrees?.()
         if (v.startsWith('layout:')) return layouts?.onOpen(Number(v.slice('layout:'.length)))
         onPick('shell', v)
       }}
@@ -83,6 +87,12 @@ export function NewShellMenu({
           Claude Code
           <MenuShortcut>Ctrl+Shift+K</MenuShortcut>
         </MenuItem>
+        {openWorktrees && (
+          <MenuItem className={menuItem} value={WORKTREE}>
+            <GitBranch aria-hidden size={14} className="flex-none text-muted" />
+            Claude Code numa cópia isolada…
+          </MenuItem>
+        )}
         {layouts && (
           <>
             <MenuSeparator className={menuSeparator} />

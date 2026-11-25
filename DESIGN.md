@@ -55,6 +55,13 @@ movimento com mola e respeito a "reduzir movimento". A cor aparece pouco e signi
   com "Nada encontrado" + Limpar). Escolhido pelo usuário: lateral + conteúdo, com busca. Salva na hora;
   o cabeçalho mostra "Salvo" por ~2 s ou "Não deu para salvar · Tentar de novo". Esc limpa a busca e depois
   fecha. Temas abre por cima e volta para a tela. Abaixo de 768px a lateral some e fica a busca.
+- 2026-11-25: central de avisos própria: sino na barra de título (ao lado de Sessões) com o número de não
+  lidas ao lado do ícone, no mesmo padrão do indicador de Sessões (amarelo do tema com permissão pendente).
+  Painel suspenso de 380px, não tela inteira, porque aviso se olha rápido. Pedidos de permissão pendentes
+  ficam no topo; o resto por dia. Registra mesmo com o Termo em foco; das sessões do coord, só "concluiu o
+  plano" e "terminou/falhou" (segundo plano), para não virar ruído. Aprovado pelo usuário.
+- 2026-11-25: worktree e nota por aba entram nos padrões existentes: janela de diálogo como a de Layouts, item
+  no menu da seta do +; a nota é uma terceira linha no cartão da aba (ícone de nota + última linha).
 
 ## Open questions
 

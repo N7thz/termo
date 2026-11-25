@@ -9,6 +9,7 @@ import {
   PanelLeftOpen,
   Plus,
   Radio,
+  StickyNote,
   X,
 } from 'lucide-react'
 import { type ReactNode, useRef, useState } from 'react'
@@ -22,7 +23,7 @@ import { ProfileEditor } from '../profiles/ProfileEditor'
 import { isPinned, profileColorCss } from '../profiles/profiles'
 import { NewShellMenu } from '../shell-profiles/NewShellMenu'
 import { TabKindIcon } from '../tabs/TabKindIcon'
-import { MAX_GROUP_NAME, type Tab, type TabGroup } from '../tabs/tabs'
+import { lastLine, MAX_GROUP_NAME, MAX_TAB_LABEL, type Tab, type TabGroup } from '../tabs/tabs'
 import { folderName, tabLabel } from './format'
 import { GitBranch } from './GitDiff'
 import { type DropTarget, useFlip, useTabDrag } from './useTabDrag'
@@ -44,6 +45,8 @@ interface Props {
   /** Nome do shell padrão: título das abas cujo shell só manda o caminho do executável. */
   shellName: string
   onTabAction: (tab: Tab, action: TabMenuAction) => void
+  /** Nome dado à aba; `null` volta ao título automático. */
+  onRename: (key: number, label: string | null) => void
   onSwitchProfile: (id: string) => void
   onAddProfile: () => void
   onEditProfile: (patch: Partial<Profile>) => void
@@ -122,6 +125,45 @@ function RailButton({ label, onClick, children }: { label: string; onClick: () =
 }
 
 /** Cabeçalho do grupo: recolhe/abre no clique, renomeia no duplo clique, desfaz no X. */
+/** Campo do nome da aba. `onDone(undefined)` = cancelou; vazio volta ao título automático. */
+function TabNameInput({
+  value,
+  placeholder,
+  onDone,
+}: {
+  value: string
+  placeholder: string
+  onDone: (name: string | null | undefined) => void
+}) {
+  const done = useRef(false)
+  const finish = (name: string | null | undefined) => {
+    if (done.current) return
+    done.current = true
+    onDone(name)
+  }
+  return (
+    <input
+      // biome-ignore lint/a11y/noAutofocus: o campo só aparece depois do pedido de renomear.
+      autoFocus
+      aria-label="Nome da aba"
+      maxLength={MAX_TAB_LABEL}
+      defaultValue={value}
+      placeholder={placeholder}
+      onFocus={(e) => e.currentTarget.select()}
+      className="pointer-events-auto relative z-1 h-6 min-w-0 flex-1 rounded-[6px] border border-accent bg-field px-1.5 text-[13px] font-medium text-text outline-none placeholder:text-muted"
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
+      onBlur={(e) => finish(e.currentTarget.value.trim() || null)}
+      onKeyDown={(e) => {
+        e.stopPropagation()
+        if (e.key === 'Enter') finish(e.currentTarget.value.trim() || null)
+        if (e.key === 'Escape') finish(undefined)
+      }}
+    />
+  )
+}
+
 function GroupHeader({
   group,
   count,
@@ -202,6 +244,13 @@ const SECTION = 'px-2 pt-3 pb-1 text-[10.5px] font-semibold tracking-[0.06em] te
 export function TabSidebar(props: Props) {
   const { profiles, profile, tabs, active, info, onActivate, onClose, onNew, onTabAction, renderAlert } = props
   const { closing } = props
+  // Aba com o nome em edição (duplo clique no nome ou "Renomear aba…" no menu).
+  const [renaming, setRenaming] = useState<number | null>(null)
+  const runTabAction = (tab: Tab, action: TabMenuAction) => {
+    if (action !== 'rename') return onTabAction(tab, action)
+    if (props.collapsed) props.onToggleCollapsed()
+    setRenaming(tab.key)
+  }
 
   // Sentido da troca de perfil: o conteúdo entra pela direita indo para um ponto à direita, e vice-versa,
   // como o carrossel de perfis do Dia (sai e volta pelo mesmo caminho).
@@ -261,7 +310,7 @@ export function TabSidebar(props: Props) {
         splitTargets={tabs
           .filter((t) => t.key !== tab.key && t.key !== partner)
           .map((t) => ({ key: t.key, title: t.title }))}
-        onAction={(action) => onTabAction(tab, action)}
+        onAction={(action) => runTabAction(tab, action)}
         trigger={
           <div
             className="group/row relative flex max-h-28 animate-row-in flex-col gap-1 overflow-hidden rounded-[10px] p-2.5 text-[12px] text-muted [transition:background-color_140ms_ease-out,color_140ms_ease-out,box-shadow_200ms_ease-out,scale_300ms_var(--spring)] hover:bg-surface-hover active:scale-[0.98] active:duration-60 data-active:bg-bg data-active:text-text data-active:shadow-tab data-closing:pointer-events-none data-closing:max-h-0 data-closing:py-0 data-closing:opacity-0 data-closing:[transition:max-height_180ms_var(--spring-soft),padding_180ms_var(--spring-soft),opacity_120ms_ease-out,translate_180ms_var(--spring-soft)] data-closing:-translate-x-2 motion-reduce:animate-none motion-reduce:active:scale-100 motion-reduce:data-closing:translate-x-0 data-dragging:pointer-events-none data-dragging:z-10 data-dragging:bg-bg data-dragging:text-text data-dragging:shadow-pop data-dragging:[transition:box-shadow_200ms_ease-out] data-dragging:animate-none"
@@ -278,7 +327,9 @@ export function TabSidebar(props: Props) {
           className="absolute inset-0 rounded-lg outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
           aria-current={isActive ? 'page' : undefined}
           aria-label={`${label}${folder ? `, ${folder}` : ''}`}
+          title="Duplo clique para renomear"
           onClick={() => onActivate(tab.key)}
+          onDoubleClick={() => setRenaming(tab.key)}
         />
         {/*
           Cartão de duas linhas em todas as abas: o título e, embaixo, pasta · branch. O diff não cabe junto na
@@ -286,7 +337,18 @@ export function TabSidebar(props: Props) {
         */}
         <span className="pointer-events-none flex items-center gap-2.5 pr-6">
           <TabKindIcon kind={tab.kind} shell={tab.shell} size={16} agent={agent} />
-          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{label}</span>
+          {renaming === tab.key ? (
+            <TabNameInput
+              value={tab.label ?? ''}
+              placeholder={tabLabel({ ...tab, label: undefined }, props.shellName)}
+              onDone={(name) => {
+                setRenaming(null)
+                if (name !== undefined) props.onRename(tab.key, name)
+              }}
+            />
+          ) : (
+            <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{label}</span>
+          )}
           {props.broadcasting?.has(tab.key) && (
             <Radio size={13} className="flex-none text-accent" aria-label="Recebendo o que é digitado" role="img" />
           )}
@@ -317,6 +379,13 @@ export function TabSidebar(props: Props) {
             </>
           )}
         </span>
+        {tab.note && (
+          // A nota numa linha: a última linha é o progresso mais recente (o Claude junta com `termo nota --add`).
+          <span className="pointer-events-none flex min-w-0 items-center gap-1.5 pl-6.5 text-[11.5px]" title={tab.note}>
+            <StickyNote aria-hidden size={11} className="flex-none opacity-70" />
+            <span className="min-w-0 truncate">{lastLine(tab.note)}</span>
+          </span>
+        )}
         <Button
           className={CARD_CLOSE}
           data-no-drag
@@ -351,7 +420,7 @@ export function TabSidebar(props: Props) {
         splitTargets={tabs
           .filter((t) => t.key !== tab.key && t.key !== partner)
           .map((t) => ({ key: t.key, title: t.title }))}
-        onAction={(action) => onTabAction(tab, action)}
+        onAction={(action) => runTabAction(tab, action)}
         trigger={
           <div
             className="relative grid size-10 flex-none animate-row-in place-items-center rounded-[10px] text-muted [transition:background-color_140ms_ease-out,color_140ms_ease-out,box-shadow_200ms_ease-out,scale_300ms_var(--spring),opacity_120ms_ease-out] hover:bg-surface-hover hover:text-text active:scale-[0.94] active:duration-60 data-active:bg-bg data-active:text-text data-active:shadow-tab data-closing:pointer-events-none data-closing:scale-75 data-closing:opacity-0 motion-reduce:animate-none motion-reduce:active:scale-100 data-dragging:pointer-events-none data-dragging:z-10 data-dragging:bg-bg data-dragging:shadow-pop data-dragging:animate-none"

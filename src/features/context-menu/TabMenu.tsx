@@ -53,6 +53,12 @@ export function TabMenu(props: Props) {
         <MenuItem className={menuItem} value="duplicate" shortcut="mod+shift+d">
           Duplicar aba
         </MenuItem>
+        <MenuItem className={menuItem} value="rename">
+          Renomear aba…
+        </MenuItem>
+        <MenuItem className={menuItem} value="note">
+          Nota da aba…
+        </MenuItem>
         <MenuSeparator className={menuSeparator} />
         <MenuItem className={menuItem} value="move-left" shortcut="ctrl+shift+pageup" disabled={first}>
           {vertical ? 'Mover para cima' : 'Mover para a esquerda'}

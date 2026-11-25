@@ -33,7 +33,9 @@ termo split [pasta]            aba nova em tela dividida com a ativa
 termo run bun dev              aba nova que roda o comando (--cwd <pasta>, --split)
 termo claude [pasta] "texto"   aba do Claude Code; o texto vai como primeira mensagem
 termo tabs [--json]            lista as abas (número, tipo, título, pasta; * = ativa)
-termo send --tab 3 "git pull"  escreve na aba e tecla Enter (--no-enter só cola)
+termo title "API: testes"      dá nome à aba (sem --tab: a do próprio terminal; --clear volta ao automático)
+termo nota --add "testes ok"   nota da aba (sem texto mostra; --add junta uma linha; --clear apaga)
+termo send --tab 3 "git pull"  escreve na aba e tecla Enter (--no-enter só cola); --tab aceita número ou nome
 termo focus [N] / close N      traz o Termo para a frente (e ativa a aba) / fecha a aba
 ```
 
@@ -163,6 +165,10 @@ src-tauri/           backend (Rust)
 - Abas SSH: os hosts do `~/.ssh/config` aparecem na seta do +, e abrem uma aba rodando `ssh <host>`, com cor própria
 - Zoom do painel (Ctrl+Shift+Enter): maximiza o painel atual da tela dividida sem desfazer a divisão; o mesmo atalho volta
 - Sessões do Claude Code (Ctrl+Shift+A ou o indicador na barra de título, com quantas estão trabalhando e esperando você): modelo e esforço, plano com as etapas e o tempo de cada uma, arquivos em edição e reservas (esquecer/liberar), abrir a sessão numa aba (`claude attach` ou `claude --resume`) e o histórico, lidos do painel do coord
+- Nome nas abas: duplo clique na lateral ou "Renomear aba…" no menu; o Claude da aba também muda o nome com `termo title` para mostrar o que está fazendo (o Termo avisa o Claude disso ao abrir a sessão). O nome vale sobre o título automático, fica guardado com a sessão, aparece no `termo tabs` e serve de referência no `--tab` do `send`, `focus` e `close`
+- Claude Code numa cópia isolada (seta do + ou paleta): cria um `git worktree` na branch `termo/<tarefa>`, numa pasta ao lado do projeto (`<repo>.worktrees/<tarefa>`), e abre o Claude nela. A janela lista as cópias com commits e alterações pendentes, abre Claude ou shell nelas, junta na branch da pasta principal (merge, recusado com alterações não commitadas; conflito desfaz o merge) ou descarta (cópia, branch e commits), fechando antes as abas que estão dentro da cópia
+- Central de avisos (sino na barra de título, com as não lidas): histórico do Claude terminou ou pede permissão (pedidos pendentes no topo, até o Claude voltar a trabalhar), comandos longos que terminaram ou falharam (repetidos viram "×3") e sessões do coord que concluíram o plano. Agrupado por dia, até 200 avisos, guardado entre aberturas; clicar marca como lido e leva à aba ou à tela de Sessões. Os avisos do Windows continuam só com a janela sem foco
+- Nota por aba: o Claude da aba registra progresso e decisões com `termo nota` (o contexto do Termo ensina a usar), a última linha aparece na lateral abaixo do nome e a nota inteira no tooltip; "Nota da aba…" no menu da aba lê e edita. Fica guardada com a sessão
 
 ## Roadmap
 

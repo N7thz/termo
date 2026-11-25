@@ -480,6 +480,7 @@ export function TerminalView({
         // O Enter separado da colagem: dentro dela o Claude Code trataria como quebra de linha.
         window.setTimeout(() => send('\r'), 120)
       },
+      ptyId: () => sessionId,
       write: (data) => {
         if (exited) return
         if (data.includes('\r')) {

@@ -184,7 +184,7 @@ interface CardProps {
   s: AgentSession
   now: number
   state: StateResponse | null
-  onOpen: (cwd: string, command: string | null) => void
+  onOpen: (cwd: string, command: string | null, label?: string) => void
   onAct: (action: 'release-claim' | 'release', file: string) => void
 }
 
@@ -285,7 +285,8 @@ function SessionCard({ s, now, state, onOpen, onAct }: CardProps) {
         {command && (
           <Button
             className={smallButton}
-            onClick={() => onOpen(s.cwd, command)}
+            // A aba leva o nome da sessão (o título do plano ou o nome dela): dá para achar pelo `termo tabs`.
+            onClick={() => onOpen(s.cwd, command, s.plano?.titulo || s.nome || undefined)}
             title={`Abre uma aba e roda: ${command}`}
           >
             <SquareTerminal aria-hidden size={13} />
@@ -345,7 +346,7 @@ interface Props {
   /** Volta ao terminal (botão e Esc). */
   onClose: () => void
   /** Abre uma aba na pasta e, se houver, roda o comando nela (`claude attach`/`claude --resume`). */
-  onOpen: (cwd: string, command: string | null) => void
+  onOpen: (cwd: string, command: string | null, label?: string) => void
 }
 
 /**

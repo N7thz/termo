@@ -31,11 +31,16 @@ Uso:
                                 aba nova que roda o comando (ex.: termo run bun dev)
   termo claude [pasta] [texto...]
                                 aba do Claude Code; o texto vai como primeira mensagem
-  termo tabs [--json]           lista as abas (número, tipo, pasta)
+  termo tabs [--json]           lista as abas (número, tipo, nome, pasta)
+  termo title [--tab N] <texto> dá nome à aba (padrão: a deste terminal); --clear volta ao automático
+  termo nota [--tab N] [--add] [texto...]
+                                nota da aba (padrão: a deste terminal): troca o texto, --add junta
+                                uma linha, --clear apaga; sem texto, mostra a nota
   termo send [--tab N] [--no-enter] <texto...>
                                 escreve na aba (padrão: a ativa) e tecla Enter
   termo focus [N]               traz o Termo para a frente (e ativa a aba N)
   termo close <N>               fecha a aba N
+                                N é o número (termo tabs) ou o nome da aba
   termo --claude [--cwd <pasta>] [--title <nome>] [--prompt-file <arq>] [--close-on-exit] [-- <args>]
                                 repassa as flags ao Termo.exe (aba do Claude no Termo aberto)
   termo help | --version
@@ -105,6 +110,7 @@ fn run(args: &[String]) -> Result<String, String> {
             .map_err(|e| format!("não foi possível abrir o Termo ({}): {e}", exe.display()))?;
         return Ok(String::new());
     }
+    let args = &with_own_tab(args, std::env::var("TERMO_PTY").ok().as_deref());
     let file = control_file().ok_or("não achei a pasta de configuração do usuário")?;
     let reply = match send(&file, &cwd, args) {
         Ok(reply) => reply,
@@ -137,7 +143,21 @@ fn opens_folder_only(args: &[String], cwd: &Path) -> bool {
 }
 
 fn is_subcommand(a: &str) -> bool {
-    matches!(a, "open" | "run" | "claude" | "split" | "tabs" | "ls" | "send" | "focus" | "close")
+    matches!(a, "open" | "run" | "claude" | "split" | "tabs" | "ls" | "send" | "focus" | "close" | "title" | "nota" | "note")
+}
+
+/// `termo title`/`termo nota` rodados dentro de um terminal do Termo valem para a própria aba: o app põe o número do
+/// terminal em `TERMO_PTY`. Com `--tab`/`--pty` explícito, ou fora do Termo, fica como veio.
+fn with_own_tab(args: &[String], pty: Option<&str>) -> Vec<String> {
+    let explicit = args.iter().any(|a| matches!(a.as_str(), "--tab" | "-t" | "--pty"));
+    match (args.first().map(String::as_str), pty) {
+        (Some(cmd @ ("title" | "nota" | "note")), Some(id)) if !explicit && !id.is_empty() => {
+            let mut out = vec![cmd.to_string(), "--pty".into(), id.to_string()];
+            out.extend_from_slice(&args[1..]);
+            out
+        }
+        _ => args.to_vec(),
+    }
 }
 
 /// `%APPDATA%\dev.termo.app\control.json` (o `app_config_dir` do Tauri). `TERMO_CONTROL` troca o caminho.
@@ -234,6 +254,16 @@ mod tests {
         assert!(!opens_folder_only(&["tabs".into()], &here));
         assert!(!opens_folder_only(&["run".into(), "ls".into()], &here));
         assert!(!opens_folder_only(&["nao-existe-xyz".into()], &here));
+    }
+
+    #[test]
+    fn title_targets_own_tab() {
+        let v = |s: &[&str]| s.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+        assert_eq!(with_own_tab(&v(&["title", "testes"]), Some("4")), v(&["title", "--pty", "4", "testes"]));
+        assert_eq!(with_own_tab(&v(&["title", "-t", "2", "x"]), Some("4")), v(&["title", "-t", "2", "x"]));
+        assert_eq!(with_own_tab(&v(&["title", "x"]), None), v(&["title", "x"]));
+        assert_eq!(with_own_tab(&v(&["tabs"]), Some("4")), v(&["tabs"]));
+        assert_eq!(with_own_tab(&v(&["nota", "--add", "ok"]), Some("4")), v(&["nota", "--pty", "4", "--add", "ok"]));
     }
 
     #[test]

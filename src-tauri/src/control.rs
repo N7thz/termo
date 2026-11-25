@@ -42,23 +42,29 @@ pub enum Action {
     Claude { cwd: String, prompt: Option<String> },
     /// Lista as abas.
     Tabs { json: bool },
-    /// Escreve na aba (`tab`: chave; sem ela, a ativa). `enter: false` só cola.
-    Send { tab: Option<u32>, text: String, enter: bool },
+    /// Escreve na aba (sem `tab`, a ativa). `enter: false` só cola.
+    Send { tab: Option<String>, text: String, enter: bool },
     /// Traz a janela para a frente e, com `tab`, ativa a aba.
-    Focus { tab: Option<u32> },
+    Focus { tab: Option<String> },
     /// Fecha a aba.
-    Close { tab: u32 },
+    Close { tab: String },
+    /// Dá nome à aba (`label: None` volta ao título automático). Sem `tab`, vale a aba do PTY `pty`
+    /// (a do processo que chamou, pela variável `TERMO_PTY`) ou a ativa.
+    Title { tab: Option<String>, pty: Option<u32>, label: Option<String> },
+    /// Nota da aba (mesma escolha de aba do `Title`). `text: None` sem `clear` mostra a nota atual;
+    /// `append` junta uma linha no fim em vez de trocar tudo.
+    Note { tab: Option<String>, pty: Option<u32>, text: Option<String>, append: bool, clear: bool },
 }
 
 impl Action {
     /// Pedidos que abrem ou mostram algo trazem a janela para a frente.
     fn shows_window(&self) -> bool {
-        !matches!(self, Action::Tabs { .. } | Action::Send { .. })
+        !matches!(self, Action::Tabs { .. } | Action::Send { .. } | Action::Title { .. } | Action::Note { .. })
     }
 }
 
 /// Subcomandos que o argv do `Termo.exe` (instância única) reconhece.
-const SUBCOMMANDS: &[&str] = &["open", "run", "claude", "split", "tabs", "send", "focus", "close"];
+const SUBCOMMANDS: &[&str] = &["open", "run", "claude", "split", "tabs", "send", "focus", "close", "title", "nota", "note"];
 
 /// Interpreta os argumentos do cliente (sem o nome do programa). `cwd` é a pasta de quem chamou.
 pub fn parse(args: &[String], cwd: &Path) -> Result<Action, String> {
@@ -133,7 +139,7 @@ pub fn parse(args: &[String], cwd: &Path) -> Result<Action, String> {
             while i < rest.len() {
                 match rest[i].as_str() {
                     "--tab" | "-t" => {
-                        tab = Some(tab_key(rest.get(i + 1).map(String::as_str))?);
+                        tab = Some(tab_ref(rest.get(i + 1).map(String::as_str))?);
                         i += 2;
                     }
                     "--no-enter" | "-n" => {
@@ -155,13 +161,91 @@ pub fn parse(args: &[String], cwd: &Path) -> Result<Action, String> {
         }
         "focus" => match rest {
             [] => Ok(Action::Focus { tab: None }),
-            [n] => Ok(Action::Focus { tab: Some(tab_key(Some(n))?) }),
+            [n] => Ok(Action::Focus { tab: Some(tab_ref(Some(n))?) }),
             _ => Err("uso: termo focus [aba]".into()),
         },
         "close" => match rest {
-            [n] => Ok(Action::Close { tab: tab_key(Some(n))? }),
+            [n] => Ok(Action::Close { tab: tab_ref(Some(n))? }),
             _ => Err("uso: termo close <aba>".into()),
         },
+        "title" => {
+            let mut tab = None;
+            let mut pty = None;
+            let mut clear = false;
+            let mut i = 0;
+            while i < rest.len() {
+                match rest[i].as_str() {
+                    "--tab" | "-t" => {
+                        tab = Some(tab_ref(rest.get(i + 1).map(String::as_str))?);
+                        i += 2;
+                    }
+                    "--pty" => {
+                        let raw = rest.get(i + 1).ok_or("--pty precisa do número do terminal")?;
+                        pty = Some(raw.parse().map_err(|_| format!("--pty inválido: {raw}"))?);
+                        i += 2;
+                    }
+                    "--clear" | "-c" => {
+                        clear = true;
+                        i += 1;
+                    }
+                    "--" => {
+                        i += 1;
+                        break;
+                    }
+                    _ => break,
+                }
+            }
+            let label = rest[i..].join(" ");
+            let label = label.trim();
+            match (clear, label.is_empty()) {
+                (true, true) => Ok(Action::Title { tab, pty, label: None }),
+                (false, false) => Ok(Action::Title { tab, pty, label: Some(label.to_string()) }),
+                (true, false) => Err("use o título ou --clear, não os dois".into()),
+                (false, true) => Err("faltou o título: termo title [--tab N] <texto> (ou --clear)".into()),
+            }
+        }
+        "nota" | "note" => {
+            let mut tab = None;
+            let mut pty = None;
+            let mut clear = false;
+            let mut append = false;
+            let mut i = 0;
+            while i < rest.len() {
+                match rest[i].as_str() {
+                    "--tab" | "-t" => {
+                        tab = Some(tab_ref(rest.get(i + 1).map(String::as_str))?);
+                        i += 2;
+                    }
+                    "--pty" => {
+                        let raw = rest.get(i + 1).ok_or("--pty precisa do número do terminal")?;
+                        pty = Some(raw.parse().map_err(|_| format!("--pty inválido: {raw}"))?);
+                        i += 2;
+                    }
+                    "--clear" | "-c" => {
+                        clear = true;
+                        i += 1;
+                    }
+                    "--add" | "-a" => {
+                        append = true;
+                        i += 1;
+                    }
+                    "--" => {
+                        i += 1;
+                        break;
+                    }
+                    _ => break,
+                }
+            }
+            let text = rest[i..].join(" ");
+            let text = text.trim();
+            match (clear, append, text.is_empty()) {
+                (true, false, true) => Ok(Action::Note { tab, pty, text: None, append: false, clear: true }),
+                (false, false, true) => Ok(Action::Note { tab, pty, text: None, append: false, clear: false }),
+                (false, _, false) => Ok(Action::Note { tab, pty, text: Some(text.to_string()), append, clear: false }),
+                (false, true, true) => Err("faltou a linha: termo nota --add <texto>".into()),
+                (true, _, _) => Err("--clear não leva texto nem --add".into()),
+            }
+        }
         // `termo .`, `termo D:\projeto`: abre aba na pasta, como o `code .`.
         a if !a.starts_with('-') && rest.is_empty() && cwd.join(a).is_dir() => {
             Ok(Action::Open { cwd: dir(Some(a), cwd)?, shell: None, split: false })
@@ -170,9 +254,10 @@ pub fn parse(args: &[String], cwd: &Path) -> Result<Action, String> {
     }
 }
 
-fn tab_key(raw: Option<&str>) -> Result<u32, String> {
-    let raw = raw.ok_or("faltou o número da aba (veja termo tabs)")?;
-    raw.trim_start_matches('#').parse().map_err(|_| format!("aba inválida: {raw} (veja termo tabs)"))
+/// Aba pelo número (`3`, `#3`) ou pelo nome/título; quem resolve é a interface, que conhece as abas.
+fn tab_ref(raw: Option<&str>) -> Result<String, String> {
+    let raw = raw.map(str::trim).filter(|r| !r.is_empty()).ok_or("faltou a aba: o número ou o nome (veja termo tabs)")?;
+    Ok(raw.to_string())
 }
 
 /// Pasta absoluta: relativa à de quem chamou; sem pasta, a própria.
@@ -293,6 +378,8 @@ fn action_name(a: &Action) -> &'static str {
         Action::Send { .. } => "send",
         Action::Focus { .. } => "focus",
         Action::Close { .. } => "close",
+        Action::Title { .. } => "title",
+        Action::Note { .. } => "note",
     }
 }
 
@@ -361,6 +448,8 @@ pub fn serve(app: &AppHandle, config_dir: &Path) -> std::io::Result<()> {
     let file = config_dir.join(FILE);
     write_atomic(&file, &serde_json::to_vec(&info).map_err(std::io::Error::other)?)?;
     app.manage(Arc::new(Pending::default()));
+    let bin = app.path().resource_dir().ok().map(|d| d.join("bin")).filter(|d| d.is_dir());
+    let _ = PTY_ENV.set(PtyEnv { control: file.clone(), bin });
     app.manage(ControlPath(file));
     let app = app.clone();
     std::thread::spawn(move || {
@@ -378,6 +467,29 @@ pub fn serve(app: &AppHandle, config_dir: &Path) -> std::io::Result<()> {
 }
 
 struct ControlPath(PathBuf);
+
+/// O que os terminais do Termo herdam para o `termo` funcionar dentro deles.
+struct PtyEnv {
+    /// `control.json` desta instância (o Termo de teste usa outro identificador e outra pasta).
+    control: PathBuf,
+    /// Pasta do `termo.exe` que veio com o app, posta na frente do PATH.
+    bin: Option<PathBuf>,
+}
+
+static PTY_ENV: std::sync::OnceLock<PtyEnv> = std::sync::OnceLock::new();
+
+/// Variáveis do terminal `id`: `TERMO_PTY` (o `termo title` sem `--tab` nomeia a própria aba),
+/// `TERMO_CONTROL` (fala com esta instância) e o PATH com o `termo` na frente.
+pub fn pty_env(id: u32) -> Vec<(String, String)> {
+    let mut vars = vec![("TERMO_PTY".to_string(), id.to_string())];
+    let Some(env) = PTY_ENV.get() else { return vars };
+    vars.push(("TERMO_CONTROL".into(), strip_verbatim(&env.control)));
+    if let Some(bin) = &env.bin {
+        let path = std::env::var("PATH").unwrap_or_default();
+        vars.push(("PATH".into(), format!("{};{path}", strip_verbatim(bin))));
+    }
+    vars
+}
 
 /// Ao sair, apaga o `control.json` (se ainda for o deste processo), para o cliente não tentar a porta velha.
 pub fn cleanup(app: &AppHandle) {
@@ -492,13 +604,51 @@ mod tests {
     fn send_tabs_focus_close() {
         assert_eq!(
             parse(&args(&["send", "-t", "#3", "-n", "ls", "-la"]), &here()).unwrap(),
-            Action::Send { tab: Some(3), text: "ls -la".into(), enter: false }
+            Action::Send { tab: Some("#3".into()), text: "ls -la".into(), enter: false }
         );
         assert_eq!(parse(&args(&["tabs", "--json"]), &here()).unwrap(), Action::Tabs { json: true });
-        assert_eq!(parse(&args(&["focus", "2"]), &here()).unwrap(), Action::Focus { tab: Some(2) });
+        assert_eq!(parse(&args(&["focus", "2"]), &here()).unwrap(), Action::Focus { tab: Some("2".into()) });
+        assert_eq!(parse(&args(&["close", "api dev"]), &here()).unwrap(), Action::Close { tab: "api dev".into() });
         assert!(parse(&args(&["close"]), &here()).is_err());
         assert!(parse(&args(&["send"]), &here()).is_err());
         assert!(parse(&args(&["voar"]), &here()).unwrap_err().contains("desconhecido"));
+    }
+
+    #[test]
+    fn note_sets_adds_shows_and_clears() {
+        assert_eq!(
+            parse(&args(&["nota", "--pty", "3", "etapa", "2/5"]), &here()).unwrap(),
+            Action::Note { tab: None, pty: Some(3), text: Some("etapa 2/5".into()), append: false, clear: false }
+        );
+        assert_eq!(
+            parse(&args(&["note", "-t", "api", "--add", "testes ok"]), &here()).unwrap(),
+            Action::Note { tab: Some("api".into()), pty: None, text: Some("testes ok".into()), append: true, clear: false }
+        );
+        assert_eq!(
+            parse(&args(&["nota"]), &here()).unwrap(),
+            Action::Note { tab: None, pty: None, text: None, append: false, clear: false }
+        );
+        assert_eq!(
+            parse(&args(&["nota", "--clear"]), &here()).unwrap(),
+            Action::Note { tab: None, pty: None, text: None, append: false, clear: true }
+        );
+        assert!(parse(&args(&["nota", "--add"]), &here()).is_err());
+        assert!(parse(&args(&["nota", "--clear", "x"]), &here()).is_err());
+    }
+
+    #[test]
+    fn title_sets_and_clears() {
+        assert_eq!(
+            parse(&args(&["title", "--pty", "7", "rodando", "testes"]), &here()).unwrap(),
+            Action::Title { tab: None, pty: Some(7), label: Some("rodando testes".into()) }
+        );
+        assert_eq!(
+            parse(&args(&["title", "-t", "api", "--clear"]), &here()).unwrap(),
+            Action::Title { tab: Some("api".into()), pty: None, label: None }
+        );
+        assert!(parse(&args(&["title"]), &here()).is_err());
+        assert!(parse(&args(&["title", "--clear", "x"]), &here()).is_err());
+        assert!(parse(&args(&["title", "--pty", "x", "y"]), &here()).is_err());
     }
 
     #[test]

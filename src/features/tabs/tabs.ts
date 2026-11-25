@@ -19,6 +19,46 @@ export interface Tab {
    * automático (o que o processo põe no título do terminal) e continua sendo atualizado por baixo.
    */
   label?: string
+  /**
+   * Nota da aba: progresso, decisões, o que falta. Escrita pela pessoa (menu da aba) ou pelo Claude
+   * (`termo nota`). Aparece na lateral, abaixo do nome.
+   */
+  note?: string
+}
+
+/** Maior nota aceita (o Claude escreve resumos; mais que isso vira um arquivo). */
+export const MAX_TAB_NOTE = 2000
+
+/** Nota limpa: sem caracteres de controle (quebras de linha ficam), sem linhas vazias nas pontas; vazio tira. */
+export function cleanNote(raw: string | null | undefined): string | undefined {
+  const note = (raw ?? '')
+    .replace(/\r\n?/g, '\n')
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: tira caracteres de controle da nota (menos \n e \t)
+    .replace(/[\u0000-\u0008\u000b-\u001f\u007f]+/g, '')
+    .split('\n')
+    .map((l) => l.trimEnd())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+  return note ? note.slice(0, MAX_TAB_NOTE).trimEnd() : undefined
+}
+
+/** Junta uma linha ao fim da nota (o `termo nota --add`); as mais antigas saem se passar do limite. */
+export function appendNote(current: string | undefined, line: string): string | undefined {
+  const add = cleanNote(line)
+  if (!add) return current
+  let next = current ? `${current}\n${add}` : add
+  while (next.length > MAX_TAB_NOTE && next.includes('\n')) next = next.slice(next.indexOf('\n') + 1)
+  return cleanNote(next)
+}
+
+/** Última linha com texto da nota: o progresso mais recente, para caber numa linha da lateral. */
+export function lastLine(note: string): string {
+  const lines = note
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+  return lines[lines.length - 1] ?? ''
 }
 
 /** Maior nome de aba aceito (a lateral corta antes, mas o `termo tabs` mostra inteiro). */
@@ -81,6 +121,8 @@ export interface SessionSnapshot {
     output?: string
     /** Nome dado à aba (veja `Tab.label`). */
     label?: string
+    /** Nota da aba (veja `Tab.note`). */
+    note?: string
   }[]
   /** Índice (em `tabs`) da aba ativa de cada perfil. */
   active: Record<string, number>
@@ -109,6 +151,8 @@ export type TabsAction =
   | { type: 'update'; key: number; patch: Partial<Omit<Tab, 'key' | 'profile' | 'cwd' | 'group'>> }
   /** Dá nome à aba (ou tira, com `null`/vazio): veja `Tab.label`. */
   | { type: 'rename'; key: number; label: string | null }
+  /** Troca a nota da aba (ou tira, com `null`/vazio); `append` junta uma linha no fim. Veja `Tab.note`. */
+  | { type: 'note'; key: number; note: string | null; append?: boolean }
   | { type: 'move'; key: number; delta: 1 | -1 }
   /**
    * Arrastar: põe a aba logo antes de `before` (e no grupo dela). Sem `before`, vai para o fim do
@@ -253,6 +297,20 @@ export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
           if (t.key !== action.key) return t
           const { label: _old, ...rest } = t
           return label ? { ...rest, label } : rest
+        }),
+      }
+    }
+    case 'note': {
+      const tab = state.tabs.find((t) => t.key === action.key)
+      if (!tab) return state
+      const note = action.append ? appendNote(tab.note, action.note ?? '') : cleanNote(action.note)
+      if (tab.note === note) return state
+      return {
+        ...state,
+        tabs: state.tabs.map((t) => {
+          if (t.key !== action.key) return t
+          const { note: _old, ...rest } = t
+          return note ? { ...rest, note } : rest
         }),
       }
     }
@@ -448,6 +506,7 @@ export function snapshot(
         ...(t.shell ? { shell: t.shell } : {}),
         ...(output && isOutputId(output) ? { output } : {}),
         ...(t.label ? { label: t.label } : {}),
+        ...(t.note ? { note: t.note } : {}),
       }
     }),
     active,
@@ -519,6 +578,8 @@ export function restore(raw: unknown, base: TabsState = initialTabs, allowed?: R
     if (typeof t.output === 'string' && isOutputId(t.output)) tab.outputId = t.output
     const label = cleanLabel(str(t.label, 1000))
     if (label) tab.label = label
+    const note = cleanNote(str(t.note, MAX_TAB_NOTE * 2))
+    if (note) tab.note = note
     tabs.push(tab)
   })
   if (tabs.length === 0) return base

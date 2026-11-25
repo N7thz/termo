@@ -12,6 +12,7 @@ import type { NodeInfo, NodeVersions } from '../features/node-version/types'
 import type { SessionSnapshot } from '../features/tabs/tabs'
 import type { UpdateInfo } from '../features/updater/types'
 import type { ClaudeUsage } from '../features/usage-battery/usage'
+import type { Worktree, WorktreeList } from '../features/worktree/worktree'
 import type {
   ClipboardContent,
   CreateSessionOptions,
@@ -58,6 +59,14 @@ export const ipc = {
   gitSwitch: (cwd: string, branch: string) => invoke<void>('git_switch', { cwd, branch }),
   /** Cria a branch a partir do HEAD e troca para ela (`git switch -c`); rejeita com a mensagem do git. */
   gitCreateBranch: (cwd: string, branch: string) => invoke<void>('git_create_branch', { cwd, branch }),
+  /** Cópias (`git worktree`) do repositório da pasta, com commits à frente e alterações não commitadas. */
+  worktreeList: (cwd: string) => invoke<WorktreeList>('worktree_list', { cwd }),
+  /** Cria a cópia `<nome>` na branch `termo/<nome>`, ao lado do repositório. */
+  worktreeCreate: (cwd: string, name: string) => invoke<Worktree>('worktree_create', { cwd, name }),
+  /** Junta a cópia na branch da pasta principal e a remove; devolve quantos commits entraram. */
+  worktreeMerge: (cwd: string, path: string) => invoke<number>('worktree_merge', { cwd, path }),
+  /** Apaga a cópia, os commits e as alterações dela. */
+  worktreeDiscard: (cwd: string, path: string) => invoke<void>('worktree_discard', { cwd, path }),
   /** Versão do `node` que o shell da aba resolve (o caminho vem do prompt) e se a pasta é projeto Node. */
   nodeInfo: (node: string | null, cwd: string | null) => invoke<NodeInfo>('node_info', { node, cwd }),
   /** Gerenciador de versões do Node (fnm, nvm-windows, Volta) e as versões instaladas. */

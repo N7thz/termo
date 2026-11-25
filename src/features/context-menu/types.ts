@@ -18,9 +18,15 @@ export interface TerminalActions {
   command?: (text: string, run: boolean) => void
   /** Manda os bytes ao pty como se tivessem sido digitados (digitar em vários painéis). */
   write?: (data: string) => void
+  /** Número do terminal (o `TERMO_PTY` do processo): liga o `termo title` à aba de onde veio. */
+  ptyId?: () => number | null
 }
 
 export type TabMenuAction =
+  /** Dá um nome à aba (editado na própria lateral). */
+  | 'rename'
+  /** Abre a nota da aba para ler e editar. */
+  | 'note'
   | 'new-shell'
   | 'new-claude'
   | 'duplicate'

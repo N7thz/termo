@@ -124,6 +124,9 @@ impl PtyManager {
         // O id sai antes do processo para os hooks do Claude saberem o arquivo de estado da aba.
         let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
         cmd.env(agent_status::ENV_VAR, agent_status::env_value(id));
+        for (key, value) in crate::control::pty_env(id) {
+            cmd.env(key, value);
+        }
 
         let mut child = pair
             .slave

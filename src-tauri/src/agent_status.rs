@@ -81,12 +81,16 @@ pub fn hooks_json() -> String {
         ("Stop", write_cmd("done")),
         ("SessionEnd", write_cmd("off")),
     ];
-    let hooks: serde_json::Map<String, serde_json::Value> = events
+    let mut hooks: serde_json::Map<String, serde_json::Value> = events
         .into_iter()
         .map(|(event, command)| {
             (event.to_string(), serde_json::json!([{ "hooks": [{ "type": "command", "command": command }] }]))
         })
         .collect();
+    // No início da sessão o Claude fica sabendo do `termo` (nome da aba, outras abas).
+    if let Some(start) = hooks.get_mut("SessionStart").and_then(|v| v[0]["hooks"].as_array_mut()) {
+        start.push(serde_json::json!({ "type": "command", "command": termo_context_cmd() }));
+    }
     let mut settings = serde_json::json!({ "hooks": hooks });
     // A bateria de uso lê os limites que o Claude Code passa ao `statusLine` (veja usage.rs).
     // Quem já tem uma linha de status própria continua com ela.
@@ -94,6 +98,29 @@ pub fn hooks_json() -> String {
         settings["statusLine"] = serde_json::json!({ "type": "command", "command": crate::usage::statusline_command() });
     }
     settings.to_string()
+}
+
+/// O que o Claude da aba fica sabendo ao abrir: o `termo` está no PATH do terminal e nomeia a aba.
+pub const TERMO_CONTEXT: &str = concat!(
+    "Você está numa aba do Termo, o terminal desta pessoa. O comando `termo` (já no PATH) controla o Termo. ",
+    "Dê nome a esta aba com `termo title \"<texto curto>\"` para mostrar o que está fazendo: ao começar uma tarefa ",
+    "e quando mudar de etapa (ex.: \"API: rodando testes\", \"Migração: esperando revisão\"); use até ~40 caracteres, ",
+    "sem informação sensível. Ao terminar, deixe um nome que resuma o resultado ou rode `termo title --clear`. ",
+    "`termo tabs` lista as abas com número e nome: use os nomes para se referir às outras sessões e processos. ",
+    "`termo send --tab <nome|número> <texto>` escreve numa aba, `termo run <comando>` abre uma aba rodando um ",
+    "comando e `termo help` mostra o resto. ",
+    "Esta aba também tem uma nota, que aparece na lateral do Termo: em tarefas longas, registre o progresso com ",
+    "`termo nota --add \"<linha curta>\"` ao concluir cada etapa (decisões, o que falta, onde parou) e, ao terminar, ",
+    "troque tudo por um resumo com `termo nota \"<resumo>\"`. `termo nota` sem texto mostra a nota atual."
+);
+
+/// Hook do `SessionStart` que entrega [`TERMO_CONTEXT`] como contexto extra. Só dentro do Termo.
+fn termo_context_cmd() -> String {
+    let out = serde_json::json!({
+        "hookSpecificOutput": { "hookEventName": "SessionStart", "additionalContext": TERMO_CONTEXT }
+    })
+    .to_string();
+    format!("[ -n \"$TERMO_PTY\" ] && printf '%s' '{}'; exit 0", out.replace('\'', r"'\''"))
 }
 
 /// Lê o conteúdo gravado por um hook. `None` quando não dá para entender (arquivo pela metade).
@@ -189,6 +216,19 @@ mod tests {
             assert!(cmd.ends_with("exit 0"), "{event}: {cmd}");
             assert!(cmd.contains("> \"$TERMO_AGENT_STATUS\""), "{event}: {cmd}");
         }
+    }
+
+    #[test]
+    fn session_start_tells_claude_about_termo() {
+        let v: serde_json::Value = serde_json::from_str(&hooks_json()).unwrap();
+        let cmd = v["hooks"]["SessionStart"][0]["hooks"][1]["command"].as_str().unwrap();
+        assert!(cmd.starts_with("[ -n \"$TERMO_PTY\" ] && printf '%s' '{"), "{cmd}");
+        assert!(cmd.ends_with("'; exit 0"), "{cmd}");
+        // O JSON vai entre aspas simples do bash: nenhuma aspa simples solta dentro dele.
+        let json = cmd.trim_start_matches("[ -n \"$TERMO_PTY\" ] && printf '%s' '").trim_end_matches("'; exit 0");
+        let parsed: serde_json::Value = serde_json::from_str(&json.replace(r"'\''", "'")).unwrap();
+        assert_eq!(parsed["hookSpecificOutput"]["hookEventName"], "SessionStart");
+        assert!(parsed["hookSpecificOutput"]["additionalContext"].as_str().unwrap().contains("termo title"));
     }
 
     #[test]
