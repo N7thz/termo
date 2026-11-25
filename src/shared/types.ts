@@ -101,6 +101,15 @@ export interface TraySettings {
   launchAtLogin: boolean
   /** Aberto junto com o Windows, fica só na bandeja até ser chamado. */
   startHidden: boolean
+  /** Modo leve em segundo plano: minimizado ou na bandeja, usa menos memória (src-tauri/src/memory.rs). */
+  lightBackground: boolean
+}
+
+/** Uso de memória do Termo e de tudo que ele abriu (WebView2, shells, Claude), em bytes. */
+export interface MemoryUsage {
+  workingSet: number
+  private: number
+  processes: number
 }
 
 export interface NotificationSettings {

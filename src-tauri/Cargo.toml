@@ -33,6 +33,16 @@ png = "0.17"
 tauri-plugin-log = "2"
 log = "0.4"
 
+# Modo leve em segundo plano (memory.rs): as mesmas versões que o Tauri já usa.
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.39"
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_ProcessStatus",
+  "Win32_System_Threading",
+] }
+
 [profile.release]
 codegen-units = 1
 lto = true

@@ -170,9 +170,14 @@ function GroupHeader({
   onToggle,
   onRename,
   onDelete,
+  busy = 0,
+  waiting = 0,
 }: {
   group: TabGroup
   count: number
+  /** Claudes do grupo trabalhando e esperando você (no lugar do contador, como o indicador de Sessões). */
+  busy?: number
+  waiting?: number
   onToggle: () => void
   onRename: (name: string) => void
   onDelete: () => void
@@ -204,7 +209,7 @@ function GroupHeader({
         type="button"
         className="absolute inset-0 rounded-lg outline-none focus-visible:outline-2 focus-visible:outline-accent"
         aria-expanded={!group.collapsed}
-        aria-label={`Grupo ${group.name}, ${count} aba(s)`}
+        aria-label={`Grupo ${group.name}, ${count} aba(s)${busy ? `, ${busy} Claude trabalhando` : ''}${waiting ? `, ${waiting} esperando você` : ''}`}
         title="Clique para recolher · duplo clique para renomear"
         onClick={onToggle}
         onDoubleClick={() => setEditing(true)}
@@ -215,7 +220,19 @@ function GroupHeader({
         className={`pointer-events-none flex-none [transition:rotate_260ms_var(--spring)] motion-reduce:transition-none ${group.collapsed ? '' : 'rotate-90'}`}
       />
       <span className="pointer-events-none min-w-0 flex-1 truncate text-[12px] tracking-[0.01em]">{group.name}</span>
-      <span className="pointer-events-none pr-6 text-[11px] font-normal tabular-nums opacity-70">{count}</span>
+      <span className="pointer-events-none flex items-center gap-1.5 pr-6 text-[11px] font-normal tabular-nums">
+        {busy > 0 && (
+          <span className="text-accent" title={`${busy} Claude trabalhando`}>
+            {busy}
+          </span>
+        )}
+        {waiting > 0 && (
+          <span style={{ color: 'var(--tone-yellow, var(--accent))' }} title={`${waiting} esperando você`}>
+            {waiting}
+          </span>
+        )}
+        <span className="opacity-70">{count}</span>
+      </span>
       <Button className={ROW_CLOSE} tabIndex={-1} aria-label={`Desfazer o grupo ${group.name}`} onClick={onDelete}>
         <X size={12} />
       </Button>
@@ -655,6 +672,7 @@ export function TabSidebar(props: Props) {
                     <GroupHeader
                       group={group}
                       count={inside.length}
+                      {...groupAgents(inside, props.agents)}
                       onToggle={() => props.onGroupToggle(group.id)}
                       onRename={(name) => props.onGroupRename(group.id, name)}
                       onDelete={() => props.onGroupDelete(group.id)}
@@ -697,4 +715,16 @@ export function TabSidebar(props: Props) {
       {profileDots(false)}
     </aside>
   )
+}
+
+/** Quantos Claudes do grupo estão trabalhando (pensando ou trabalhando) e esperando você (pronto ou pedindo permissão). */
+function groupAgents(inside: readonly Tab[], agents: ReadonlyMap<number, AgentState> | undefined) {
+  let busy = 0
+  let waiting = 0
+  for (const t of inside) {
+    const a = agents?.get(t.key)
+    if (a === 'thinking' || a === 'working') busy++
+    else if (a === 'waiting' || a === 'blocked' || a === 'done') waiting++
+  }
+  return { busy, waiting }
 }

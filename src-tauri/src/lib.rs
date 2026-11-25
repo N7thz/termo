@@ -1,4 +1,5 @@
 mod agent_status;
+mod agents;
 mod ai;
 mod browser;
 mod cli;
@@ -12,6 +13,7 @@ mod history;
 mod export;
 mod images;
 mod logging;
+mod memory;
 mod node;
 mod notify;
 mod paths;
@@ -226,6 +228,29 @@ async fn git_switch(cwd: String, branch: String) -> Result<(), String> {
 #[tauri::command]
 async fn git_create_branch(cwd: String, branch: String) -> Result<(), String> {
     git::create_branch(std::path::Path::new(&cwd), &branch)
+}
+
+/// Uso de memória do Termo e de tudo que ele abriu (WebView2, shells, Claude).
+#[tauri::command]
+async fn memory_usage() -> memory::MemoryUsage {
+    memory::usage()
+}
+
+/// Janela entrou ou saiu do segundo plano. Com o modo leve ligado, em segundo plano o WebView2 vai para
+/// o modo de pouca memória e a memória ociosa volta ao Windows; ao voltar, o WebView2 volta ao normal.
+/// Devolve o uso depois (em segundo plano, já com a memória devolvida).
+#[tauri::command]
+async fn memory_background(window: tauri::WebviewWindow, settings: State<'_, SettingsStore>, hidden: bool) -> Result<memory::MemoryUsage, ()> {
+    let light = settings.get().tray.light_background;
+    memory::set_webview_low(&window, hidden && light);
+    Ok(if hidden && light { memory::trim() } else { memory::usage() })
+}
+
+/// Agentes (`.claude/agents`) do projeto da pasta e do usuário, para abrir o Claude com um papel.
+#[tauri::command]
+async fn claude_agents(cwd: Option<String>) -> Vec<agents::AgentDef> {
+    let cwd = cwd.map(std::path::PathBuf::from).filter(|p| p.is_dir());
+    agents::list(cwd.as_deref(), dirs::home_dir().as_deref())
 }
 
 /// Cópias (`git worktree`) do repositório da pasta.
@@ -713,6 +738,9 @@ pub fn run() {
             git_switch,
             git_create_branch,
             worktree_list,
+            memory_usage,
+            memory_background,
+            claude_agents,
             worktree_create,
             worktree_merge,
             worktree_discard,

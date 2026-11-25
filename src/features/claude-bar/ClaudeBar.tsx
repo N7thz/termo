@@ -22,8 +22,10 @@ import { GitBranch } from '../workspace/GitDiff'
 import {
   ATTACH_FILTERS,
   attachmentText,
+  belowDefault,
   type ClaudeLine,
   contextInfo,
+  defaultEffort,
   EFFORT_LABEL,
   EFFORTS,
   formatCost,
@@ -108,6 +110,11 @@ export function ClaudeBar({
   const waitTitle = busy ? 'Espere o Claude terminar a resposta' : undefined
   const currentModel = modelAlias(line)
   const effort = isEffort(line?.effort) ? line.effort : null
+  const modelDefault = defaultEffort(line?.modelId)
+  const lowEffort = belowDefault(effort, modelDefault)
+  const effortTitle = lowEffort
+    ? `Esforço abaixo do padrão do modelo (${EFFORT_LABEL[modelDefault as keyof typeof EFFORT_LABEL]}). Se o Claude pulou arquivos, testes ou revisão, suba o esforço.`
+    : 'Nível de esforço (/effort). O guia recomenda o padrão do modelo na maior parte do tempo.'
   const permission = line?.permissionMode ? (PERMISSION_LABEL[line.permissionMode] ?? line.permissionMode) : null
   const context = contextInfo(line?.contextPct ?? null)
   const cost = formatCost(line?.costUsd ?? null)
@@ -170,20 +177,35 @@ export function ClaudeBar({
       </Menu>
 
       <Menu>
-        <MenuTrigger className={`${chip} text-text`} disabled={busy} title={waitTitle ?? 'Nível de esforço (/effort)'}>
-          <Gauge aria-hidden size={12} className="flex-none text-muted" />
+        <MenuTrigger className={`${chip} text-text`} disabled={busy} title={waitTitle ?? effortTitle}>
+          <Gauge
+            aria-hidden
+            size={12}
+            className="flex-none text-muted"
+            style={lowEffort ? { color: tone('yellow') } : undefined}
+          />
           <span className="truncate">{effort ? `esforço ${EFFORT_LABEL[effort]}` : 'Esforço'}</span>
+          {lowEffort && <span className="sr-only">, abaixo do padrão do modelo</span>}
           <ChevronDown aria-hidden size={12} className="flex-none opacity-60" />
         </MenuTrigger>
         <MenuContent className={menuContent} {...menuProps} aria-label="Esforço">
           <MenuGroup>
             <MenuGroupLabel className={groupLabel}>Esforço</MenuGroupLabel>
+            {/* `/effort auto` limpa o nível salvo para o modelo: volta ao padrão dele. */}
+            <MenuItem className={menuItem} onSelect={() => onCommand('/effort auto')}>
+              <span className="grid size-3.5 flex-none place-items-center" />
+              <span className="flex-1">Padrão do modelo</span>
+              <span className="text-[11px] text-muted">
+                {modelDefault ? `${EFFORT_LABEL[modelDefault]} · recomendado` : 'recomendado'}
+              </span>
+            </MenuItem>
             {EFFORTS.map((e) => (
               <MenuItem key={e} className={menuItem} onSelect={() => onCommand(`/effort ${e}`)}>
                 <span className="grid size-3.5 flex-none place-items-center">
                   {effort === e && <Check aria-hidden size={13} className="text-accent" />}
                 </span>
                 <span className="flex-1">{EFFORT_LABEL[e]}</span>
+                {e === modelDefault && <span className="text-[11px] text-muted">padrão</span>}
                 <span className="font-mono text-[11px] text-muted">{e}</span>
               </MenuItem>
             ))}

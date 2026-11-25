@@ -2,9 +2,10 @@ import { Button } from '@ui-sdk/react/button'
 import { Field, FieldDescription, FieldLabel } from '@ui-sdk/react/field'
 import { Switch, SwitchThumb } from '@ui-sdk/react/switch'
 import { X } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ipc } from '../../lib/ipc'
-import type { NotificationSettings, Settings, TraySettings } from '../../shared/types'
+import type { MemoryUsage, NotificationSettings, Settings, TraySettings } from '../../shared/types'
+import { formatBytes } from '../memory/useBackgroundMemory'
 import { announceUpdate } from '../updater/UpdateButton'
 import { comboFromEvent, formatCombo } from './hotkey'
 
@@ -184,6 +185,22 @@ function UpdateCheck() {
 function TrayFields({ settings, onChange, switchClass, thumbClass }: Omit<Props, 'inputClass'>) {
   const t = settings.tray
   const [error, setError] = useState<string | null>(null)
+  // Uso de memória agora, para a dica do modo leve (atualiza a cada 5 s com a tela aberta).
+  const [memory, setMemory] = useState<MemoryUsage | null>(null)
+  useEffect(() => {
+    let alive = true
+    const load = () =>
+      void ipc.memoryUsage().then(
+        (m) => alive && setMemory(m),
+        () => undefined,
+      )
+    load()
+    const timer = window.setInterval(load, 5000)
+    return () => {
+      alive = false
+      window.clearInterval(timer)
+    }
+  }, [])
   // Direto pelo ipc: ligar o início com o Windows pode falhar (registro), e o erro aparece aqui.
   const set = (patch: Partial<TraySettings>) => {
     setError(null)
@@ -227,6 +244,13 @@ function TrayFields({ settings, onChange, switchClass, thumbClass }: Omit<Props,
       {row('Minimizar manda para a bandeja', t.minimizeToTray, 'minimizeToTray', !t.enabled)}
       {row('Iniciar com o Windows', t.launchAtLogin, 'launchAtLogin')}
       {row('…só na bandeja, sem abrir a janela', t.startHidden, 'startHidden', !t.enabled || !t.launchAtLogin)}
+      {row(
+        'Modo leve em segundo plano',
+        t.lightBackground,
+        'lightBackground',
+        false,
+        `Minimizado ou na bandeja, a interface usa o modo de pouca memória e a memória ociosa do Termo e das abas volta ao Windows. Nada é encerrado.${memory ? ` Agora: ${formatBytes(memory.workingSet)} em ${memory.processes} processos.` : ''}`,
+      )}
       {error && (
         <p className="m-0 text-[11px] text-claude" role="alert">
           {error}

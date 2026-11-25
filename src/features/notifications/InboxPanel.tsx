@@ -8,6 +8,9 @@ import type { Inbox } from './useInbox'
 
 interface Props {
   inbox: Inbox
+  /** Aberto/fechado controlado de fora (o atalho Ctrl+Shift+O). */
+  open: boolean
+  onOpenChange: (open: boolean) => void
   /** A aba ainda existe nesta janela? */
   tabExists: (key: number) => boolean
   onOpenTab: (key: number) => void
@@ -47,8 +50,7 @@ function KindIcon({ kind }: { kind: InboxKind }): ReactNode {
  * Central de avisos: sino na barra de título com as não lidas e um painel com o histórico (pedidos
  * de permissão pendentes no topo, depois por dia). Clicar leva à aba ou à tela de Sessões.
  */
-export function InboxPanel({ inbox, tabExists, onOpenTab, onOpenSessions }: Props) {
-  const [open, setOpen] = useState(false)
+export function InboxPanel({ inbox, open, onOpenChange: setOpen, tabExists, onOpenTab, onOpenSessions }: Props) {
   const [confirmClear, setConfirmClear] = useState(false)
   const [now, setNow] = useState(() => Date.now())
   // Com o ponteiro sobre a lista, avisos novos esperam: a linha sob o mouse não sai do lugar.
@@ -145,7 +147,7 @@ export function InboxPanel({ inbox, tabExists, onOpenTab, onOpenSessions }: Prop
       modal={false}
     >
       {/* O número fica ao lado do sino, como no indicador de Sessões: amarelo com permissão pendente. */}
-      <PopoverTrigger className={`${actionButton} tabular-nums`} aria-label={label} title={label}>
+      <PopoverTrigger className={`${actionButton} tabular-nums`} aria-label={label} title={`${label} · Ctrl+Shift+O`}>
         <Bell aria-hidden size={14} />
         {unread > 0 && (
           <span

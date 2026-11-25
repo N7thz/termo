@@ -1,7 +1,9 @@
 import { expect, test } from 'bun:test'
 import {
   attachmentText,
+  belowDefault,
   contextInfo,
+  defaultEffort,
   formatCost,
   isBusy,
   isEffort,
@@ -17,6 +19,23 @@ test('modelo atual pelo id ou pelo nome', () => {
   expect(modelAlias({ modelId: 'outro', modelName: null })).toBeNull()
   expect(modelAlias(null)).toBeNull()
   expect(modelLabel(null)).toBe('Modelo')
+})
+
+test('esforço padrão do modelo (documentação do Claude Code)', () => {
+  expect(defaultEffort('claude-opus-5-5')).toBe('medium')
+  expect(defaultEffort('claude-fable-5-2')).toBe('medium')
+  expect(defaultEffort('claude-haiku-5-5')).toBe('medium')
+  expect(defaultEffort('claude-opus-4-7')).toBe('xhigh')
+  expect(defaultEffort('claude-opus-5')).toBe('high')
+  expect(defaultEffort('claude-sonnet-4-6')).toBe('high')
+  expect(defaultEffort('claude-opus-5-5[1m]')).toBe('medium')
+  expect(defaultEffort('claude-haiku-4-5')).toBeNull()
+  expect(defaultEffort('claude-fable-5-1')).toBeNull()
+  expect(defaultEffort(null)).toBeNull()
+  expect(belowDefault('low', 'medium')).toBe(true)
+  expect(belowDefault('medium', 'medium')).toBe(false)
+  expect(belowDefault('high', 'xhigh')).toBe(true)
+  expect(belowDefault('low', null)).toBe(false)
 })
 
 test('esforço válido', () => {

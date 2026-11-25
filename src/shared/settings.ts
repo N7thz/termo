@@ -38,7 +38,14 @@ export const DEFAULT_SETTINGS: Settings = {
   restoreOutput: true,
   defaultShell: 'auto',
   historySearch: true,
-  tray: { enabled: false, closeToTray: false, minimizeToTray: false, launchAtLogin: false, startHidden: false },
+  tray: {
+    enabled: false,
+    closeToTray: false,
+    minimizeToTray: false,
+    launchAtLogin: false,
+    startHidden: false,
+    lightBackground: true,
+  },
   background: {
     enabled: false,
     images: [],

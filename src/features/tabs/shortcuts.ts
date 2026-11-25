@@ -2,6 +2,7 @@ export type TabNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
 export type ProfileNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
 
 export type AppAction =
+  | 'inbox'
   | 'new-shell'
   | 'new-claude'
   | 'duplicate-tab'
@@ -222,6 +223,13 @@ export const SHORTCUTS: readonly Shortcut[] = [
     keys: ['mod+shift+a'],
     action: 'sessions',
     match: (e) => ctrlShift(e) && key(e) === 'a',
+  },
+  {
+    group: 'Janela',
+    label: 'Central de avisos',
+    keys: ['mod+shift+o'],
+    action: 'inbox',
+    match: (e) => ctrlShift(e) && key(e) === 'o',
   },
   {
     group: 'Janela',

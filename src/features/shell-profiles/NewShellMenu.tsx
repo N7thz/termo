@@ -1,9 +1,10 @@
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuShortcut, MenuTrigger } from '@ui-sdk/react/menu'
-import { ChevronDown, GitBranch, LayoutGrid } from 'lucide-react'
+import { ChevronDown, GitBranch, LayoutGrid, UserRound } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { actionButton, menuContent, menuItem, menuSeparator } from '../../lib/ui'
 import type { SessionKind } from '../../shared/types'
 import { useLayouts } from '../layouts/LayoutsContext'
+import { useRoles } from '../roles/RolesContext'
 import { useOpenWorktrees } from '../worktree/WorktreeContext'
 import { ModeIcon } from './ModeIcon'
 import { familyOf, resolveDefaultShell } from './modes'
@@ -24,6 +25,7 @@ interface Props {
 const CLAUDE = '__claude'
 const MANAGE_LAYOUTS = '__layouts'
 const WORKTREE = '__worktree'
+const ROLE = '__role:'
 
 /**
  * Menu "nova aba" com todos os modos: cada shell instalado (PowerShell 7, Windows PowerShell, cmd,
@@ -40,6 +42,7 @@ export function NewShellMenu({
   const sshHosts = useSshHosts()
   const layouts = useLayouts()
   const openWorktrees = useOpenWorktrees()
+  const roles = useRoles()
   const current = resolveDefaultShell(defaultShell, shells)
   return (
     <Menu
@@ -48,6 +51,7 @@ export function NewShellMenu({
         if (v === CLAUDE) return onPick('claude')
         if (v === MANAGE_LAYOUTS) return layouts?.onManage()
         if (v === WORKTREE) return openWorktrees?.()
+        if (v.startsWith(ROLE)) return roles?.onOpen(v.slice(ROLE.length))
         if (v.startsWith('layout:')) return layouts?.onOpen(Number(v.slice('layout:'.length)))
         onPick('shell', v)
       }}
@@ -92,6 +96,20 @@ export function NewShellMenu({
             <GitBranch aria-hidden size={14} className="flex-none text-muted" />
             Claude Code numa cópia isolada…
           </MenuItem>
+        )}
+        {roles && roles.agents.length > 0 && (
+          <>
+            <MenuSeparator className={menuSeparator} />
+            {roles.agents.map((a) => (
+              <MenuItem key={a.name} className={menuItem} value={`${ROLE}${a.name}`}>
+                <UserRound aria-hidden size={14} className="flex-none text-claude" />
+                <span className="flex min-w-0 flex-col" title={a.description || undefined}>
+                  <span className="truncate">Claude como {a.name}</span>
+                  {a.description && <span className="truncate text-[11px] text-muted">{a.description}</span>}
+                </span>
+              </MenuItem>
+            ))}
+          </>
         )}
         {layouts && (
           <>

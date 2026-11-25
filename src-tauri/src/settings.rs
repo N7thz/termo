@@ -255,7 +255,7 @@ fn sanitize_background(mut b: BackgroundSettings) -> BackgroundSettings {
     b
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct TraySettings {
     /// Mostra o ícone na bandeja, com o menu (mostrar, nova aba, Claude Code, nova janela, sair).
@@ -268,6 +268,27 @@ pub struct TraySettings {
     pub launch_at_login: bool,
     /// Aberto junto com o Windows, fica só na bandeja (sem janela) até ser chamado.
     pub start_hidden: bool,
+    /// Modo leve em segundo plano: minimizado ou na bandeja, o WebView2 vai para o modo de pouca memória
+    /// e a memória ociosa do Termo e das abas volta ao Windows (memory.rs). Ligado por padrão.
+    #[serde(default = "yes")]
+    pub light_background: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Default for TraySettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            close_to_tray: false,
+            minimize_to_tray: false,
+            launch_at_login: false,
+            start_hidden: false,
+            light_background: true,
+        }
+    }
 }
 
 impl TraySettings {

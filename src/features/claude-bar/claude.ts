@@ -22,10 +22,11 @@ export interface ClaudeLine {
 
 /** Modelos do `/model` (o alias que o Claude Code aceita e o nome mostrado). */
 export const MODELS = [
-  { alias: 'opus', label: 'Opus', hint: 'o mais capaz' },
-  { alias: 'sonnet', label: 'Sonnet', hint: 'equilíbrio' },
-  { alias: 'haiku', label: 'Haiku', hint: 'o mais rápido' },
-  { alias: 'fable', label: 'Fable', hint: '' },
+  // Dicas do guia de modelo e esforço: modelo maior quando o Claude "não sabia o bastante".
+  { alias: 'opus', label: 'Opus', hint: 'bugs sutis, arquitetura' },
+  { alias: 'sonnet', label: 'Sonnet', hint: 'o dia a dia' },
+  { alias: 'haiku', label: 'Haiku', hint: 'rotina, edições exatas' },
+  { alias: 'fable', label: 'Fable', hint: 'o que os outros não resolvem' },
   { alias: 'default', label: 'Padrão da conta', hint: '' },
 ] as const
 
@@ -74,6 +75,26 @@ export function modelLabel(line: ClaudeLine | null): string {
 
 export function isEffort(v: string | null | undefined): v is Effort {
   return (EFFORTS as readonly string[]).includes(v ?? '')
+}
+
+/**
+ * Esforço padrão do modelo, como na documentação do Claude Code (model-config): `medium` no Fable 5.2,
+ * Opus 5.5, Sonnet 5.5 e Haiku 5.5; `xhigh` no Opus 4.7; `high` no Opus 5, Sonnet 5, Opus 4.8, Opus 4.6
+ * e Sonnet 4.6. `null` quando o modelo não é um desses (ou não tem esforço, como o Haiku 4.5).
+ */
+export function defaultEffort(modelId: string | null | undefined): Effort | null {
+  const id = (modelId ?? '').toLowerCase().replace(/\[.*\]$/, '')
+  const is = (family: string, version: string) => new RegExp(`${family}-${version}(?![-.]?\\d)`).test(id)
+  if (is('fable', '5-2') || is('opus', '5-5') || is('sonnet', '5-5') || is('haiku', '5-5')) return 'medium'
+  if (is('opus', '4-7')) return 'xhigh'
+  if (is('opus', '5') || is('sonnet', '5') || is('opus', '4-8') || is('opus', '4-6') || is('sonnet', '4-6'))
+    return 'high'
+  return null
+}
+
+/** O esforço escolhido está abaixo do padrão do modelo? É quando o guia manda subir se o Claude pulou etapas. */
+export function belowDefault(effort: Effort | null, def: Effort | null): boolean {
+  return effort != null && def != null && EFFORTS.indexOf(effort) < EFFORTS.indexOf(def)
 }
 
 /** "US$ 0,42". */

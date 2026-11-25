@@ -9,6 +9,7 @@ import type { ClaudeLine } from '../features/claude-bar/claude'
 import type { FileDiff, ReviewStatus } from '../features/code-review/diff'
 import type { GitBranchInfo } from '../features/git-branch/types'
 import type { NodeInfo, NodeVersions } from '../features/node-version/types'
+import type { AgentDef } from '../features/roles/RolesContext'
 import type { SessionSnapshot } from '../features/tabs/tabs'
 import type { UpdateInfo } from '../features/updater/types'
 import type { ClaudeUsage } from '../features/usage-battery/usage'
@@ -20,6 +21,7 @@ import type {
   FileHit,
   GitInfo,
   LaunchInfo,
+  MemoryUsage,
   PathSuggestion,
   PtyEvent,
   Settings,
@@ -60,6 +62,12 @@ export const ipc = {
   /** Cria a branch a partir do HEAD e troca para ela (`git switch -c`); rejeita com a mensagem do git. */
   gitCreateBranch: (cwd: string, branch: string) => invoke<void>('git_create_branch', { cwd, branch }),
   /** Cópias (`git worktree`) do repositório da pasta, com commits à frente e alterações não commitadas. */
+  /** Uso de memória do Termo e de tudo que ele abriu. */
+  memoryUsage: () => invoke<MemoryUsage>('memory_usage'),
+  /** A janela entrou ou saiu do segundo plano (modo leve); devolve o uso depois. */
+  memoryBackground: (hidden: boolean) => invoke<MemoryUsage>('memory_background', { hidden }),
+  /** Agentes (`.claude/agents`) do projeto da pasta e do usuário: os papéis para abrir o Claude. */
+  claudeAgents: (cwd: string | null) => invoke<AgentDef[]>('claude_agents', { cwd }),
   worktreeList: (cwd: string) => invoke<WorktreeList>('worktree_list', { cwd }),
   /** Cria a cópia `<nome>` na branch `termo/<nome>`, ao lado do repositório. */
   worktreeCreate: (cwd: string, name: string) => invoke<Worktree>('worktree_create', { cwd, name }),
