@@ -74,3 +74,26 @@ export function findImagePaths(text: string, limit = 200): string[] {
   for (const m of text.matchAll(BARE)) if (![...found].some((f) => f !== m[1] && f.endsWith(` ${m[1]}`))) add(m[1])
   return [...found]
 }
+
+/** Linhas de um bloco no buffer (as marcas do xterm; -1 quando a linha já saiu do histórico). */
+export interface BlockSpan {
+  promptLine: number
+  outputLine: number
+  /** Linha logo depois da saída; `null` enquanto o comando roda. */
+  endLine: number | null
+}
+
+/**
+ * Bloco cujo comando já saiu da tela por cima mas cuja saída ainda ocupa a primeira linha visível
+ * (`top`): é ele que o cabeçalho fixo mostra. `-1` se nenhum.
+ */
+export function stickyIndex(spans: readonly BlockSpan[], top: number): number {
+  for (let i = spans.length - 1; i >= 0; i--) {
+    const s = spans[i]
+    if (s.outputLine < 0 || s.promptLine < 0) continue
+    if (s.outputLine > top) continue
+    if (s.endLine != null && (s.endLine <= top || s.endLine <= s.outputLine)) return -1
+    return i
+  }
+  return -1
+}

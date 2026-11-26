@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { toOps } from '../tabs/splitTree'
 import { initialTabs, type TabsAction, type TabsState, tabsReducer, visibleTabs } from '../tabs/tabs'
 import {
   captureLayout,
@@ -22,7 +23,7 @@ function sample() {
     { type: 'open', kind: 'claude', title: 'Claude Code' },
     { type: 'group-create', key: 2, name: 'Back' },
     { type: 'split', key: 1, with: 3 },
-    { type: 'split-ratio', key: 1, ratio: 0.6 },
+    { type: 'split-ratio', key: 1, path: '', ratio: 0.6 },
   )
 }
 
@@ -43,7 +44,7 @@ describe('captureLayout', () => {
     expect(layout.tabs[1]).toMatchObject({ shell: 'cmd', cwd: 'D:/web/src', command: 'bun run dev', group: null })
     // Claude: sem shell nem comando.
     expect(layout.tabs[2]).toMatchObject({ kind: 'claude', shell: '', command: '' })
-    expect(layout.splits).toEqual([{ left: 1, right: 2, ratio: 0.6 }])
+    expect(layout.splits).toEqual([{ left: 1, right: 2, ratio: 0.6, dir: 'row' }])
   })
 
   test('aba SSH não guarda comando; abas de outro perfil ficam de fora', () => {
@@ -78,7 +79,7 @@ describe('abrir um layout', () => {
     expect(next.active).toBe(2)
     expect(next.groups).toHaveLength(1)
     expect(next.tabs[1].group).toBe(next.groups[0].id)
-    expect(next.pairs).toEqual([{ left: 3, right: 4, ratio: 0.6 }])
+    expect(next.splits.map((l) => toOps(l.root))).toEqual([[{ left: 3, right: 4, ratio: 0.6, dir: 'row' }]])
     expect(next.tabs[2].shell).toBe('cmd')
     expect(visibleTabs(next)).toHaveLength(4)
     expect([...layoutCommands(layout, base.nextKey)]).toEqual([[3, 'bun run dev']])
@@ -100,7 +101,7 @@ describe('abrir um layout', () => {
       splits: [{ left: 0, right: 5, ratio: 0.5 }],
     })
     expect(next.tabs[0].shell).toBeUndefined()
-    expect(next.pairs).toEqual([])
+    expect(next.splits).toEqual([])
   })
 })
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { blockKeyAction, extendFocus, filterOutput, type KeyLike, matchedText, stepSelection } from './blockNav'
-import { decodeCommand, findImagePaths, formatDuration, joinRows, tail } from './blocks'
+import { decodeCommand, findImagePaths, formatDuration, joinRows, stickyIndex, tail } from './blocks'
 
 test('decodifica o comando do OSC 633;E', () => {
   expect(decodeCommand('echo a\\x3bb \\\\x "c"\\x0ad')).toBe('echo a;b \\x "c"\nd')
@@ -143,4 +143,23 @@ describe('filterOutput', () => {
   test('consulta vazia mostra tudo', () => {
     expect(filterOutput(out, '', false).lines).toHaveLength(5)
   })
+})
+
+test('cabeçalho fixo: o bloco cuja saída ocupa o topo da tela, com o comando já fora dela', () => {
+  const spans = [
+    { promptLine: 0, outputLine: 1, endLine: 5 },
+    { promptLine: 5, outputLine: 6, endLine: 40 },
+    { promptLine: 40, outputLine: 41, endLine: null },
+  ]
+  expect(stickyIndex(spans, 0)).toBe(-1) // o comando ainda está na tela
+  expect(stickyIndex(spans, 1)).toBe(0)
+  expect(stickyIndex(spans, 5)).toBe(-1) // topo no prompt do segundo: ele está à vista
+  expect(stickyIndex(spans, 20)).toBe(1)
+  expect(stickyIndex(spans, 39)).toBe(1)
+  expect(stickyIndex(spans, 40)).toBe(-1)
+  expect(stickyIndex(spans, 300)).toBe(2) // rodando: a saída não tem fim ainda
+  // Bloco sem saída (o fim é a própria linha da saída) não fixa.
+  expect(stickyIndex([{ promptLine: 0, outputLine: 1, endLine: 1 }], 1)).toBe(-1)
+  // Marcas que saíram do histórico.
+  expect(stickyIndex([{ promptLine: -1, outputLine: -1, endLine: 3 }], 0)).toBe(-1)
 })

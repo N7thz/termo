@@ -144,6 +144,8 @@ export const ipc = {
   configExport: (exportedAt: string) => invoke<string | null>('config_export', { exportedAt }),
   /** Escolhe e lê um arquivo de configurações (não aplica nada); `null` se cancelou. */
   configImportRead: () => invoke<ImportFile | null>('config_import_read'),
+  /** Escolhe e lê um esquema de cores de outro terminal (o formato é lido no frontend); `null` se cancelou. */
+  themeImportRead: () => invoke<{ fileName: string; text: string } | null>('theme_import_read'),
 
   /** Aviso do Windows e piscar na barra de tarefas (respeita `notifications.enabled` no Rust). */
   notify: (title: string, body: string) => invoke<void>('notify', { title, body }),

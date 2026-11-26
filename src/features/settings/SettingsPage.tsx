@@ -327,6 +327,12 @@ export function SettingsPage({ settings, onChange, onClose, onOpenThemes, onOpen
                 onChange={(on) => save({ linkTarget: on ? 'panel' : 'browser' })}
               />
               <Toggle
+                label="Comando fixo no topo"
+                description="Quando a saída de um comando passa da tela, o comando fica preso em cima, com o estado e a duração. O clique volta a ele."
+                checked={settings.stickyCommand}
+                onChange={(stickyCommand) => save({ stickyCommand })}
+              />
+              <Toggle
                 label="Escurecer o painel sem foco"
                 description="Na tela dividida, a metade que não recebe o teclado fica mais apagada."
                 checked={settings.dimInactivePane}

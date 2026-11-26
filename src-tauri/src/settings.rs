@@ -70,6 +70,98 @@ pub struct Settings {
     /// Atalhos trocados pela pessoa: ação do app (`new-shell`, `palette`...) → combinação (`Ctrl+Alt+T`).
     /// Vazio desliga o atalho; a ação que não está aqui usa o padrão.
     pub keybindings: BTreeMap<String, String>,
+    /// Cabeçalho fixo do comando: quando a saída passa da tela, o comando fica preso no topo.
+    pub sticky_command: bool,
+    /// Esquemas de cores importados de outros terminais (a interface é gerada a partir deles).
+    pub custom_themes: Vec<CustomTheme>,
+}
+
+pub const MAX_CUSTOM_THEMES: usize = 50;
+
+/// Esquema importado, no formato do Windows Terminal (o mesmo `TerminalScheme` do frontend).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CustomTheme {
+    /// `custom-...`, letras minúsculas, números e hífen.
+    pub id: String,
+    pub name: String,
+    pub author: String,
+    pub source: String,
+    pub background: String,
+    pub foreground: String,
+    pub cursor: String,
+    pub selection: Option<String>,
+    pub black: String,
+    pub red: String,
+    pub green: String,
+    pub yellow: String,
+    pub blue: String,
+    pub magenta: String,
+    pub cyan: String,
+    pub white: String,
+    pub bright_black: String,
+    pub bright_red: String,
+    pub bright_green: String,
+    pub bright_yellow: String,
+    pub bright_blue: String,
+    pub bright_magenta: String,
+    pub bright_cyan: String,
+    pub bright_white: String,
+}
+
+impl CustomTheme {
+    fn colors_mut(&mut self) -> [&mut String; 19] {
+        [
+            &mut self.background,
+            &mut self.foreground,
+            &mut self.cursor,
+            &mut self.black,
+            &mut self.red,
+            &mut self.green,
+            &mut self.yellow,
+            &mut self.blue,
+            &mut self.magenta,
+            &mut self.cyan,
+            &mut self.white,
+            &mut self.bright_black,
+            &mut self.bright_red,
+            &mut self.bright_green,
+            &mut self.bright_yellow,
+            &mut self.bright_blue,
+            &mut self.bright_magenta,
+            &mut self.bright_cyan,
+            &mut self.bright_white,
+        ]
+    }
+}
+
+/// Até 50 temas com id `custom-...` único, nome de 1 a 60 caracteres e todas as cores `#rrggbb`.
+fn sanitize_custom_themes(list: Vec<CustomTheme>) -> Vec<CustomTheme> {
+    let mut out: Vec<CustomTheme> = Vec::new();
+    for mut t in list {
+        t.name = t.name.trim().chars().take(60).collect();
+        t.author = t.author.trim().chars().take(80).collect();
+        t.source = t.source.trim().chars().take(80).collect();
+        let mut colors_ok = true;
+        for c in t.colors_mut() {
+            *c = c.trim().to_ascii_lowercase();
+            colors_ok &= is_hex_color(c);
+        }
+        t.selection = t.selection.map(|s| s.trim().to_ascii_lowercase()).filter(|s| is_hex_color(s));
+        if !colors_ok
+            || t.name.is_empty()
+            || !t.id.starts_with("custom-")
+            || !is_valid_theme_id(&t.id)
+            || out.iter().any(|o| o.id == t.id)
+        {
+            continue;
+        }
+        out.push(t);
+        if out.len() == MAX_CUSTOM_THEMES {
+            break;
+        }
+    }
+    out
 }
 
 pub const MAX_KEYBINDINGS: usize = 100;
@@ -125,14 +217,18 @@ impl Default for LayoutTab {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct LayoutSplit {
+    /// Painel que é dividido (índice em `tabs`).
     pub left: usize,
+    /// Aba que entra depois dele.
     pub right: usize,
     pub ratio: f64,
+    /// `row` (ao lado, o padrão dos layouts antigos) ou `col` (embaixo).
+    pub dir: String,
 }
 
 impl Default for LayoutSplit {
     fn default() -> Self {
-        Self { left: 0, right: 0, ratio: 0.5 }
+        Self { left: 0, right: 0, ratio: 0.5, dir: "row".into() }
     }
 }
 
@@ -184,23 +280,25 @@ fn sanitize_layouts(list: Vec<SavedLayout>) -> Vec<SavedLayout> {
                 }
             })
             .collect();
+        // Divisões em ordem formam a árvore da tela dividida: `left` pode já ter aparecido (dividir de novo
+        // um painel), `right` é sempre uma aba que ainda não está em nenhuma.
         let mut used: Vec<usize> = Vec::new();
         let splits = l
             .splits
             .into_iter()
             .filter(|p| {
-                let ok = p.left != p.right
-                    && p.left < tabs.len()
-                    && p.right < tabs.len()
-                    && !used.contains(&p.left)
-                    && !used.contains(&p.right);
+                let ok = p.left != p.right && p.left < tabs.len() && p.right < tabs.len() && !used.contains(&p.right);
                 if ok {
                     used.push(p.left);
                     used.push(p.right);
                 }
                 ok
             })
-            .map(|p| LayoutSplit { ratio: if p.ratio.is_finite() { p.ratio.clamp(0.2, 0.8) } else { 0.5 }, ..p })
+            .map(|p| LayoutSplit {
+                ratio: if p.ratio.is_finite() { p.ratio.clamp(0.1, 0.9) } else { 0.5 },
+                dir: if p.dir == "col" { "col".into() } else { "row".into() },
+                ..p
+            })
             .collect();
         out.push(SavedLayout { name, tabs, groups, splits });
         if out.len() == MAX_LAYOUTS {
@@ -647,6 +745,8 @@ impl Default for Settings {
             osc_clipboard: true,
             osc_notifications: true,
             keybindings: BTreeMap::new(),
+            sticky_command: true,
+            custom_themes: Vec::new(),
         }
     }
 }
@@ -688,6 +788,9 @@ pub struct SettingsPatch {
     pub osc_notifications: Option<bool>,
     /// Substitui todos os atalhos trocados de uma vez (validados no apply).
     pub keybindings: Option<BTreeMap<String, String>>,
+    pub sticky_command: Option<bool>,
+    /// Substitui a lista inteira de temas importados (validada no apply).
+    pub custom_themes: Option<Vec<CustomTheme>>,
 }
 
 fn is_contrast_level(v: f64) -> bool {
@@ -801,6 +904,12 @@ impl Settings {
         if let Some(v) = patch.osc_clipboard {
             self.osc_clipboard = v;
         }
+        if let Some(v) = patch.custom_themes {
+            self.custom_themes = sanitize_custom_themes(v);
+        }
+        if let Some(v) = patch.sticky_command {
+            self.sticky_command = v;
+        }
         if let Some(v) = patch.keybindings {
             self.keybindings = sanitize_keybindings(v);
         }
@@ -843,6 +952,7 @@ impl SettingsStore {
                 s.background = sanitize_background(std::mem::take(&mut s.background));
                 s.layouts = sanitize_layouts(std::mem::take(&mut s.layouts));
                 s.keybindings = sanitize_keybindings(std::mem::take(&mut s.keybindings));
+                s.custom_themes = sanitize_custom_themes(std::mem::take(&mut s.custom_themes));
                 if !is_contrast_level(s.minimum_contrast) {
                     s.minimum_contrast = 1.0;
                 }
@@ -952,10 +1062,11 @@ mod tests {
             ],
             groups: vec![" Dev ".into()],
             splits: vec![
-                LayoutSplit { left: 0, right: 1, ratio: 9.0 },
-                LayoutSplit { left: 1, right: 2, ratio: 0.5 },
-                LayoutSplit { left: 2, right: 2, ratio: 0.5 },
-                LayoutSplit { left: 2, right: 9, ratio: 0.5 },
+                LayoutSplit { left: 0, right: 1, ratio: 9.0, ..Default::default() },
+                LayoutSplit { left: 1, right: 2, ratio: 0.5, dir: "col".into() },
+                LayoutSplit { left: 2, right: 2, ratio: 0.5, ..Default::default() },
+                LayoutSplit { left: 3, right: 1, ratio: 0.5, ..Default::default() },
+                LayoutSplit { left: 2, right: 9, ratio: 0.5, dir: "diagonal".into() },
             ],
         };
         let mut s = Settings::default();
@@ -973,10 +1084,20 @@ mod tests {
         assert_eq!((l.tabs[2].shell.as_str(), l.tabs[2].command.as_str()), ("", ""));
         assert_eq!((l.tabs[3].shell.as_str(), l.tabs[3].command.as_str()), ("ssh:web-1", ""));
         assert_eq!((l.tabs[4].shell.as_str(), l.tabs[4].command.as_str()), ("", ""));
-        // Divisões: ratio limitado; repetida, de uma aba só ou fora da lista saem.
-        assert_eq!(l.splits, vec![LayoutSplit { left: 0, right: 1, ratio: 0.8 }]);
+        // Divisões em árvore: ratio limitado; dividir de novo um painel vale; aba que já está numa divisão
+        // (como `right`), de uma aba só ou fora da lista saem.
+        assert_eq!(
+            l.splits,
+            vec![
+                LayoutSplit { left: 0, right: 1, ratio: 0.9, dir: "row".into() },
+                LayoutSplit { left: 1, right: 2, ratio: 0.5, dir: "col".into() },
+            ]
+        );
         let old: Settings = serde_json::from_str("{}").unwrap();
         assert!(old.layouts.is_empty());
+        // Layout antigo (pares, sem `dir`): ao lado.
+        let split: LayoutSplit = serde_json::from_str(r#"{"left":0,"right":1,"ratio":0.5}"#).unwrap();
+        assert_eq!(split.dir, "row");
     }
 
     #[test]
@@ -1209,6 +1330,34 @@ mod tests {
         assert_eq!(s.interface_size, "large");
         let old: Settings = serde_json::from_str(r#"{"theme":"dracula"}"#).unwrap();
         assert_eq!(old.interface_size, "medium");
+    }
+
+    #[test]
+    fn custom_themes_keep_only_valid_schemes() {
+        let good = CustomTheme {
+            id: "custom-meu".into(),
+            name: " Meu ".into(),
+            background: "#101010".into(),
+            foreground: "#E0E0E0".into(),
+            cursor: "#ffffff".into(),
+            selection: Some("nada".into()),
+            ..Default::default()
+        };
+        let mut good = good;
+        for c in good.colors_mut().into_iter().skip(3) {
+            *c = "#123456".into();
+        }
+        let mut bad_color = good.clone();
+        bad_color.id = "custom-ruim".into();
+        bad_color.red = "red".into();
+        let mut bad_id = good.clone();
+        bad_id.id = "dracula".into();
+        let dup = good.clone();
+        let mut s = Settings::default();
+        s.apply(SettingsPatch { custom_themes: Some(vec![good, bad_color, bad_id, dup]), ..Default::default() });
+        assert_eq!(s.custom_themes.len(), 1);
+        let t = &s.custom_themes[0];
+        assert_eq!((t.name.as_str(), t.foreground.as_str(), t.selection.clone()), ("Meu", "#e0e0e0", None));
     }
 
     #[test]

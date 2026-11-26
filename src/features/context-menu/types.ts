@@ -47,6 +47,8 @@ export type TabMenuAction =
   | 'ungroup'
   /** Tela dividida: abre uma aba nova ao lado desta. */
   | 'split-new'
+  /** Tela dividida: abre uma aba nova embaixo desta. */
+  | 'split-new-down'
   /** Tela dividida: esta aba ao lado da aba ativa. */
   | 'split-with-active'
   /** Tela dividida: esta aba ao lado da aba `key`, já aberta. */

@@ -25,6 +25,7 @@ mod review;
 mod session;
 mod settings;
 mod shell;
+mod theme_import;
 mod tray;
 mod shells;
 mod ssh;
@@ -404,6 +405,14 @@ fn settings_set(app: AppHandle, settings: State<SettingsStore>, patch: SettingsP
 async fn config_export(app: AppHandle, exported_at: String) -> Result<Option<String>, String> {
     let current = app.state::<SettingsStore>().get();
     tauri::async_runtime::spawn_blocking(move || config_io::export(&app, &current, &exported_at))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Escolhe e lê um esquema de cores de outro terminal (o formato é lido no frontend). `None`: cancelou.
+#[tauri::command]
+async fn theme_import_read(app: AppHandle) -> Result<Option<theme_import::SchemeFile>, String> {
+    tauri::async_runtime::spawn_blocking(move || theme_import::pick_and_read(&app))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -797,6 +806,7 @@ pub fn run() {
             settings_set,
             config_export,
             config_import_read,
+            theme_import_read,
             clipboard_read,
             clipboard_write,
             open_in_editor,

@@ -74,7 +74,10 @@ export function TabMenu(props: Props) {
         )}
         <MenuSeparator className={menuSeparator} />
         <MenuItem className={menuItem} value="split-new" shortcut={keysFor('split-tab')}>
-          Dividir com uma aba nova
+          Dividir: painel novo ao lado
+        </MenuItem>
+        <MenuItem className={menuItem} value="split-new-down" shortcut={keysFor('split-down')}>
+          Dividir: painel novo embaixo
         </MenuItem>
         {canSplitWithActive && (
           <MenuItem className={menuItem} value="split-with-active">

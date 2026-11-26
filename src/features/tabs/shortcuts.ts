@@ -9,6 +9,11 @@ export type AppAction =
   | 'new-claude'
   | 'duplicate-tab'
   | 'split-tab'
+  | 'split-down'
+  | 'focus-left'
+  | 'focus-right'
+  | 'focus-up'
+  | 'focus-down'
   | 'zoom-pane'
   | 'broadcast'
   | 'close-tab'
@@ -53,6 +58,8 @@ const key = (e: KeyboardEvent) => e.key.toLowerCase()
 const ctrl = (e: KeyboardEvent) => e.ctrlKey && !e.altKey && !e.metaKey
 const ctrlOnly = (e: KeyboardEvent) => ctrl(e) && !e.shiftKey
 const ctrlShift = (e: KeyboardEvent) => ctrl(e) && e.shiftKey
+const altShift = (e: KeyboardEvent) => e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey
+const altOnly = (e: KeyboardEvent) => e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey
 const plain = (e: KeyboardEvent) => !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey
 // Ctrl+Alt de verdade. O AltGr do ABNT2 também chega como Ctrl+Alt (AltGr+2 = ²), mas com o estado AltGraph ligado.
 const altGr = (e: KeyboardEvent) => typeof e.getModifierState === 'function' && e.getModifierState('AltGraph')
@@ -100,11 +107,35 @@ export const SHORTCUTS: readonly Shortcut[] = [
   },
   {
     group: 'Abas',
-    label: 'Dividir a tela com uma aba nova (ou desfazer)',
-    keys: ['mod+shift+e'],
+    label: 'Dividir: painel novo ao lado',
+    keys: ['mod+shift+e', 'alt+shift+='],
     action: 'split-tab',
-    match: (e) => ctrlShift(e) && key(e) === 'e',
+    // Alt+Shift+= / Alt+Shift+- como no Windows Terminal (pela tecla física: no ABNT2 o `key` muda).
+    match: (e) => (ctrlShift(e) && key(e) === 'e') || (altShift(e) && (e.code === 'Equal' || e.code === 'NumpadAdd')),
   },
+  {
+    group: 'Abas',
+    label: 'Dividir: painel novo embaixo',
+    keys: ['alt+shift+-'],
+    action: 'split-down',
+    match: (e) => altShift(e) && (e.code === 'Minus' || e.code === 'NumpadSubtract'),
+  },
+  ...(
+    [
+      ['left', 'ArrowLeft', 'esquerda'],
+      ['right', 'ArrowRight', 'direita'],
+      ['up', 'ArrowUp', 'cima'],
+      ['down', 'ArrowDown', 'baixo'],
+    ] as const
+  ).map(
+    ([dir, arrow, name]): Shortcut => ({
+      group: 'Abas',
+      label: `Ir para o painel da ${name === 'cima' || name === 'baixo' ? `parte de ${name}` : name}`,
+      keys: [`alt+${arrow.toLowerCase()}`],
+      action: `focus-${dir}`,
+      match: (e) => altOnly(e) && e.key === arrow,
+    }),
+  ),
   {
     group: 'Abas',
     label: 'Ampliar o painel atual da tela dividida (ou voltar)',

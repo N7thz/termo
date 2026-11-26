@@ -1,5 +1,6 @@
 // Layouts salvos: conjunto de abas, grupos e divisões do perfil, guardado nas configurações.
 import type { SavedLayout } from '../../shared/types'
+import { toOps } from '../tabs/splitTree'
 import { type Tab, type TabsAction, type TabsState, visibleGroups, visibleTabs } from '../tabs/tabs'
 
 /** Mesmos limites do Rust (MAX_LAYOUTS e companhia em src-tauri/src/settings.rs). */
@@ -24,11 +25,14 @@ export function captureLayout(
   const keys = tabs.map((t) => t.key)
   const used = visibleGroups(state).filter((g) => tabs.some((t) => t.group === g.id))
   const groupIndex = new Map(used.map((g, i) => [g.id, i]))
-  const splits = state.pairs.flatMap((p) => {
-    const left = keys.indexOf(p.left)
-    const right = keys.indexOf(p.right)
-    return left < 0 || right < 0 ? [] : [{ left, right, ratio: p.ratio }]
-  })
+  // Cada tela dividida vira a lista de divisões dela (splitTree.ts), por índice nas abas do layout.
+  const splits = state.splits.flatMap((l) =>
+    toOps(l.root).flatMap((op) => {
+      const left = keys.indexOf(op.left)
+      const right = keys.indexOf(op.right)
+      return left < 0 || right < 0 ? [] : [{ left, right, ratio: op.ratio, dir: op.dir ?? 'row' }]
+    }),
+  )
   return {
     name: name.trim(),
     groups: used.map((g) => g.name),

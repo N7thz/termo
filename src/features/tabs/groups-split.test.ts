@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { initialTabs, pairOf, restore, snapshot, type TabsState, tabsReducer, visibleTabs } from './tabs'
+import { leaves, toOps } from './splitTree'
+import { initialTabs, paneMates, restore, snapshot, splitOf, type TabsState, tabsReducer, visibleTabs } from './tabs'
 
 const open = (s: TabsState, title: string, extra: object = {}) =>
   tabsReducer(s, { type: 'open', kind: 'shell', title, ...extra })
@@ -61,33 +62,61 @@ describe('grupos', () => {
   })
 })
 
+/** As telas divididas no formato do disco (lista de divisões), para comparar fácil. */
+const splitOps = (s: TabsState) => s.splits.map((l) => toOps(l.root))
+
 describe('tela dividida', () => {
-  test('abrir dividida cria o par e foca a nova', () => {
+  test('abrir dividida cria a divisão e foca a nova', () => {
     const s = open(three(), 'd', { splitWith: 1 })
-    expect(s.pairs).toEqual([{ left: 1, right: 4, ratio: 0.5 }])
+    expect(splitOps(s)).toEqual([[{ left: 1, right: 4, ratio: 0.5, dir: 'row' }]])
     expect(s.active).toBe(4)
-    expect(pairOf(s, 1)).toEqual(pairOf(s, 4))
+    expect(splitOf(s, 1)).toBe(splitOf(s, 4))
   })
 
-  test('uma aba fica em um par só', () => {
+  test('dividir de novo um painel faz a árvore; embaixo com `col`', () => {
+    let s = tabsReducer(three(), { type: 'split', key: 1, with: 2 })
+    s = tabsReducer(s, { type: 'split', key: 2, with: 3, dir: 'col' })
+    expect(splitOps(s)).toEqual([
+      [
+        { left: 1, right: 2, ratio: 0.5, dir: 'row' },
+        { left: 2, right: 3, ratio: 0.5, dir: 'col' },
+      ],
+    ])
+    expect(paneMates(s, 1)).toEqual([2, 3])
+    s = open(s, 'd', { splitWith: 3, splitDir: 'col' })
+    expect(leaves(s.splits[0].root)).toEqual([1, 2, 3, 4])
+  })
+
+  test('uma aba fica numa tela dividida só', () => {
     let s = tabsReducer(three(), { type: 'split', key: 1, with: 2 })
     s = tabsReducer(s, { type: 'split', key: 3, with: 2 })
-    expect(s.pairs).toEqual([{ left: 3, right: 2, ratio: 0.5 }])
+    expect(splitOps(s)).toEqual([[{ left: 3, right: 2, ratio: 0.5, dir: 'row' }]])
   })
 
-  test('fechar a ativa do par deixa a outra metade ativa e desfaz o par', () => {
+  test('fechar a ativa deixa um vizinho ativo; com um painel só, deixa de ser dividida', () => {
     let s = open(three(), 'd', { splitWith: 1 })
     s = tabsReducer(s, { type: 'close', key: 4 })
     expect(s.active).toBe(1)
-    expect(s.pairs).toEqual([])
+    expect(s.splits).toEqual([])
   })
 
-  test('proporção fica entre 20% e 80%', () => {
+  test('fechar o painel do meio mantém os outros divididos', () => {
     let s = tabsReducer(three(), { type: 'split', key: 1, with: 2 })
-    s = tabsReducer(s, { type: 'split-ratio', key: 2, ratio: 0.95 })
-    expect(s.pairs[0].ratio).toBe(0.8)
+    s = tabsReducer(s, { type: 'split', key: 2, with: 3, dir: 'col' })
+    s = tabsReducer(s, { type: 'close', key: 2 })
+    expect(splitOps(s)).toEqual([[{ left: 1, right: 3, ratio: 0.5, dir: 'row' }]])
+  })
+
+  test('proporção de cada divisão fica entre 10% e 90%; ampliar e voltar', () => {
+    let s = tabsReducer(three(), { type: 'split', key: 1, with: 2 })
+    s = tabsReducer(s, { type: 'split-ratio', key: 2, path: '', ratio: 0.95 })
+    expect(splitOps(s)[0][0].ratio).toBe(0.9)
+    s = tabsReducer(s, { type: 'zoom', key: 1 })
+    expect(s.splits[0].zoomed).toBe(true)
+    s = tabsReducer(s, { type: 'zoom', key: 2 })
+    expect(s.splits[0].zoomed).toBe(false)
     s = tabsReducer(s, { type: 'unsplit', key: 1 })
-    expect(s.pairs).toEqual([])
+    expect(s.splits).toEqual([])
   })
 })
 
@@ -112,7 +141,7 @@ describe('salvar e restaurar', () => {
     expect(r.lastActive.q).toBe(4)
     expect(r.groups[0].name).toBe('Build')
     expect(r.nextGroup).toBe(2)
-    expect(r.pairs).toEqual([{ left: 1, right: 3, ratio: 0.5 }])
+    expect(splitOps(r)).toEqual([[{ left: 1, right: 3, ratio: 0.5, dir: 'row' }]])
     expect(r.nextKey).toBe(5)
   })
 
@@ -147,7 +176,7 @@ describe('salvar e restaurar', () => {
     expect(r.tabs).toEqual([{ key: 1, kind: 'shell', title: 'ok', profile: 'p' }])
     expect(r.profile).toBe('p')
     expect(r.active).toBe(1)
-    expect(r.pairs).toEqual([])
+    expect(r.splits).toEqual([])
     expect(r.groups).toEqual([])
   })
 })
@@ -158,15 +187,36 @@ describe('zoom do painel', () => {
 
   test('liga e desliga sem desfazer a divisão', () => {
     const zoomed = tabsReducer(split(), { type: 'zoom', key: 2 })
-    expect(zoomed.pairs).toHaveLength(1)
-    expect(zoomed.pairs[0].zoomed).toBe(true)
-    expect(tabsReducer(zoomed, { type: 'zoom', key: 1 }).pairs[0].zoomed).toBe(false)
+    expect(zoomed.splits).toHaveLength(1)
+    expect(zoomed.splits[0].zoomed).toBe(true)
+    expect(tabsReducer(zoomed, { type: 'zoom', key: 1 }).splits[0].zoomed).toBe(false)
   })
 
   test('sem divisão não faz nada, e nova divisão começa sem zoom', () => {
     const lone = open({ ...initialTabs, profile: 'p' }, 'a')
     expect(tabsReducer(lone, { type: 'zoom', key: 1 })).toBe(lone)
     const zoomed = tabsReducer(split(), { type: 'zoom', key: 1 })
-    expect(tabsReducer(zoomed, { type: 'split', key: 1, with: 2 }).pairs[0].zoomed).toBeUndefined()
+    expect(tabsReducer(zoomed, { type: 'split', key: 1, with: 2 }).splits[0].zoomed).toBeUndefined()
+  })
+})
+
+describe('sessões antigas', () => {
+  test('pares sem `dir` (antes da árvore) voltam como telas divididas lado a lado', () => {
+    const old = {
+      version: 1,
+      profile: 'p',
+      tabs: ['a', 'b', 'c', 'd'].map((title) => ({ kind: 'shell', title, profile: 'p' })),
+      active: { p: 0 },
+      groups: [],
+      pairs: [
+        { left: 0, right: 1, ratio: 0.3 },
+        { left: 2, right: 3, ratio: 0.5 },
+      ],
+    }
+    const r = restore(old)
+    expect(splitOps(r)).toEqual([
+      [{ left: 1, right: 2, ratio: 0.3, dir: 'row' }],
+      [{ left: 3, right: 4, ratio: 0.5, dir: 'row' }],
+    ])
   })
 })

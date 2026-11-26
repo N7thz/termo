@@ -1,4 +1,5 @@
 import type { AgentState } from '../features/agent-status/agentState'
+import type { TerminalScheme } from '../features/theme/derive'
 
 export type SessionKind = 'shell' | 'claude'
 
@@ -57,6 +58,10 @@ export interface Settings {
   oscNotifications: boolean
   /** Atalhos trocados: ação do app → combinação (`Ctrl+Alt+T`); `''` desliga; sem a ação, vale o padrão. */
   keybindings: Record<string, string>
+  /** Cabeçalho fixo do comando: quando a saída passa da tela, o comando fica preso no topo. */
+  stickyCommand: boolean
+  /** Esquemas de cores importados de outros terminais (ids `custom-...`); até 50. */
+  customThemes: TerminalScheme[]
 }
 
 /** Um conjunto de abas e painéis guardado para abrir com um clique. */
@@ -67,8 +72,11 @@ export interface SavedLayout {
   tabs: LayoutTab[]
   /** Nomes dos grupos; `LayoutTab.group` é o índice aqui. */
   groups: string[]
-  /** Telas divididas, por índice em `tabs`. */
-  splits: { left: number; right: number; ratio: number }[]
+  /**
+   * Divisões, por índice em `tabs`: "divida `left`, pondo `right` depois dele" (`dir` `col` = embaixo;
+   * sem `dir`, ao lado). Em ordem, refazem a árvore da tela dividida (src/features/tabs/splitTree.ts).
+   */
+  splits: { left: number; right: number; ratio: number; dir?: 'row' | 'col' }[]
 }
 
 export interface LayoutTab {

@@ -64,6 +64,8 @@ export const DEFAULT_SETTINGS: Settings = {
   oscClipboard: true,
   oscNotifications: true,
   keybindings: {},
+  stickyCommand: true,
+  customThemes: [],
 }
 
 /** Mesmos níveis do Rust (CONTRAST_LEVELS em src-tauri/src/settings.rs). */

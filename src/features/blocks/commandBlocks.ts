@@ -1,7 +1,7 @@
 import type { IDecoration, IDisposable, IMarker, Terminal } from '@xterm/xterm'
 import { blocksToMarkdown, type ExportBlock } from './blockExport'
 import { type BlockKeyAction, extendFocus, stepSelection } from './blockNav'
-import { decodeCommand, findImagePaths, formatDuration, joinRows, tail } from './blocks'
+import { decodeCommand, findImagePaths, formatDuration, joinRows, stickyIndex, tail } from './blocks'
 import './commandBlocks.css'
 
 /**
@@ -53,6 +53,17 @@ export interface BlockCallbacks {
   sendToClaude?: (blocks: ExportBlock[]) => void
   /** Abre o menu de exportar os blocos (junto do botão clicado, ou no canto com `null`). */
   exportBlocks?: (blocks: ExportBlock[], anchor: HTMLElement | null) => void
+}
+
+/** O que o cabeçalho fixo do comando mostra (veja `stickyAt`). */
+export interface StickyBlock {
+  command: string
+  exitCode: number | null
+  running: boolean
+  startedAt: number
+  endedAt: number | null
+  /** Linha do prompt no buffer: o clique no cabeçalho rola até ela. */
+  promptLine: number
 }
 
 /** Evento de `window` disparado por "Salvar como workflow"; `detail` é `{ command: string }`. */
@@ -113,6 +124,28 @@ export class CommandBlocks implements IDisposable {
         for (const b of this.blocks) if (b.end) this.render(b)
       }),
     )
+  }
+
+  /**
+   * O bloco que o cabeçalho fixo mostra quando a primeira linha visível é `top` (linha do buffer): o
+   * comando já saiu da tela por cima e a saída dele ainda está lá. `null` se nenhum.
+   */
+  stickyAt(top: number): StickyBlock | null {
+    const list = this.running ? [...this.blocks, this.running] : this.blocks
+    const i = stickyIndex(
+      list.map((b) => ({ promptLine: b.prompt.line, outputLine: b.output.line, endLine: b.end ? b.end.line : null })),
+      top,
+    )
+    const b = list[i]
+    if (!b?.command) return null
+    return {
+      command: b.command,
+      exitCode: b.exitCode,
+      running: b === this.running,
+      startedAt: b.startedAt,
+      endedAt: b.endedAt,
+      promptLine: b.prompt.line,
+    }
   }
 
   /** O último bloco que terminou com erro (para o "explicar erro" do menu e da paleta). */

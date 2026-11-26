@@ -8,6 +8,7 @@
  * nesta máquina podem ficar de fora.
  */
 import type { Profile, SavedLayout, Settings, Workflow } from '../../shared/types'
+import type { TerminalScheme } from '../theme/derive'
 
 /** O que `config_import_read` devolve. */
 export interface ImportFile {
@@ -43,7 +44,16 @@ export const SECTIONS: Section[] = [
   {
     id: 'appearance',
     label: 'Aparência',
-    keys: ['theme', 'fontFamily', 'fontSize', 'interfaceSize', 'layout', 'minimumContrast', 'dimInactivePane'],
+    keys: [
+      'theme',
+      'fontFamily',
+      'fontSize',
+      'interfaceSize',
+      'layout',
+      'minimumContrast',
+      'dimInactivePane',
+      'customThemes',
+    ],
   },
   {
     id: 'terminal',
@@ -59,6 +69,7 @@ export const SECTIONS: Section[] = [
       'restoreSession',
       'restoreOutput',
       'oscClipboard',
+      'stickyCommand',
       'oscNotifications',
     ],
   },
@@ -191,6 +202,12 @@ export function previewImport(file: ImportFile, current: Settings, dropMissing: 
           }
         }
         if (key === 'defaultCwd' && !keep(value)) continue
+        // Temas importados se juntam aos daqui pelo id (o do arquivo substitui o de mesmo id).
+        if (key === 'customThemes') {
+          const incoming = listOf<TerminalScheme>(value, (t) => hasText(t, 'id') && hasText(t, 'name'))
+          if (!incoming) continue
+          value = mergeList(current.customThemes ?? [], incoming, (a, b) => a.id === b.id).list
+        }
         if (!same(value, current[key])) (patch as Record<string, unknown>)[key] = value
       }
       const n = Object.keys(patch).length

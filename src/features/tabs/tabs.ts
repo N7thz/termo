@@ -1,4 +1,21 @@
 import type { SessionKind } from '../../shared/types'
+import {
+  clampRatio,
+  fromOps,
+  hasKey,
+  leaf,
+  leaves,
+  MAX_PANES,
+  removeLeaf,
+  type SplitDir,
+  type SplitLayout,
+  type SplitOp,
+  setRatio,
+  splitLeaf,
+  toOps,
+} from './splitTree'
+
+export type { SplitDir, SplitLayout } from './splitTree'
 
 export interface Tab {
   key: number
@@ -82,15 +99,6 @@ export interface TabGroup {
   collapsed: boolean
 }
 
-/** Duas abas lado a lado no cartão (tela dividida). `ratio` é a largura da esquerda, de 0.2 a 0.8. */
-export interface SplitPair {
-  left: number
-  right: number
-  ratio: number
-  /** Um painel ampliado: só a aba ativa do par aparece, sem desfazer a divisão. Não vai para o disco. */
-  zoomed?: boolean
-}
-
 export interface TabsState {
   /** Abas de todos os perfis, na ordem em que foram abertas/movidas. */
   tabs: Tab[]
@@ -103,7 +111,8 @@ export interface TabsState {
   lastActive: Readonly<Record<string, number>>
   groups: TabGroup[]
   nextGroup: number
-  pairs: SplitPair[]
+  /** Telas divididas: cada uma é uma árvore de painéis (splitTree.ts) mostrada junta no cartão. */
+  splits: SplitLayout[]
 }
 
 /** O que vai para o disco ao fechar e volta ao abrir (as chaves das abas são refeitas). */
@@ -127,8 +136,11 @@ export interface SessionSnapshot {
   /** Índice (em `tabs`) da aba ativa de cada perfil. */
   active: Record<string, number>
   groups: TabGroup[]
-  /** Pares por índice em `tabs`. */
-  pairs: { left: number; right: number; ratio: number }[]
+  /**
+   * Divisões por índice em `tabs` (`dir` ausente = lado a lado). O nome ficou dos pares antigos, que são
+   * o mesmo formato sem `dir`.
+   */
+  pairs: SplitOp[]
 }
 
 export type TabsAction =
@@ -142,8 +154,10 @@ export type TabsAction =
       group?: string
       /** Perfil de shell da aba nova (veja `Tab.shell`). */
       shell?: string
-      /** Abre já em tela dividida com esta aba (a nova fica à direita). */
+      /** Abre já em tela dividida com esta aba (a nova fica depois dela: à direita ou embaixo). */
       splitWith?: number
+      /** `row` (padrão) põe ao lado; `col`, embaixo. */
+      splitDir?: SplitDir
     }
   | { type: 'close'; key: number }
   | { type: 'activate'; key: number }
@@ -170,18 +184,20 @@ export type TabsAction =
   | { type: 'group-delete'; id: string }
   /** Põe a aba num grupo do perfil dela (ou tira, com `null`). */
   | { type: 'set-group'; key: number; group: string | null }
-  | { type: 'split'; key: number; with: number }
+  /** Põe `with` num painel novo ao lado de `key` (`dir: col`: embaixo), na tela dividida de `key`. */
+  | { type: 'split'; key: number; with: number; dir?: SplitDir }
   | { type: 'unsplit'; key: number }
   /** Abre as abas de um layout salvo no perfil atual, com os grupos e divisões dele; a primeira fica ativa. */
   | {
       type: 'open-layout'
       tabs: { kind: SessionKind; title: string; cwd?: string; shell?: string; group?: number }[]
       groups: string[]
-      splits: { left: number; right: number; ratio: number }[]
+      splits: SplitOp[]
     }
   /** Amplia o painel da aba na tela dividida, ou volta aos dois. */
   | { type: 'zoom'; key: number }
-  | { type: 'split-ratio'; key: number; ratio: number }
+  /** Proporção de uma divisão da tela de `key`; `path` diz qual (veja `setRatio`). */
+  | { type: 'split-ratio'; key: number; path: string; ratio: number }
   /** `profiles`: perfis que ainda existem (abas e grupos de perfis excluídos ficam de fora). */
   | { type: 'restore'; snapshot: unknown; profiles?: readonly string[] }
 
@@ -193,11 +209,10 @@ export const initialTabs: TabsState = {
   lastActive: {},
   groups: [],
   nextGroup: 1,
-  pairs: [],
+  splits: [],
 }
 
 export const MAX_GROUP_NAME = 40
-const clampRatio = (r: number) => (Number.isFinite(r) ? Math.min(0.8, Math.max(0.2, r)) : 0.5)
 
 /** Grupos do perfil atual, na ordem de criação. */
 export function visibleGroups(state: TabsState): TabGroup[] {
@@ -216,9 +231,15 @@ export function visibleTabs(state: TabsState): Tab[] {
   return [...grouped, ...mine.filter((t) => !t.group || !known.has(t.group))]
 }
 
-/** O par de tela dividida de que a aba faz parte, se houver. */
-export function pairOf(state: Pick<TabsState, 'pairs'>, key: number | null): SplitPair | undefined {
-  return key == null ? undefined : state.pairs.find((p) => p.left === key || p.right === key)
+/** A tela dividida de que a aba faz parte, se houver. */
+export function splitOf(state: Pick<TabsState, 'splits'>, key: number | null): SplitLayout | undefined {
+  return key == null ? undefined : state.splits.find((l) => hasKey(l.root, key))
+}
+
+/** As outras abas da tela dividida da aba (vazio se ela não está dividida). */
+export function paneMates(state: Pick<TabsState, 'splits'>, key: number | null): number[] {
+  const layout = splitOf(state, key)
+  return layout ? leaves(layout.root).filter((k) => k !== key) : []
 }
 
 function withActive(state: TabsState, active: number | null): TabsState {
@@ -226,8 +247,24 @@ function withActive(state: TabsState, active: number | null): TabsState {
   return { ...state, active, lastActive }
 }
 
-const withoutPairsOf = (pairs: SplitPair[], ...keys: number[]) =>
-  pairs.filter((p) => !keys.includes(p.left) && !keys.includes(p.right))
+/** Tira as abas das telas divididas; uma tela que fica com um painel só deixa de ser dividida. */
+function withoutKeys(splits: SplitLayout[], ...keys: number[]): SplitLayout[] {
+  return splits.flatMap((l) => {
+    let root: SplitLayout['root'] | null = l.root
+    for (const k of keys) root = root && removeLeaf(root, k)
+    if (!root || root.type === 'leaf') return []
+    return [root === l.root ? l : { ...l, root }]
+  })
+}
+
+/** Põe `added` ao lado de `key`: na tela dividida de `key` (se couber) ou numa nova. */
+function withPane(splits: SplitLayout[], key: number, added: number, dir: SplitDir): SplitLayout[] {
+  const rest = withoutKeys(splits, added)
+  const at = rest.findIndex((l) => hasKey(l.root, key))
+  if (at === -1) return [...rest, { root: splitLeaf(leaf(key), key, added, dir) }]
+  if (leaves(rest[at].root).length >= MAX_PANES) return rest
+  return rest.map((l, i) => (i === at ? { root: splitLeaf(l.root, key, added, dir) } : l))
+}
 
 /** Mesma regra do Rust (`settings::is_valid_shell`), sem o `auto`: o que a aba guarda é sempre um shell concreto. */
 export const isShellId = (s: string) =>
@@ -245,12 +282,11 @@ export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
       // Com `after`, entra logo à direita daquela aba (duplicar); senão, no fim.
       const at = action.after == null ? -1 : state.tabs.findIndex((t) => t.key === action.after)
       const tabs = at < 0 ? [...state.tabs, tab] : [...state.tabs.slice(0, at + 1), tab, ...state.tabs.slice(at + 1)]
-      let pairs = state.pairs
+      let splits = state.splits
       const partner = action.splitWith == null ? undefined : state.tabs.find((t) => t.key === action.splitWith)
-      if (partner && partner.profile === profile) {
-        pairs = [...withoutPairsOf(pairs, partner.key), { left: partner.key, right: tab.key, ratio: 0.5 }]
-      }
-      return withActive({ ...state, tabs, pairs, profile, nextKey: state.nextKey + 1 }, tab.key)
+      if (partner && partner.profile === profile)
+        splits = withPane(splits, partner.key, tab.key, action.splitDir ?? 'row')
+      return withActive({ ...state, tabs, splits, profile, nextKey: state.nextKey + 1 }, tab.key)
     }
     case 'close': {
       const closing = state.tabs.find((t) => t.key === action.key)
@@ -258,11 +294,11 @@ export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
       const tabs = state.tabs.filter((t) => t.key !== action.key)
       const lastActive = { ...state.lastActive }
       if (lastActive[closing.profile] === action.key) delete lastActive[closing.profile]
-      const pair = pairOf(state, action.key)
-      const next = { ...state, tabs, lastActive, pairs: withoutPairsOf(state.pairs, action.key) }
+      const mates = paneMates(state, action.key)
+      const next = { ...state, tabs, lastActive, splits: withoutKeys(state.splits, action.key) }
       if (state.active !== action.key) return next
-      // Fechou a ativa: na tela dividida, fica a outra metade; senão, a vizinha de cima (ou a primeira).
-      if (pair) return withActive(next, pair.left === action.key ? pair.right : pair.left)
+      // Fechou a ativa: na tela dividida, fica um painel vizinho; senão, a vizinha de cima (ou a primeira).
+      if (mates.length > 0) return withActive(next, mates[0])
       const mine = visibleTabs(state)
       const idx = mine.findIndex((t) => t.key === action.key)
       const rest = mine.filter((t) => t.key !== action.key)
@@ -413,11 +449,13 @@ export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
       const a = state.tabs.find((t) => t.key === action.key)
       const b = state.tabs.find((t) => t.key === action.with)
       if (!a || !b || a.key === b.key || a.profile !== b.profile) return state
-      const pairs = [...withoutPairsOf(state.pairs, a.key, b.key), { left: a.key, right: b.key, ratio: 0.5 }]
-      return withActive({ ...state, pairs }, a.key)
+      const splits = withPane(state.splits, a.key, b.key, action.dir ?? 'row').map((l) =>
+        hasKey(l.root, a.key) ? { root: l.root } : l,
+      )
+      return withActive({ ...state, splits }, a.key)
     }
     case 'unsplit':
-      return { ...state, pairs: withoutPairsOf(state.pairs, action.key) }
+      return { ...state, splits: withoutKeys(state.splits, action.key) }
     case 'open-layout': {
       const profile = state.profile
       const groups = action.groups.slice(0, 16).map((name, i) => ({
@@ -434,37 +472,33 @@ export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
         return tab
       })
       if (tabs.length === 0) return state
-      const used = new Set<number>()
-      const pairs = action.splits.flatMap((p) => {
+      const ops = action.splits.flatMap((p) => {
         const left = tabs[p.left]
         const right = tabs[p.right]
-        if (!left || !right || left === right || used.has(left.key) || used.has(right.key)) return []
-        used.add(left.key)
-        used.add(right.key)
-        return [{ left: left.key, right: right.key, ratio: clampRatio(p.ratio) }]
+        return left && right ? [{ ...p, left: left.key, right: right.key }] : []
       })
+      const added = fromOps(ops).map((root) => ({ root }))
       const next = {
         ...state,
         tabs: [...state.tabs, ...tabs],
         groups: [...state.groups, ...groups],
         nextKey: state.nextKey + tabs.length,
         nextGroup: state.nextGroup + groups.length,
-        pairs: [...withoutPairsOf(state.pairs, ...used), ...pairs],
+        splits: [...state.splits, ...added],
       }
       return withActive(next, tabs[0].key)
     }
     case 'zoom': {
-      const pair = pairOf(state, action.key)
-      if (!pair) return state
-      return { ...state, pairs: state.pairs.map((p) => (p === pair ? { ...p, zoomed: !p.zoomed } : p)) }
+      const layout = splitOf(state, action.key)
+      if (!layout) return state
+      return { ...state, splits: state.splits.map((l) => (l === layout ? { ...l, zoomed: !l.zoomed } : l)) }
     }
-    case 'split-ratio':
-      return {
-        ...state,
-        pairs: state.pairs.map((p) =>
-          p.left === action.key || p.right === action.key ? { ...p, ratio: clampRatio(action.ratio) } : p,
-        ),
-      }
+    case 'split-ratio': {
+      const layout = splitOf(state, action.key)
+      if (!layout) return state
+      const root = setRatio(layout.root, action.path, action.ratio)
+      return { ...state, splits: state.splits.map((l) => (l === layout ? { ...l, root } : l)) }
+    }
     case 'restore':
       return restore(action.snapshot, state, action.profiles && new Set(action.profiles))
   }
@@ -511,11 +545,13 @@ export function snapshot(
     }),
     active,
     groups: state.groups,
-    pairs: state.pairs.flatMap((p) => {
-      const left = index.get(p.left)
-      const right = index.get(p.right)
-      return left == null || right == null ? [] : [{ left, right, ratio: p.ratio }]
-    }),
+    pairs: state.splits.flatMap((l) =>
+      toOps(l.root).flatMap((op) => {
+        const left = index.get(op.left)
+        const right = index.get(op.right)
+        return left == null || right == null ? [] : [{ ...op, left, right }]
+      }),
+    ),
   }
 }
 
@@ -589,19 +625,28 @@ export function restore(raw: unknown, base: TabsState = initialTabs, allowed?: R
     const key = keyOf.get(i)
     if (key != null && tabs.some((t) => t.key === key && t.profile === profile)) lastActive[profile] = key
   }
-  const used = new Set<number>()
-  const pairs: SplitPair[] = (Array.isArray(snap.pairs) ? snap.pairs : []).flatMap((p) => {
+  const ops: SplitOp[] = (Array.isArray(snap.pairs) ? snap.pairs : []).flatMap((p) => {
     const left = keyOf.get(p?.left)
     const right = keyOf.get(p?.right)
-    if (left == null || right == null || left === right || used.has(left) || used.has(right)) return []
-    used.add(left)
-    used.add(right)
-    return [{ left, right, ratio: clampRatio(p.ratio) }]
+    if (left == null || right == null) return []
+    return [
+      {
+        left,
+        right,
+        ratio: typeof p.ratio === 'number' ? clampRatio(p.ratio) : 0.5,
+        dir: p.dir === 'col' ? 'col' : 'row',
+      },
+    ]
   })
+  const profileOf = new Map(tabs.map((t) => [t.key, t.profile]))
+  // Uma tela dividida só junta abas do mesmo perfil.
+  const splits: SplitLayout[] = fromOps(ops)
+    .filter((root) => new Set(leaves(root).map((k) => profileOf.get(k))).size === 1)
+    .map((root) => ({ root }))
   const nextGroup = groups.reduce((n, g) => Math.max(n, Number(g.id.replace(/^g/, '')) || 0), 0) + 1
 
   const profile =
     str(snap.profile, 40) && tabs.some((t) => t.profile === snap.profile) ? (snap.profile as string) : tabs[0].profile
   const active = lastActive[profile] ?? tabs.find((t) => t.profile === profile)?.key ?? null
-  return { tabs, active, nextKey: tabs.length + 1, profile, lastActive, groups, nextGroup, pairs }
+  return { tabs, active, nextKey: tabs.length + 1, profile, lastActive, groups, nextGroup, splits }
 }

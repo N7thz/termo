@@ -51,14 +51,16 @@ import { ClaudeIcon } from './features/tabs/ClaudeIcon'
 import { PaneNotice } from './features/tabs/PaneNotice'
 import { SplitDivider } from './features/tabs/SplitDivider'
 import { actionFor, keysFor, setKeybindings } from './features/tabs/shortcuts'
+import { type Direction, layoutRects, neighbor, type SplitDir } from './features/tabs/splitTree'
 import { TabKindIcon } from './features/tabs/TabKindIcon'
 import {
   initialTabs,
   outputIdFor,
-  pairOf,
+  paneMates,
   restore,
   type SessionSnapshot,
   snapshot,
+  splitOf,
   type Tab,
   tabsReducer,
   tabsToClose,
@@ -68,6 +70,7 @@ import {
 import { type Progress, taskbarProgress } from './features/terminal/programOsc'
 import { TerminalView } from './features/terminal/TerminalView'
 import { ThemesPage } from './features/theme/ThemesPage'
+import { setCustomThemes } from './features/theme/themes'
 import { useTheme } from './features/theme/useTheme'
 import { useTrayActions } from './features/tray/useTrayActions'
 import { UpdateButton } from './features/updater/UpdateButton'
@@ -132,6 +135,8 @@ export function App() {
   // Aplica as cores do tema no :root e devolve o tema ativo (com as cores do terminal).
   // Prévia ao passar pela lista de temas; null = tema salvo.
   const [previewTheme, setPreviewTheme] = useState<string | null>(null)
+  // Temas importados de outros terminais entram no registro antes de resolver o tema.
+  setCustomThemes(settings.customThemes)
   const theme = useTheme(previewTheme ?? settings.theme)
   // Com imagem atrás do terminal, o fundo do xterm fica transparente para ela aparecer.
   // O brilho do tema também fica atrás do texto (ver features/background/GlowLayer).
@@ -224,6 +229,8 @@ export function App() {
         after?: number
         group?: string
         splitWith?: number
+        /** Com `splitWith`: `col` abre embaixo; o padrão é ao lado. */
+        splitDir?: SplitDir
         title?: string
       } = {},
     ) =>
@@ -237,6 +244,7 @@ export function App() {
         after: opts.after,
         group: opts.group,
         splitWith: opts.splitWith,
+        splitDir: opts.splitDir,
       }),
     [shellName],
   )
@@ -374,21 +382,26 @@ export function App() {
   )
   const [sidebarDragging, setSidebarDragging] = useState(false)
 
-  // Tela dividida: o par da aba ativa aparece lado a lado no cartão; as outras abas ficam escondidas.
-  const split = pairOf(state, state.active)
-  const partnerOf = (key: number) => {
-    const p = pairOf(state, key)
-    return p && (p.left === key ? p.right : p.left)
-  }
-  // Zoom: a aba ativa ocupa o cartão; a outra metade fica escondida, com o tamanho de antes (o pty não é redimensionado).
+  // Tela dividida: os painéis da árvore da aba ativa (splitTree.ts) dividem o cartão; as outras abas ficam escondidas.
+  const split = splitOf(state, state.active)
+  const splitRects = useMemo(() => (split ? layoutRects(split.root) : null), [split])
+  /** Um dos outros painéis da tela dividida da aba (a lateral só precisa saber se há). */
+  const partnerOf = (key: number) => paneMates(state, key)[0]
+  // Zoom: a aba ativa ocupa o cartão; os outros painéis ficam escondidos, com o tamanho de antes (o pty não é redimensionado).
   const zoomed = split?.zoomed === true
-  const hiddenByZoom = (key: number) => zoomed && key !== state.active && (key === split?.left || key === split?.right)
+  const hiddenByZoom = (key: number) => zoomed && key !== state.active && splitRects?.panes.has(key) === true
   const paneStyle = (key: number): CSSProperties | undefined => {
-    if (!split) return undefined
+    if (!splitRects) return undefined
     if (zoomed && key === state.active) return undefined
-    if (key === split.left) return { left: 0, width: `${split.ratio * 100}%` }
-    if (key === split.right) return { left: `${split.ratio * 100}%`, right: 0 }
-    return undefined
+    const r = splitRects.panes.get(key)
+    if (!r) return undefined
+    return { left: `${r.x * 100}%`, top: `${r.y * 100}%`, width: `${r.w * 100}%`, height: `${r.h * 100}%` }
+  }
+  /** Alt+setas: o foco vai para o painel vizinho naquela direção. */
+  const focusPane = (dir: Direction) => {
+    if (!split || zoomed || state.active == null) return
+    const next = neighbor(split.root, state.active, dir)
+    if (next != null) dispatch({ type: 'activate', key: next })
   }
 
   // Ações do xterm de cada aba, para o menu do botão direito.
@@ -626,6 +639,8 @@ export function App() {
         })
       case 'split-new':
         return openTab('shell', { splitWith: tab.key, cwd: workspace.info(tab.key).cwd ?? tab.cwd })
+      case 'split-new-down':
+        return openTab('shell', { splitWith: tab.key, splitDir: 'col', cwd: workspace.info(tab.key).cwd ?? tab.cwd })
       case 'split-with-active':
         return state.active != null && dispatch({ type: 'split', key: state.active, with: tab.key })
       case 'unsplit':
@@ -730,7 +745,17 @@ export function App() {
         case 'duplicate-tab':
           return activeTab && runTabAction(activeTab, 'duplicate')
         case 'split-tab':
-          return activeTab && runTabAction(activeTab, pairOf(state, activeTab.key) ? 'unsplit' : 'split-new')
+          return activeTab && runTabAction(activeTab, 'split-new')
+        case 'split-down':
+          return activeTab && runTabAction(activeTab, 'split-new-down')
+        case 'focus-left':
+          return focusPane('left')
+        case 'focus-right':
+          return focusPane('right')
+        case 'focus-up':
+          return focusPane('up')
+        case 'focus-down':
+          return focusPane('down')
         case 'zoom-pane':
           return state.active != null && dispatch({ type: 'zoom', key: state.active })
         case 'broadcast':
@@ -1066,7 +1091,7 @@ export function App() {
                       key={tab.key}
                       role="tabpanel"
                       aria-label={tabLabel(tab, shellName)}
-                      className={`absolute inset-y-0 ${paneStyle(tab.key) ? '' : 'inset-x-0'} ${split && paneStyle(tab.key) && tab.key !== state.active ? 'opacity-80' : ''} ${hiddenByZoom(tab.key) ? 'pointer-events-none' : ''} [transition:opacity_160ms_ease-out]`}
+                      className={`absolute ${paneStyle(tab.key) ? '' : 'inset-0'} ${split && paneStyle(tab.key) && tab.key !== state.active ? 'opacity-80' : ''} ${hiddenByZoom(tab.key) ? 'pointer-events-none' : ''} [transition:opacity_160ms_ease-out]`}
                       style={paneStyle(tab.key)}
                     >
                       <TerminalMenu
@@ -1176,23 +1201,32 @@ export function App() {
                         <span
                           key={`bc-${tab.key}`}
                           aria-hidden
-                          className={`pointer-events-none absolute inset-y-0 z-10 rounded-[10px] border-2 border-accent/60 ${paneStyle(tab.key) ? '' : 'inset-x-0'}`}
+                          className={`pointer-events-none absolute z-10 rounded-[10px] border-2 border-accent/60 ${paneStyle(tab.key) ? '' : 'inset-0'}`}
                           style={paneStyle(tab.key)}
                         />
                       ),
                   )}
                   <PaneNotice
-                    hiddenPanes={zoomed ? 1 : 0}
+                    hiddenPanes={zoomed && splitRects ? splitRects.panes.size - 1 : 0}
                     broadcast={broadcast ? broadcastTo.length + (broadcastTo.length > 0 ? 1 : 0) || 1 : null}
                     onUnzoom={() => state.active != null && dispatch({ type: 'zoom', key: state.active })}
                     onStopBroadcast={() => setBroadcast(false)}
                   />
-                  {split && !zoomed && (
-                    <SplitDivider
-                      ratio={split.ratio}
-                      onRatio={(ratio) => dispatch({ type: 'split-ratio', key: split.left, ratio })}
-                    />
-                  )}
+                  {split &&
+                    !zoomed &&
+                    state.active != null &&
+                    splitRects?.dividers.map((d) => (
+                      <SplitDivider
+                        key={d.path}
+                        dir={d.dir}
+                        rect={d.rect}
+                        ratio={d.ratio}
+                        onRatio={(ratio) =>
+                          state.active != null &&
+                          dispatch({ type: 'split-ratio', key: state.active, path: d.path, ratio })
+                        }
+                      />
+                    ))}
                   {tabs.length === 0 && (
                     <div className="absolute inset-0 grid animate-fade-in place-items-center motion-reduce:animate-none">
                       <div className="flex flex-col items-center gap-3 text-[13px] text-muted">
@@ -1234,6 +1268,8 @@ export function App() {
                       onChange={(id) => updateSettings({ theme: id })}
                       onPreview={setPreviewTheme}
                       onClose={closeThemes}
+                      customThemes={settings.customThemes ?? []}
+                      onCustomThemesChange={(customThemes) => updateSettings({ customThemes })}
                     />
                   )}
                 </main>

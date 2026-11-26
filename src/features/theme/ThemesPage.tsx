@@ -3,13 +3,24 @@ import { Input } from '@ui-sdk/react/input'
 import { Listbox, ListboxItem, ListboxItemIndicator } from '@ui-sdk/react/listbox'
 import { SegmentedControl, SegmentedControlIndicator, SegmentedControlItem } from '@ui-sdk/react/segmented-control'
 import type { ITheme } from '@xterm/xterm'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Trash2, Upload } from 'lucide-react'
 import { type KeyboardEvent, useEffect, useMemo, useState } from 'react'
 import { ipc } from '../../lib/ipc'
 import { Scroller } from '../../lib/Scroller'
 import { actionButton } from '../../lib/ui'
+import type { TerminalScheme } from './derive'
 import { filterGallery, rowStep, type SchemeFilter } from './gallery'
-import { DEFAULT_DARK, DEFAULT_LIGHT, findTheme, THEME_OPTIONS, type ThemeOption } from './themes'
+import { addCustomThemes, parseSchemeFile } from './importScheme'
+import {
+  DEFAULT_DARK,
+  DEFAULT_LIGHT,
+  findTheme,
+  isCustomTheme,
+  SYSTEM_THEME,
+  setCustomThemes,
+  type ThemeOption,
+  themeGroups,
+} from './themes'
 
 interface Props {
   value: string
@@ -17,6 +28,10 @@ interface Props {
   /** Prévia ao vivo do tema em foco ou sob o ponteiro; `null` volta ao salvo. */
   onPreview: (id: string | null) => void
   onClose: () => void
+  /** Temas importados de outros terminais (settings.customThemes). */
+  customThemes: readonly TerminalScheme[]
+  /** Grava a lista inteira de temas importados. */
+  onCustomThemesChange: (list: TerminalScheme[]) => void
 }
 
 const SCHEMES: { value: SchemeFilter; label: string }[] = [
@@ -25,13 +40,55 @@ const SCHEMES: { value: SchemeFilter; label: string }[] = [
   { value: 'light', label: 'Claros' },
 ]
 
-export function ThemesPage({ value, onChange, onPreview, onClose }: Props) {
+export function ThemesPage({ value, onChange, onPreview, onClose, customThemes, onCustomThemesChange }: Props) {
   const [query, setQuery] = useState('')
   const [scheme, setScheme] = useState<SchemeFilter>('all')
   const [focused, setFocused] = useState<string | null>(null)
-  const groups = useMemo(() => filterGallery(query, scheme), [query, scheme])
+  const [notice, setNotice] = useState<{ error: boolean; text: string } | null>(null)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: os importados mudam os grupos
+  const allGroups = useMemo(() => themeGroups(), [customThemes])
+  const total = allGroups.reduce((n, g) => n + g.options.length, 0)
+  const groups = useMemo(() => filterGallery(query, scheme, allGroups), [query, scheme, allGroups])
   const shown = groups.reduce((n, g) => n + g.options.length, 0)
-  const credit = findTheme(focused ?? value)?.credit
+  const current = focused ?? value
+  const credit = findTheme(current)?.credit
+  const custom = isCustomTheme(current) ? findTheme(current) : undefined
+
+  const importFile = () => {
+    setNotice(null)
+    ipc.themeImportRead().then(
+      (file) => {
+        if (!file) return
+        try {
+          const parsed = parseSchemeFile(file.text, file.fileName)
+          const { list, ids } = addCustomThemes(customThemes, parsed)
+          // Registra já: a prévia do tema novo funciona antes de as configurações voltarem.
+          setCustomThemes(list)
+          onCustomThemesChange(list)
+          preview(ids[0] ?? null)
+          setNotice({
+            error: false,
+            text:
+              parsed.length === 1
+                ? `Importado: ${parsed[0].name}. Enter ou clique no cartão aplica.`
+                : `${parsed.length} temas importados de ${file.fileName}.`,
+          })
+        } catch (err) {
+          setNotice({ error: true, text: `Não deu para importar ${file.fileName}: ${(err as Error).message}` })
+        }
+      },
+      (err) => setNotice({ error: true, text: `Não deu para abrir o arquivo: ${String(err)}` }),
+    )
+  }
+
+  const remove = (id: string) => {
+    const list = customThemes.filter((t) => t.id !== id)
+    setCustomThemes(list)
+    onCustomThemesChange(list)
+    if (value === id) onChange(SYSTEM_THEME)
+    preview(null)
+    setNotice(null)
+  }
 
   // Ao sair da página, a interface volta ao tema salvo.
   useEffect(() => () => onPreview(null), [onPreview])
@@ -60,9 +117,16 @@ export function ThemesPage({ value, onChange, onPreview, onClose }: Props) {
           Temas
         </h1>
         <span className="text-[12px] text-muted" aria-live="polite">
-          {shown === THEME_OPTIONS.length ? `${shown} temas` : `${shown} de ${THEME_OPTIONS.length}`}
+          {shown === total ? `${shown} temas` : `${shown} de ${total}`}
         </span>
         <div className="flex-1" />
+        <Button
+          className={`${actionButton} gap-1.5 px-2 text-[12.5px] text-text`}
+          title="Esquema do Windows Terminal (JSON), iTerm2 (.itermcolors), Ghostty, Alacritty (TOML) ou kitty"
+          onClick={importFile}
+        >
+          <Upload aria-hidden size={13} /> Importar…
+        </Button>
         <SegmentedControl
           aria-label="Claros ou escuros"
           value={scheme}
@@ -90,6 +154,14 @@ export function ThemesPage({ value, onChange, onPreview, onClose }: Props) {
           className="w-64 rounded-[7px] border border-border bg-field px-[9px] py-[5px] text-[13px] text-text placeholder:text-muted focus-visible:border-accent focus-visible:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_25%,transparent)] focus-visible:outline-none"
         />
       </header>
+      {notice && (
+        <p
+          className={`m-0 border-b border-hairline px-5 py-2 text-[12px] ${notice.error ? 'text-(--tone-red,var(--claude))' : 'text-muted'}`}
+          role={notice.error ? 'alert' : 'status'}
+        >
+          {notice.text}
+        </p>
+      )}
 
       <Scroller className="min-h-0 flex-1">
         <div className="px-5 py-4" onPointerLeave={() => preview(null)}>
@@ -121,17 +193,30 @@ export function ThemesPage({ value, onChange, onPreview, onClose }: Props) {
       <footer className="flex items-center gap-3 border-t border-hairline px-5 py-2 text-[11px] text-muted">
         <span>Setas navegam · Enter aplica · digite para pular pelo nome · Esc volta</span>
         <div className="flex-1" />
-        {credit && (
-          <span>
-            Tema de {credit.author || 'autor desconhecido'} via TerminalSplash ·{' '}
+        {custom ? (
+          <span className="flex items-center gap-2">
+            {custom.name} · importado{custom.credit?.source ? ` do ${custom.credit.source}` : ''}
             <button
               type="button"
-              className="cursor-pointer text-accent underline-offset-2 hover:underline"
-              onClick={() => void ipc.openUrl(credit.source)}
+              className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-(--tone-red,var(--claude)) hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-accent"
+              onClick={() => remove(custom.id)}
             >
-              fonte
+              <Trash2 aria-hidden size={12} /> Apagar
             </button>
           </span>
+        ) : (
+          credit && (
+            <span>
+              Tema de {credit.author || 'autor desconhecido'} via TerminalSplash ·{' '}
+              <button
+                type="button"
+                className="cursor-pointer text-accent underline-offset-2 hover:underline"
+                onClick={() => void ipc.openUrl(credit.source)}
+              >
+                fonte
+              </button>
+            </span>
+          )
         )}
       </footer>
     </section>
@@ -152,8 +237,13 @@ function moveByRow(e: KeyboardEvent<HTMLElement>) {
 
 function ThemeCard({ option, onPointerEnter }: { option: ThemeOption; onPointerEnter: () => void }) {
   const { theme } = option
+  const origin = !theme?.credit
+    ? 'Termo'
+    : isCustomTheme(option.id)
+      ? `Importado · ${theme.credit.source}`
+      : theme.credit.author || 'TerminalSplash'
   const detail = theme
-    ? `${theme.credit ? theme.credit.author || 'TerminalSplash' : 'Termo'} · ${theme.scheme === 'dark' ? 'escuro' : 'claro'}`
+    ? `${origin} · ${theme.scheme === 'dark' ? 'escuro' : 'claro'}`
     : 'Segue o claro/escuro do Windows'
   return (
     <ListboxItem

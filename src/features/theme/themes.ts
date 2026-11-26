@@ -535,9 +535,40 @@ export const THEME_GROUPS: readonly { label: string; options: readonly ThemeOpti
 
 export const THEME_OPTIONS: readonly ThemeOption[] = THEME_GROUPS.flatMap((g) => g.options)
 
-export const findTheme = (id: string) => BY_ID.get(id)
+// ---- Temas importados de outros terminais (settings.customThemes) ----
+
+let customList: readonly ThemeDefinition[] = []
+let customById = new Map<string, ThemeDefinition>()
+let customKey = '[]'
+
+/**
+ * Registra os temas importados (vindos das configurações). O App chama a cada render, antes do
+ * `useTheme`; a lista só é refeita quando muda.
+ */
+export function setCustomThemes(list: readonly TerminalScheme[] | undefined) {
+  const key = JSON.stringify(list ?? [])
+  if (key === customKey) return
+  customKey = key
+  customList = (list ?? []).map(themeFromScheme)
+  customById = new Map(customList.map((t) => [t.id, t]))
+}
+
+/** Tema importado (id `custom-...`). */
+export const isCustomTheme = (id: string) => customById.has(id)
+
+/** Grupos do seletor com os importados no topo, quando houver. */
+export function themeGroups(): readonly { label: string; options: readonly ThemeOption[] }[] {
+  if (customList.length === 0) return THEME_GROUPS
+  const imported = {
+    label: `Importados · ${customList.length}`,
+    options: customList.map((theme) => ({ id: theme.id, name: theme.name, theme })),
+  }
+  return [THEME_GROUPS[0], imported, ...THEME_GROUPS.slice(1)]
+}
+
+export const findTheme = (id: string) => BY_ID.get(id) ?? customById.get(id)
 
 /** Resolve o id salvo para um tema; id desconhecido cai no padrão do sistema. */
 export function resolveTheme(id: string, systemPrefersDark: boolean): ThemeDefinition {
-  return BY_ID.get(id) ?? (systemPrefersDark ? DEFAULT_DARK : DEFAULT_LIGHT)
+  return findTheme(id) ?? (systemPrefersDark ? DEFAULT_DARK : DEFAULT_LIGHT)
 }

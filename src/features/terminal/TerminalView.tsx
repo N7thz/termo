@@ -22,7 +22,7 @@ import { type BlockExportAnchor, BlockExportMenu } from '../blocks/BlockExportMe
 import { BlockFilter } from '../blocks/BlockFilter'
 import { blocksForClaude, type ExportBlock } from '../blocks/blockExport'
 import { blockKeyAction } from '../blocks/blockNav'
-import { CommandBlocks, SAVE_WORKFLOW_EVENT } from '../blocks/commandBlocks'
+import { CommandBlocks, SAVE_WORKFLOW_EVENT, type StickyBlock } from '../blocks/commandBlocks'
 import { ImagePreview, type ImagePreviewAnchor } from '../blocks/ImagePreview'
 import { openLink } from '../browser/links'
 import { ClaudeBar } from '../claude-bar/ClaudeBar'
@@ -44,6 +44,7 @@ import { CopyModeOverlay } from './CopyModeOverlay'
 import { attachProgramOsc, type Progress } from './programOsc'
 import { type CellGeometry, QuickSelectOverlay } from './QuickSelectOverlay'
 import { findTargets, readScreen, type Target } from './quickSelect'
+import { StickyCommand, type StickyPlace } from './StickyCommand'
 
 interface Props {
   kind: SessionKind
@@ -214,6 +215,9 @@ export function TerminalView({
   const openQuickRef = useRef<() => void>(() => {})
   /** Modo de cópia (Ctrl+Shift+X): a grade de células enquanto está aberto. */
   const [copyMode, setCopyMode] = useState<CellGeometry | null>(null)
+  /** Cabeçalho fixo: o comando cuja saída ocupa o topo da tela, e onde desenhá-lo. */
+  const [sticky, setSticky] = useState<{ block: StickyBlock; place: StickyPlace } | null>(null)
+  const updateStickyRef = useRef<() => void>(() => {})
   const openCopyModeRef = useRef<() => void>(() => {})
   const insertTextRef = useRef<(text: string) => void>(() => {})
   // Arquivos que entraram na linha (imagem colada, arquivos arrastados): faixa de miniaturas.
@@ -392,6 +396,26 @@ export function TerminalView({
       },
     })
     term.buffer.onBufferChange((b) => setAltBuffer(b.type === 'alternate'))
+    // Cabeçalho fixo do comando: recalculado uma vez por quadro ao rolar, escrever ou redimensionar.
+    let stickyFrame = 0
+    updateStickyRef.current = () => {
+      if (stickyFrame) return
+      stickyFrame = requestAnimationFrame(() => {
+        stickyFrame = 0
+        const buf = term.buffer.active
+        const block =
+          settingsRef.current.stickyCommand && kindRef.current === 'shell' && buf.type !== 'alternate'
+            ? blocks.stickyAt(buf.viewportY)
+            : null
+        const g = block ? cellGeometry() : null
+        const next =
+          block && g ? { block, place: { left: g.left, top: g.top, width: term.cols * g.cellW, cellH: g.cellH } } : null
+        setSticky((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
+      })
+    }
+    term.onScroll(() => updateStickyRef.current())
+    term.onWriteParsed(() => updateStickyRef.current())
+    term.onResize(() => updateStickyRef.current())
     const highlights = new TerminalHighlights(term, {
       settings: settings.highlights,
       colors: highlightColors(terminalTheme),
@@ -835,6 +859,7 @@ export function TerminalView({
     return () => {
       disposed = true
       clearTimeout(refreshTimer)
+      cancelAnimationFrame(stickyFrame)
       ro.disconnect()
       wrap.removeEventListener('paste', onEditorPaste, true)
       if (sessionId != null) void ipc.kill(sessionId)
@@ -877,6 +902,10 @@ export function TerminalView({
   useEffect(() => {
     if (termRef.current) termRef.current.options.minimumContrastRatio = settings.minimumContrast
   }, [settings.minimumContrast])
+
+  // Ligar ou desligar o cabeçalho fixo vale na hora.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refaz só quando a opção muda
+  useEffect(() => updateStickyRef.current(), [settings.stickyCommand])
 
   // Ctrl+Shift+Espaço abre a seleção rápida e Ctrl+Shift+X o modo de cópia, do xterm ou do editor de
   // entrada (captura antes deles).
@@ -949,6 +978,20 @@ export function TerminalView({
         style={{ background: MODE_TONE[modeOf(kind, shellProfile)] }}
       />
       <div className="min-h-0 w-full flex-1" ref={hostRef} />
+      {sticky && !quick && !copyMode && (
+        <StickyCommand
+          block={sticky.block}
+          place={sticky.place}
+          fontFamily={settings.fontFamily}
+          fontSize={terminalFontSize(settings.fontSize, settings.interfaceSize)}
+          onJump={() => {
+            const term = termRef.current
+            if (!term) return
+            term.scrollToLine(Math.max(0, sticky.block.promptLine))
+            term.focus()
+          }}
+        />
+      )}
       {copyMode && termRef.current && (
         <CopyModeOverlay
           term={termRef.current}

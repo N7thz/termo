@@ -1,13 +1,13 @@
 // Digitar em vários painéis ao mesmo tempo: quem recebe e o que é repassado.
-import { pairOf, type Tab, type TabsState } from '../tabs/tabs'
+import { paneMates, type Tab, type TabsState } from '../tabs/tabs'
 
 /**
- * Abas que recebem junto o que for digitado em `key`: as outras do grupo dela ou, fora de grupo, a outra
- * metade da tela dividida. Só shells: nem a origem nem o destino pode ser o Claude (`isClaude` cobre o
- * `claude` aberto à mão dentro de um shell).
+ * Abas que recebem junto o que for digitado em `key`: as outras do grupo dela ou, fora de grupo, os
+ * outros painéis da tela dividida. Só shells: nem a origem nem o destino pode ser o Claude (`isClaude`
+ * cobre o `claude` aberto à mão dentro de um shell).
  */
 export function broadcastTargets(
-  state: Pick<TabsState, 'tabs' | 'pairs' | 'groups'>,
+  state: Pick<TabsState, 'tabs' | 'splits' | 'groups'>,
   key: number | null,
   isClaude: (tab: Tab) => boolean = () => false,
 ): number[] {
@@ -15,11 +15,10 @@ export function broadcastTargets(
   const shell = (t: Tab) => t.kind === 'shell' && !isClaude(t)
   if (!source || !shell(source)) return []
   const grouped = state.groups.some((g) => g.id === source.group && g.profile === source.profile)
-  const pair = pairOf(state, source.key)
-  const partner = pair && (pair.left === source.key ? pair.right : pair.left)
+  const mates = paneMates(state, source.key)
   return state.tabs
     .filter((t) => t.key !== source.key && shell(t))
-    .filter((t) => (grouped ? t.group === source.group && t.profile === source.profile : t.key === partner))
+    .filter((t) => (grouped ? t.group === source.group && t.profile === source.profile : mates.includes(t.key)))
     .map((t) => t.key)
 }
 
