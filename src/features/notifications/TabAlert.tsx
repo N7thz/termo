@@ -1,3 +1,4 @@
+import type { Progress } from '../terminal/programOsc'
 import { formatSeconds, type TabFinished } from './notifications'
 
 /** Marcas de uma aba em segundo plano; somem quando ela é aberta. */
@@ -27,17 +28,68 @@ const CROSS = (
   </svg>
 )
 
+const PROGRESS_LABEL = { normal: 'Progresso', error: 'Erro', paused: 'Pausado', indeterminate: 'Trabalhando' } as const
+
+/**
+ * Anel de progresso mandado pelo programa da aba (OSC 9;4): cheio até o valor, girando quando o
+ * programa não diz quanto falta, vermelho no erro e amarelo pausado.
+ */
+export function ProgressRing({ progress, colors }: { progress: Progress; colors: { red?: string; yellow?: string } }) {
+  const r = 5.5
+  const length = 2 * Math.PI * r
+  const spin = progress.state === 'indeterminate'
+  const fill = spin ? 0.3 : progress.value / 100
+  const color = progress.state === 'error' ? colors.red : progress.state === 'paused' ? colors.yellow : 'var(--accent)'
+  const label = `${PROGRESS_LABEL[progress.state]}${spin ? '' : ` · ${progress.value}%`}`
+  return (
+    <svg
+      viewBox="0 0 14 14"
+      width="14"
+      height="14"
+      className={`shrink-0 ${spin ? 'animate-spin motion-reduce:animate-none' : ''}`}
+      role="img"
+      aria-label={label}
+    >
+      <title>{label}</title>
+      <circle cx="7" cy="7" r={r} fill="none" stroke="currentColor" strokeOpacity="0.18" strokeWidth="2" />
+      <circle
+        cx="7"
+        cy="7"
+        r={r}
+        fill="none"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeDasharray={`${fill * length} ${length}`}
+        transform="rotate(-90 7 7)"
+        className="[transition:stroke-dasharray_240ms_ease-out] motion-reduce:transition-none"
+      />
+    </svg>
+  )
+}
+
 /**
  * Indicador da aba em segundo plano: comando demorado que terminou (✓ verde ou ✕ vermelho), contador de
  * erros novos (vermelho) ou ponto de aviso (amarelo). As cores vêm do tema do terminal.
  */
 export function TabAlert({
   alert,
+  progress,
   colors,
 }: {
   alert?: TabAlertState
+  /** Progresso do programa da aba (OSC 9;4); aparece antes das outras marcas, mesmo com a aba aberta. */
+  progress?: Progress
   colors: { red?: string; yellow?: string; green?: string }
 }) {
+  if (progress) {
+    return (
+      <>
+        <ProgressRing progress={progress} colors={colors} />
+        <TabAlert alert={alert} colors={colors} />
+      </>
+    )
+  }
   if (!alert) return null
   const done = alert.finished
   const doneLabel = done

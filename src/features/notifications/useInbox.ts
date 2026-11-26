@@ -42,6 +42,8 @@ export interface Inbox {
   agent: (tabKey: number, title: string, cwd: string | null, state: AgentState) => void
   /** Comando terminou numa aba (só os que passaram do limite de segundos entram). */
   command: (tabKey: number, title: string, cmd: FinishedCommand) => void
+  /** Um programa da aba mandou um aviso (OSC 9 / OSC 777); `title` vazio usa o nome da aba. */
+  program: (tabKey: number, tabTitle: string, title: string, body: string) => void
   read: (id: string) => void
   readAll: () => void
   clear: () => void
@@ -133,6 +135,15 @@ export function useInbox(opts: { persist: boolean; commandSecs: number }): Inbox
           kind: ok ? 'command-ok' : 'command-failed',
           title: title.trim() || 'Terminal',
           detail: `${text} · ${formatSeconds(cmd.durationMs)}${ok ? '' : ` · código ${cmd.exitCode}`}`,
+          tabKey,
+        })
+      },
+      program(tabKey, tabTitle, title, body) {
+        const name = tabTitle.trim() || 'Terminal'
+        add({
+          kind: 'program',
+          title: title || name,
+          detail: title ? `${body}${body ? ' · ' : ''}${name}` : body,
           tabKey,
         })
       },

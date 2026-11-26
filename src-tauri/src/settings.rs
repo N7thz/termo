@@ -57,7 +57,18 @@ pub struct Settings {
     pub background: BackgroundSettings,
     /// Layouts salvos: conjuntos de abas, grupos e divisões, abertos com um clique.
     pub layouts: Vec<SavedLayout>,
+    /// Na tela dividida, o painel sem o foco fica mais apagado.
+    pub dim_inactive_pane: bool,
+    /// Contraste mínimo entre texto e fundo no terminal (`minimumContrastRatio` do xterm):
+    /// 1 = desligado; 3, 4.5 (WCAG AA) ou 7 (AAA) clareiam ou escurecem o texto até chegar lá.
+    pub minimum_contrast: f64,
+    /// Programas podem copiar para a área de transferência pelo OSC 52 (tmux, nvim, ssh). Ler nunca.
+    pub osc_clipboard: bool,
+    /// Programas podem mandar avisos pelo OSC 9 / OSC 777 (`printf '\e]9;pronto\a'`).
+    pub osc_notifications: bool,
 }
+
+pub const CONTRAST_LEVELS: &[f64] = &[1.0, 3.0, 4.5, 7.0];
 
 pub const MAX_LAYOUTS: usize = 20;
 pub const MAX_LAYOUT_TABS: usize = 16;
@@ -599,6 +610,10 @@ impl Default for Settings {
             tray: TraySettings::default(),
             background: BackgroundSettings::default(),
             layouts: Vec::new(),
+            dim_inactive_pane: true,
+            minimum_contrast: 1.0,
+            osc_clipboard: true,
+            osc_notifications: true,
         }
     }
 }
@@ -634,6 +649,14 @@ pub struct SettingsPatch {
     pub background: Option<BackgroundSettings>,
     /// Substitui a lista inteira de layouts (validada no apply).
     pub layouts: Option<Vec<SavedLayout>>,
+    pub dim_inactive_pane: Option<bool>,
+    pub minimum_contrast: Option<f64>,
+    pub osc_clipboard: Option<bool>,
+    pub osc_notifications: Option<bool>,
+}
+
+fn is_contrast_level(v: f64) -> bool {
+    CONTRAST_LEVELS.iter().any(|l| (l - v).abs() < 1e-9)
 }
 
 /// Ids de tema: letras minúsculas, números e hífen, até 40 caracteres.
@@ -732,6 +755,20 @@ impl Settings {
                 self.default_shell = v.trim().to_string();
             }
         }
+        if let Some(v) = patch.dim_inactive_pane {
+            self.dim_inactive_pane = v;
+        }
+        if let Some(v) = patch.minimum_contrast {
+            if is_contrast_level(v) {
+                self.minimum_contrast = v;
+            }
+        }
+        if let Some(v) = patch.osc_clipboard {
+            self.osc_clipboard = v;
+        }
+        if let Some(v) = patch.osc_notifications {
+            self.osc_notifications = v;
+        }
     }
 }
 
@@ -767,6 +804,9 @@ impl SettingsStore {
                 }
                 s.background = sanitize_background(std::mem::take(&mut s.background));
                 s.layouts = sanitize_layouts(std::mem::take(&mut s.layouts));
+                if !is_contrast_level(s.minimum_contrast) {
+                    s.minimum_contrast = 1.0;
+                }
                 s
             })
             .unwrap_or_default();
@@ -1108,6 +1148,20 @@ mod tests {
         assert_eq!(s.interface_size, "large");
         let old: Settings = serde_json::from_str(r#"{"theme":"dracula"}"#).unwrap();
         assert_eq!(old.interface_size, "medium");
+    }
+
+    #[test]
+    fn contrast_only_known_levels_and_osc_toggles() {
+        let mut s = Settings::default();
+        assert_eq!(s.minimum_contrast, 1.0);
+        assert!(s.dim_inactive_pane && s.osc_clipboard && s.osc_notifications);
+        s.apply(SettingsPatch { minimum_contrast: Some(4.5), osc_clipboard: Some(false), ..Default::default() });
+        assert_eq!(s.minimum_contrast, 4.5);
+        assert!(!s.osc_clipboard);
+        s.apply(SettingsPatch { minimum_contrast: Some(30.0), ..Default::default() });
+        assert_eq!(s.minimum_contrast, 4.5);
+        s.apply(SettingsPatch { minimum_contrast: Some(f64::NAN), ..Default::default() });
+        assert_eq!(s.minimum_contrast, 4.5);
     }
 
     #[test]

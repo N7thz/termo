@@ -47,6 +47,14 @@ export interface Settings {
   background: BackgroundSettings
   /** Layouts salvos (abas, grupos e divisões); limites em src-tauri/src/settings.rs. */
   layouts: SavedLayout[]
+  /** Na tela dividida, o painel sem o foco fica mais apagado. */
+  dimInactivePane: boolean
+  /** Contraste mínimo do texto do terminal (1 = desligado; 3, 4.5 ou 7). */
+  minimumContrast: number
+  /** Programas podem copiar para a área de transferência pelo OSC 52 (ler, nunca). */
+  oscClipboard: boolean
+  /** Programas podem mandar avisos pelo OSC 9 / OSC 777. */
+  oscNotifications: boolean
 }
 
 /** Um conjunto de abas e painéis guardado para abrir com um clique. */

@@ -39,7 +39,11 @@ export interface Section {
 }
 
 export const SECTIONS: Section[] = [
-  { id: 'appearance', label: 'Aparência', keys: ['theme', 'fontFamily', 'fontSize', 'interfaceSize', 'layout'] },
+  {
+    id: 'appearance',
+    label: 'Aparência',
+    keys: ['theme', 'fontFamily', 'fontSize', 'interfaceSize', 'layout', 'minimumContrast', 'dimInactivePane'],
+  },
   {
     id: 'terminal',
     label: 'Terminal e abertura',
@@ -53,6 +57,8 @@ export const SECTIONS: Section[] = [
       'startWithClaude',
       'restoreSession',
       'restoreOutput',
+      'oscClipboard',
+      'oscNotifications',
     ],
   },
   { id: 'background', label: 'Imagem de fundo', keys: ['background'] },

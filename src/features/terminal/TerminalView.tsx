@@ -40,6 +40,7 @@ import { terminalFontSize } from '../settings/interfaceSize'
 import { MODE_TONE, modeOf } from '../shell-profiles/modes'
 import { isAppShortcut } from '../tabs/shortcuts'
 import { ContextBar } from './ContextBar'
+import { attachProgramOsc, type Progress } from './programOsc'
 
 interface Props {
   kind: SessionKind
@@ -87,6 +88,10 @@ interface Props {
   onInput?: (data: string) => void
   /** Manda texto (os blocos selecionados) para uma aba do Claude Code, sem Enter. */
   onSendToClaude?: (text: string) => void
+  /** Progresso mandado pelo programa (OSC 9;4); `null` quando acaba ou o processo sai. */
+  onProgress?: (progress: Progress | null) => void
+  /** Aviso mandado pelo programa (OSC 9 / OSC 777), já com a opção conferida e limitado no tempo. */
+  onProgramNotice?: (title: string, body: string) => void
 }
 
 const highlightColors = (t: ITheme) => ({
@@ -140,6 +145,8 @@ export function TerminalView({
   launch,
   onInput,
   onSendToClaude,
+  onProgress,
+  onProgramNotice,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
@@ -225,8 +232,15 @@ export function TerminalView({
     onCommandEnd,
     onInput,
     onSendToClaude,
+    onProgress,
+    onProgramNotice,
   })
+  // Opções lidas pelos handlers do xterm, que vivem enquanto o terminal vive.
+  const settingsRef = useRef(settings)
+  settingsRef.current = settings
   cbRef.current = {
+    onProgress,
+    onProgramNotice,
     onTitle,
     onKind,
     onShell,
@@ -264,8 +278,19 @@ export function TerminalView({
       allowTransparency: isTranslucent(terminalTheme.background),
       // Régua da direita: marcas de erro/aviso e resultados da busca.
       overviewRuler: { width: 8 },
+      minimumContrastRatio: settings.minimumContrast,
     })
     termRef.current = term
+    // Progresso, avisos e copiar mandados pelos programas (OSC 9;4, 9, 777 e 52).
+    const programOsc = attachProgramOsc(term, {
+      onProgress: (p) => cbRef.current.onProgress?.(p),
+      onNotice: (title, body) => cbRef.current.onProgramNotice?.(title, body),
+      onCopy: (text) => void ipc.writeClipboard(text).catch(() => undefined),
+      allow: () => ({
+        clipboard: settingsRef.current.oscClipboard,
+        notifications: settingsRef.current.oscNotifications,
+      }),
+    })
 
     const fit = new FitAddon()
     fitRef.current = fit
@@ -721,6 +746,7 @@ export function TerminalView({
               exited = true
               setDead(true)
               hide()
+              cbRef.current.onProgress?.(null)
               // Sessão aberta pelo coord: a aba some junto com o claude (ou com o fechar-sessao.ps1).
               if (launch?.closeOnExit) return cbRef.current.onClose()
               const code = ev.code == null ? '' : ` (código ${ev.code})`
@@ -766,6 +792,8 @@ export function TerminalView({
       shell.dispose()
       dropDisposed = true
       unlistenDrop?.()
+      programOsc.dispose()
+      cbRef.current.onProgress?.(null)
       term.dispose()
     }
   }, [])
@@ -789,6 +817,10 @@ export function TerminalView({
     term.options.allowTransparency = isTranslucent(terminalTheme.background)
     term.options.theme = withRuler(terminalTheme)
   }, [terminalTheme])
+
+  useEffect(() => {
+    if (termRef.current) termRef.current.options.minimumContrastRatio = settings.minimumContrast
+  }, [settings.minimumContrast])
 
   // Foco vindo de dentro do xterm (clique na metade da tela dividida): avisa quem controla a aba ativa.
   const onFocusRef = useRef(onFocus)
@@ -829,6 +861,13 @@ export function TerminalView({
         style={{ background: MODE_TONE[modeOf(kind, shellProfile)] }}
       />
       <div className="min-h-0 w-full flex-1" ref={hostRef} />
+      {/* Tela dividida: o painel sem o foco fica apagado; o clique passa e o foca. */}
+      <div
+        aria-hidden
+        className={`pointer-events-none absolute inset-0 bg-bg [transition:opacity_180ms_ease-out] motion-reduce:transition-none ${
+          settings.dimInactivePane && visible && !active ? 'opacity-40' : 'opacity-0'
+        }`}
+      />
       <PathSuggestions
         items={suggestions}
         position={position}

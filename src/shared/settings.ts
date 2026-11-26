@@ -57,7 +57,19 @@ export const DEFAULT_SETTINGS: Settings = {
     shuffle: false,
   },
   layouts: [],
+  dimInactivePane: true,
+  minimumContrast: 1,
+  oscClipboard: true,
+  oscNotifications: true,
 }
+
+/** Mesmos níveis do Rust (CONTRAST_LEVELS em src-tauri/src/settings.rs). */
+export const CONTRAST_LEVELS = [
+  { value: 1, label: 'Desligado' },
+  { value: 3, label: 'Leve' },
+  { value: 4.5, label: 'Forte (WCAG AA)' },
+  { value: 7, label: 'Máximo (WCAG AAA)' },
+] as const
 
 /** Mesmos limites do Rust (MAX_PROFILES / MAX_PINNED em src-tauri/src/settings.rs). */
 export const MAX_PROFILES = 9

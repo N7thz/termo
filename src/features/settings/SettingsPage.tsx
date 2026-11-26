@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@ui-sdk/react/tooltip'
 import { ArrowLeft, Check, ChevronRight, Settings2 } from 'lucide-react'
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { actionButton, tooltip } from '../../lib/ui'
+import { CONTRAST_LEVELS } from '../../shared/settings'
 import type { Settings } from '../../shared/types'
 import { BackgroundSettingsSection } from '../background/BackgroundSettingsSection'
 import { ConfigTransferSection } from '../config-io/ConfigTransferSection'
@@ -323,6 +324,42 @@ export function SettingsPage({ settings, onChange, onClose, onOpenThemes, onOpen
                 description="Ctrl+clique faz o contrário: abre no navegador padrão (ou no painel, se desligado)."
                 checked={settings.linkTarget === 'panel'}
                 onChange={(on) => save({ linkTarget: on ? 'panel' : 'browser' })}
+              />
+              <Toggle
+                label="Escurecer o painel sem foco"
+                description="Na tela dividida, a metade que não recebe o teclado fica mais apagada."
+                checked={settings.dimInactivePane}
+                onChange={(dimInactivePane) => save({ dimInactivePane })}
+              />
+              <Field className={COLUMN}>
+                <FieldLabel>Contraste mínimo do texto</FieldLabel>
+                <select
+                  className={INPUT}
+                  value={String(settings.minimumContrast)}
+                  onChange={(e) => save({ minimumContrast: Number(e.currentTarget.value) })}
+                >
+                  {CONTRAST_LEVELS.map((l) => (
+                    <option key={l.value} value={String(l.value)}>
+                      {l.label}
+                    </option>
+                  ))}
+                </select>
+                <FieldDescription className={DESCRIPTION}>
+                  Clareia ou escurece o texto que ficaria apagado contra o fundo (cores do tema ou do programa, imagem
+                  de fundo).
+                </FieldDescription>
+              </Field>
+              <Toggle
+                label="Programas podem copiar para a área de transferência"
+                description="Pelo OSC 52, como no tmux, no nvim e em sessões SSH. Ler a área de transferência nunca é permitido."
+                checked={settings.oscClipboard}
+                onChange={(oscClipboard) => save({ oscClipboard })}
+              />
+              <Toggle
+                label="Programas podem mandar avisos"
+                description="Pelo OSC 9 e OSC 777 (ex.: printf '\e]9;build pronto\a'). Entram na central de avisos e, com a janela sem foco, viram aviso do Windows."
+                checked={settings.oscNotifications}
+                onChange={(oscNotifications) => save({ oscNotifications })}
               />
             </Group>
 

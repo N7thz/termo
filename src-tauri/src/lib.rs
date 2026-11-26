@@ -415,6 +415,24 @@ async fn config_import_read(app: AppHandle) -> Result<Option<config_io::ImportFi
         .map_err(|e| e.to_string())?
 }
 
+/// Progresso no ícone da barra de tarefas (OSC 9;4 da aba ativa): `none`, `normal`, `error`,
+/// `indeterminate` ou `paused`, com 0 a 100.
+#[tauri::command]
+fn window_progress(window: tauri::WebviewWindow, state: String, value: u64) -> Result<(), String> {
+    use tauri::window::{ProgressBarState, ProgressBarStatus};
+    let status = match state.as_str() {
+        "none" => ProgressBarStatus::None,
+        "normal" => ProgressBarStatus::Normal,
+        "error" => ProgressBarStatus::Error,
+        "indeterminate" => ProgressBarStatus::Indeterminate,
+        "paused" => ProgressBarStatus::Paused,
+        other => return Err(format!("estado de progresso desconhecido: {other}")),
+    };
+    window
+        .set_progress_bar(ProgressBarState { status: Some(status), progress: Some(value.min(100)) })
+        .map_err(|e| e.to_string())
+}
+
 /// Aviso do Windows (Claude esperando, comando longo). Respeita a configuração.
 #[tauri::command]
 fn notify(app: AppHandle, window: tauri::WebviewWindow, settings: State<SettingsStore>, title: String, body: String) -> Result<(), String> {
@@ -807,6 +825,7 @@ pub fn run() {
             review_commit_message,
             new_window,
             notify,
+            window_progress,
             update_check,
             update_install,
         ])

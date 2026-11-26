@@ -12,6 +12,7 @@ import type { GitBranchInfo } from '../features/git-branch/types'
 import type { NodeInfo, NodeVersions } from '../features/node-version/types'
 import type { AgentDef } from '../features/roles/RolesContext'
 import type { SessionSnapshot } from '../features/tabs/tabs'
+import type { ProgressState } from '../features/terminal/programOsc'
 import type { UpdateInfo } from '../features/updater/types'
 import type { ClaudeUsage } from '../features/usage-battery/usage'
 import type { Worktree, WorktreeList } from '../features/worktree/worktree'
@@ -144,6 +145,9 @@ export const ipc = {
 
   /** Aviso do Windows e piscar na barra de tarefas (respeita `notifications.enabled` no Rust). */
   notify: (title: string, body: string) => invoke<void>('notify', { title, body }),
+  /** Progresso no ícone da barra de tarefas desta janela (`none` tira). */
+  windowProgress: (state: 'none' | ProgressState, value: number) =>
+    invoke<void>('window_progress', { state, value: Math.round(value) }),
   /** Procura versão nova nas releases do GitHub; `null` = já está na mais recente. */
   updateCheck: () => invoke<UpdateInfo | null>('update_check'),
   /** Baixa, instala e reinicia o Termo. */

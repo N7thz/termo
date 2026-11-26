@@ -1,5 +1,15 @@
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@ui-sdk/react/popover'
-import { Bell, CheckCheck, CircleCheck, CircleX, ListChecks, ShieldQuestion, Trash2, TriangleAlert } from 'lucide-react'
+import {
+  Bell,
+  BellRing,
+  CheckCheck,
+  CircleCheck,
+  CircleX,
+  ListChecks,
+  ShieldQuestion,
+  Trash2,
+  TriangleAlert,
+} from 'lucide-react'
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react'
 import { actionButton } from '../../lib/ui'
 import { ClaudeIcon } from '../tabs/ClaudeIcon'
@@ -43,6 +53,8 @@ function KindIcon({ kind }: { kind: InboxKind }): ReactNode {
       return <ListChecks {...props} className="flex-none text-accent" />
     case 'session-failed':
       return <TriangleAlert {...props} className="flex-none text-claude" />
+    case 'program':
+      return <BellRing {...props} className="flex-none text-accent" />
   }
 }
 

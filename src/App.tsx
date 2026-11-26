@@ -58,6 +58,7 @@ import {
   visibleGroups,
   visibleTabs,
 } from './features/tabs/tabs'
+import { type Progress, taskbarProgress } from './features/terminal/programOsc'
 import { TerminalView } from './features/terminal/TerminalView'
 import { ThemesPage } from './features/theme/ThemesPage'
 import { useTheme } from './features/theme/useTheme'
@@ -135,6 +136,8 @@ export function App() {
   const [showSessions, setShowSessions] = useState(false)
   // Erros/avisos novos em abas em segundo plano; some ao abrir a aba.
   const [alerts, setAlerts] = useState<ReadonlyMap<number, TabAlertState>>(new Map())
+  /** Progresso mandado pelo programa de cada aba (OSC 9;4). */
+  const [progress, setProgress] = useState<ReadonlyMap<number, Progress>>(new Map())
   const activeRef = useRef(state.active)
   activeRef.current = state.active
 
@@ -686,6 +689,14 @@ export function App() {
   // Tamanho da interface (zoom do webview): vale com a tela de configurações aberta ou não.
   useInterfaceZoom(settings.interfaceSize)
 
+  // Barra de tarefas: o progresso da aba ativa; sem ele, o de outra aba desta janela (um erro primeiro).
+  const taskbar = taskbarProgress(progress, state.active)
+  const taskbarKey = taskbar ? `${taskbar.state}:${taskbar.value}` : 'none'
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a chave resume o estado e o valor
+  useEffect(() => {
+    void ipc.windowProgress(taskbar?.state ?? 'none', taskbar?.value ?? 0).catch(() => undefined)
+  }, [taskbarKey])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const action = actionFor(e)
@@ -830,7 +841,9 @@ export function App() {
                   onDeleteProfile={deleteProfile}
                   onUnpin={(dir) => editProfile({ pinned: profile.pinned.filter((d) => d !== dir) })}
                   closing={closing}
-                  renderAlert={(key) => <TabAlert alert={alerts.get(key)} colors={theme.terminal} />}
+                  renderAlert={(key) => (
+                    <TabAlert alert={alerts.get(key)} progress={progress.get(key)} colors={theme.terminal} />
+                  )}
                   groups={visibleGroups(state)}
                   onGroupToggle={(id) => dispatch({ type: 'group-toggle', id })}
                   onGroupRename={(id, name) => dispatch({ type: 'group-rename', id, name })}
@@ -920,7 +933,11 @@ export function App() {
                             role="img"
                           />
                         )}
-                        <TabAlert alert={alerts.get(tab.key)} colors={theme.terminal} />
+                        <TabAlert
+                          alert={alerts.get(tab.key)}
+                          progress={progress.get(tab.key)}
+                          colors={theme.terminal}
+                        />
                       </TabsTab>
                       {/* Fora do tab (botão dentro de botão é inválido) e fora da ordem de Tab: pelo teclado é Ctrl+Shift+W. */}
                       <Button
@@ -1075,6 +1092,22 @@ export function App() {
                             inbox.agent(tab.key, tab.label ?? tab.title, workspace.info(tab.key).cwd ?? null, s)
                           }}
                           onSendToClaude={(text) => sendToClaude(text, false)}
+                          onProgress={(p) =>
+                            setProgress((m) => {
+                              if (!p && !m.has(tab.key)) return m
+                              const cur = m.get(tab.key)
+                              if (p && cur && cur.state === p.state && cur.value === p.value) return m
+                              const next = new Map(m)
+                              if (p) next.set(tab.key, p)
+                              else next.delete(tab.key)
+                              return next
+                            })
+                          }
+                          onProgramNotice={(title, body) => {
+                            const name = tab.label ?? tab.title
+                            notifier.program(title || name, body)
+                            inbox.program(tab.key, name, title, body)
+                          }}
                           onCommandEnd={(cmd) => {
                             notifier.command(cmd)
                             inbox.command(tab.key, tab.label ?? tab.title, cmd)

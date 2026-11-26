@@ -26,5 +26,9 @@ export function useNotifier(settings: NotificationSettings) {
     command(cmd: FinishedCommand) {
       send(commandNotice(cmd, settingsRef.current, document.hasFocus()))
     },
+    /** Aviso de um programa (OSC 9 / OSC 777): só com a janela sem foco, como os outros. */
+    program(title: string, body: string) {
+      if (settingsRef.current.enabled && !document.hasFocus()) send({ title, body })
+    },
   }).current
 }

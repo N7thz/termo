@@ -11,6 +11,8 @@ export type InboxKind =
   | 'command-failed'
   | 'session-done'
   | 'session-failed'
+  /** Aviso mandado por um programa no terminal (OSC 9 / OSC 777). */
+  | 'program'
 
 export interface InboxItem {
   id: string
