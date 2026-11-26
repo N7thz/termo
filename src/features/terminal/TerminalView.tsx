@@ -40,6 +40,7 @@ import { terminalFontSize } from '../settings/interfaceSize'
 import { MODE_TONE, modeOf } from '../shell-profiles/modes'
 import { isAppShortcut } from '../tabs/shortcuts'
 import { ContextBar } from './ContextBar'
+import { CopyModeOverlay } from './CopyModeOverlay'
 import { attachProgramOsc, type Progress } from './programOsc'
 import { type CellGeometry, QuickSelectOverlay } from './QuickSelectOverlay'
 import { findTargets, readScreen, type Target } from './quickSelect'
@@ -211,6 +212,9 @@ export function TerminalView({
   const [quick, setQuick] = useState<{ targets: Target[]; geometry: CellGeometry } | null>(null)
   const [quickNote, setQuickNote] = useState<string | null>(null)
   const openQuickRef = useRef<() => void>(() => {})
+  /** Modo de cópia (Ctrl+Shift+X): a grade de células enquanto está aberto. */
+  const [copyMode, setCopyMode] = useState<CellGeometry | null>(null)
+  const openCopyModeRef = useRef<() => void>(() => {})
   const insertTextRef = useRef<(text: string) => void>(() => {})
   // Arquivos que entraram na linha (imagem colada, arquivos arrastados): faixa de miniaturas.
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -439,30 +443,39 @@ export function TerminalView({
     insertTextRef.current = (text) => {
       if (!exited) insertText(text)
     }
-    openQuickRef.current = () => {
+    /** Onde fica a grade de células do xterm dentro do painel (para as camadas por cima dela). */
+    const cellGeometry = (): CellGeometry | null => {
       const screen = term.element?.querySelector<HTMLElement>('.xterm-screen')
-      if (!screen || term.rows === 0 || term.cols === 0) return
+      if (!screen || term.rows === 0 || term.cols === 0) return null
+      const s = screen.getBoundingClientRect()
+      const w = wrap.getBoundingClientRect()
+      return { left: s.left - w.left, top: s.top - w.top, cellW: s.width / term.cols, cellH: s.height / term.rows }
+    }
+    openQuickRef.current = () => {
+      const geometry = cellGeometry()
+      if (!geometry) return
       const targets = findTargets(readScreen(term))
       if (targets.length === 0) {
         setQuickNote('Nada para selecionar na tela')
         return
       }
-      const s = screen.getBoundingClientRect()
-      const w = wrap.getBoundingClientRect()
       setQuickNote(null)
-      setQuick({
-        targets,
-        geometry: {
-          left: s.left - w.left,
-          top: s.top - w.top,
-          cellW: s.width / term.cols,
-          cellH: s.height / term.rows,
-        },
-      })
+      setCopyMode(null)
+      setQuick({ targets, geometry })
+    }
+    openCopyModeRef.current = () => {
+      const geometry = cellGeometry()
+      if (!geometry) return
+      setQuick(null)
+      setQuickNote(null)
+      setCopyMode(geometry)
     }
     // A tela mudou de lugar: os rótulos ficariam sobre o texto errado.
     term.onScroll(() => setQuick(null))
-    term.onResize(() => setQuick(null))
+    term.onResize(() => {
+      setQuick(null)
+      setCopyMode(null)
+    })
     insertPathsRef.current = (paths) => {
       if (exited || paths.length === 0) return
       const target: PathTarget = kindRef.current === 'claude' ? 'claude' : shellFamilyRef.current
@@ -536,6 +549,7 @@ export function TerminalView({
       },
       find: () => openSearchRef.current(),
       quickSelect: () => openQuickRef.current(),
+      copyMode: () => openCopyModeRef.current(),
       command: (text, run) => putCommandRef.current(text, run),
       pasteText: (text) => {
         term.focus()
@@ -864,16 +878,18 @@ export function TerminalView({
     if (termRef.current) termRef.current.options.minimumContrastRatio = settings.minimumContrast
   }, [settings.minimumContrast])
 
-  // Ctrl+Shift+Espaço abre a seleção rápida, do xterm ou do editor de entrada (captura antes deles).
+  // Ctrl+Shift+Espaço abre a seleção rápida e Ctrl+Shift+X o modo de cópia, do xterm ou do editor de
+  // entrada (captura antes deles).
   useEffect(() => {
     const wrap = wrapRef.current
     if (!wrap) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && e.code === 'Space') {
-        e.preventDefault()
-        e.stopPropagation()
-        openQuickRef.current()
-      }
+      if (!e.ctrlKey || !e.shiftKey || e.altKey || e.metaKey) return
+      const open = e.code === 'Space' ? openQuickRef : e.code === 'KeyX' ? openCopyModeRef : null
+      if (!open) return
+      e.preventDefault()
+      e.stopPropagation()
+      open.current()
     }
     wrap.addEventListener('keydown', onKey, true)
     return () => wrap.removeEventListener('keydown', onKey, true)
@@ -933,6 +949,32 @@ export function TerminalView({
         style={{ background: MODE_TONE[modeOf(kind, shellProfile)] }}
       />
       <div className="min-h-0 w-full flex-1" ref={hostRef} />
+      {copyMode && termRef.current && (
+        <CopyModeOverlay
+          term={termRef.current}
+          geometry={copyMode}
+          onDone={(text) => {
+            setCopyMode(null)
+            if (text) {
+              void ipc.writeClipboard(text).then(
+                () => {
+                  const lines = text.split('\n').length
+                  setQuickNote(
+                    lines > 1
+                      ? `Copiadas ${lines} linhas`
+                      : `Copiado: ${text.length > 60 ? `${text.slice(0, 59)}…` : text}`,
+                  )
+                },
+                () => setQuickNote('Não deu para copiar'),
+              )
+            }
+            requestAnimationFrame(() => {
+              if (showEditorRef.current) inputRef.current?.focus()
+              else termRef.current?.focus()
+            })
+          }}
+        />
+      )}
       {quick && (
         <QuickSelectOverlay
           targets={quick.targets}

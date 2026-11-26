@@ -58,6 +58,9 @@ export function TerminalMenu({ children, actions, onAction }: Props) {
         <MenuItem className={menuItem} value="quick-select" shortcut="mod+shift+space" disabled={!ready}>
           Seleção rápida…
         </MenuItem>
+        <MenuItem className={menuItem} value="copy-mode" shortcut="mod+shift+x" disabled={!ready}>
+          Modo de cópia…
+        </MenuItem>
         <MenuSeparator className={menuSeparator} />
         <MenuItem className={menuItem} value="new-shell" shortcut="mod+shift+t">
           Nova aba

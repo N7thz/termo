@@ -183,6 +183,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
     label: 'Seleção rápida: copiar URL, caminho, hash ou número da tela',
     keys: ['mod+shift+space'],
   },
+  { group: 'Terminal', label: 'Modo de cópia: selecionar pelo teclado (hjkl, w/b, v, y)', keys: ['mod+shift+x'] },
   { group: 'Terminal', label: 'Buscar no histórico de comandos', keys: ['ctrl+r'] },
   { group: 'Terminal', label: 'Executar a sugestão de pasta 1 a 9', keys: ['alt+1'] },
   { group: 'Terminal', label: 'Ir para a lista de sugestões', keys: ['alt+arrowdown'] },

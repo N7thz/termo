@@ -12,6 +12,8 @@ export interface TerminalActions {
   find: () => void
   /** Rótulos sobre URLs, caminhos, hashes e números da tela para copiar pelo teclado (Ctrl+Shift+Espaço). */
   quickSelect?: () => void
+  /** Modo de cópia pelo teclado: cursor próprio pela saída e pelo histórico (Ctrl+Shift+X). */
+  copyMode?: () => void
   /** Cola o texto como uma colagem (bracketed paste) e manda Enter: assim o Claude Code recebe uma mensagem só. */
   sendText?: (text: string) => void
   /** Cola o texto sem mandar Enter (contexto para o Claude Code: a pessoa completa com a pergunta). */
@@ -58,6 +60,7 @@ export type TerminalMenuAction =
   | 'clear'
   | 'find'
   | 'quick-select'
+  | 'copy-mode'
   | 'new-shell'
   | 'new-claude'
   | 'themes'

@@ -661,7 +661,10 @@ export function App() {
       case 'find':
         return term?.find()
       case 'quick-select':
-        return term?.quickSelect?.()
+        // O menu devolve o foco ao fechar; o rAF espera isso para a camada ficar com o teclado.
+        return void requestAnimationFrame(() => term?.quickSelect?.())
+      case 'copy-mode':
+        return void requestAnimationFrame(() => term?.copyMode?.())
       case 'new-shell':
         return openTab('shell')
       case 'new-claude':
@@ -1315,6 +1318,15 @@ export function App() {
                 })),
                 { id: 'themes', label: 'Temas', keys: 'mod+shift+,', run: openThemes },
                 { id: 'settings', label: 'Configurações', keys: 'mod+,', run: () => setShowSettings(true) },
+                {
+                  id: 'copy-mode',
+                  label: 'Modo de cópia: selecionar a saída pelo teclado',
+                  keys: 'mod+shift+x',
+                  run: () =>
+                    requestAnimationFrame(() =>
+                      state.active != null ? terminalActions.current.get(state.active)?.copyMode?.() : undefined,
+                    ),
+                },
                 {
                   id: 'quick-select',
                   label: 'Seleção rápida: copiar URL, caminho, hash ou número da tela',
