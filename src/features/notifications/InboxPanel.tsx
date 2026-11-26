@@ -9,6 +9,7 @@ import {
   ShieldQuestion,
   Trash2,
   TriangleAlert,
+  Zap,
 } from 'lucide-react'
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react'
 import { actionButton } from '../../lib/ui'
@@ -55,6 +56,8 @@ function KindIcon({ kind }: { kind: InboxKind }): ReactNode {
       return <TriangleAlert {...props} className="flex-none text-claude" />
     case 'program':
       return <BellRing {...props} className="flex-none text-accent" />
+    case 'trigger':
+      return <Zap {...props} style={{ color: YELLOW }} />
   }
 }
 

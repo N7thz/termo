@@ -188,6 +188,10 @@ export interface HighlightRule {
   pattern: string
   /** Cor `#rrggbb`. */
   color: string
+  /** Gatilho: a linha que casa vira aviso (central e, com a janela sem foco, Windows). */
+  notify?: boolean
+  /** Gatilho: a linha que casa marca a aba escondida até ela ser aberta. */
+  mark?: boolean
 }
 
 export interface HighlightSettings {

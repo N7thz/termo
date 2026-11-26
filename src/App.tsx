@@ -1105,6 +1105,24 @@ export function App() {
                               return next
                             })
                           }
+                          onTrigger={(hit) => {
+                            const name = tab.label ?? tab.title
+                            if (hit.notify) {
+                              notifier.program(name, hit.line)
+                              inbox.trigger(tab.key, name, hit.pattern, hit.line)
+                            }
+                            const seen =
+                              tab.key === activeRef.current || (paneStyle(tab.key) != null && !hiddenByZoom(tab.key))
+                            if (hit.mark && !seen)
+                              setAlerts((prev) => {
+                                const next = new Map(prev)
+                                next.set(tab.key, {
+                                  ...(prev.get(tab.key) ?? { errors: 0, warnings: 0 }),
+                                  trigger: hit.line,
+                                })
+                                return next
+                              })
+                          }}
                           onProgramNotice={(title, body) => {
                             const name = tab.label ?? tab.title
                             notifier.program(title || name, body)

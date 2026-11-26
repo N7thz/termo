@@ -1,7 +1,7 @@
 import { Button } from '@ui-sdk/react/button'
 import { Field, FieldDescription, FieldLabel } from '@ui-sdk/react/field'
 import { Switch, SwitchThumb } from '@ui-sdk/react/switch'
-import { X } from 'lucide-react'
+import { Bell, Flag, X } from 'lucide-react'
 import { useState } from 'react'
 import { MAX_PATTERN, MAX_RULES } from '../../shared/settings'
 import type { HighlightRule, HighlightSettings } from '../../shared/types'
@@ -28,6 +28,9 @@ const TOGGLES: { key: keyof Omit<HighlightSettings, 'rules'>; label: string }[] 
 ]
 
 const ROW = 'flex items-center justify-between gap-2.5 text-[13px] tracking-[0.005em]'
+// Botão de liga/desliga do gatilho: apagado desligado, no tom de destaque ligado.
+const TRIGGER =
+  'grid size-6 flex-none place-items-center rounded-md text-muted opacity-60 hover:bg-surface-hover hover:opacity-100 aria-pressed:bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] aria-pressed:text-accent aria-pressed:opacity-100'
 
 /** Seção "Destaques" do painel de configurações: chaves de cada tipo e regras próprias (regex + cor). */
 export function HighlightSettingsSection({ value, onChange, switchClass, thumbClass, inputClass }: Props) {
@@ -94,6 +97,24 @@ export function HighlightSettingsSection({ value, onChange, switchClass, thumbCl
                 onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
               />
               <Button
+                className={TRIGGER}
+                aria-pressed={rule.notify === true}
+                aria-label={`Avisar quando a regra ${i + 1} aparecer`}
+                title="Avisar: a linha entra na central de avisos (e no Windows, com a janela sem foco)"
+                onClick={() => saveRules(drafts.map((r, j) => (j === i ? { ...r, notify: !r.notify } : r)))}
+              >
+                <Bell size={13} />
+              </Button>
+              <Button
+                className={TRIGGER}
+                aria-pressed={rule.mark === true}
+                aria-label={`Marcar a aba quando a regra ${i + 1} aparecer`}
+                title="Marcar a aba: numa aba escondida, fica uma bandeira até você abri-la"
+                onClick={() => saveRules(drafts.map((r, j) => (j === i ? { ...r, mark: !r.mark } : r)))}
+              >
+                <Flag size={13} />
+              </Button>
+              <Button
                 className="grid size-6 flex-none place-items-center rounded-md text-muted hover:bg-surface-hover hover:text-text"
                 aria-label={`Remover regra ${i + 1}`}
                 onClick={() => saveRules(drafts.filter((_, j) => j !== i))}
@@ -104,7 +125,8 @@ export function HighlightSettingsSection({ value, onChange, switchClass, thumbCl
           )
         })}
         <FieldDescription className="m-0 text-[11px] text-muted">
-          Valem para a saída nova. Ctrl+Shift+F busca no que já está na tela.
+          Valem para a saída nova. Com o sino, a linha vira aviso; com a bandeira, marca a aba escondida (gatilhos, no
+          máximo um por regra a cada 5 s). Ctrl+Shift+F busca no que já está na tela.
         </FieldDescription>
       </div>
     </section>

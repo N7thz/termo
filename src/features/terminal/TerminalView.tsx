@@ -27,7 +27,7 @@ import { ImagePreview, type ImagePreviewAnchor } from '../blocks/ImagePreview'
 import { openLink } from '../browser/links'
 import { ClaudeBar } from '../claude-bar/ClaudeBar'
 import type { TerminalActions } from '../context-menu/types'
-import type { Severity } from '../highlights/matchers'
+import type { Severity, TriggerHit } from '../highlights/matchers'
 import { SearchBar } from '../highlights/SearchBar'
 import { TerminalHighlights } from '../highlights/terminalHighlights'
 import { HistorySearch } from '../history-search/HistorySearch'
@@ -94,6 +94,8 @@ interface Props {
   onProgress?: (progress: Progress | null) => void
   /** Aviso mandado pelo programa (OSC 9 / OSC 777), já com a opção conferida e limitado no tempo. */
   onProgramNotice?: (title: string, body: string) => void
+  /** Uma regra própria com avisar/marcar casou com uma linha nova da saída (gatilho). */
+  onTrigger?: (hit: TriggerHit) => void
 }
 
 const highlightColors = (t: ITheme) => ({
@@ -149,6 +151,7 @@ export function TerminalView({
   onSendToClaude,
   onProgress,
   onProgramNotice,
+  onTrigger,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
@@ -241,6 +244,7 @@ export function TerminalView({
     onSendToClaude,
     onProgress,
     onProgramNotice,
+    onTrigger,
   })
   // Opções lidas pelos handlers do xterm, que vivem enquanto o terminal vive.
   const settingsRef = useRef(settings)
@@ -248,6 +252,7 @@ export function TerminalView({
   cbRef.current = {
     onProgress,
     onProgramNotice,
+    onTrigger,
     onTitle,
     onKind,
     onShell,
@@ -388,6 +393,8 @@ export function TerminalView({
       colors: highlightColors(terminalTheme),
       cwd: () => shell.cwd ?? cwd ?? null,
       onSeverity: (s) => cbRef.current.onSeverity?.(s),
+      // Só a saída do processo desta aba: o texto restaurado da última vez não dispara gatilho.
+      onTrigger: (hit) => sessionId != null && cbRef.current.onTrigger?.(hit),
     })
     highlightsRef.current = highlights
     openSearchRef.current = () => setSearch(searchAddon)

@@ -553,15 +553,22 @@ impl Default for HighlightSettings {
             rules: vec![HighlightRule {
                 pattern: r"\b(TODO|FIXME|HACK)\b".into(),
                 color: "#e0af68".into(),
+                ..Default::default()
             }],
         }
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
 pub struct HighlightRule {
     pub pattern: String,
     pub color: String,
+    /// Gatilho: a linha que casa vira aviso (central e, com a janela sem foco, Windows).
+    #[serde(default)]
+    pub notify: bool,
+    /// Gatilho: a linha que casa marca a aba escondida até ela ser aberta.
+    #[serde(default)]
+    pub mark: bool,
 }
 
 impl HighlightSettings {
@@ -573,6 +580,8 @@ impl HighlightSettings {
             .map(|r| HighlightRule {
                 pattern: r.pattern.trim().to_string(),
                 color: r.color.trim().to_ascii_lowercase(),
+                notify: r.notify,
+                mark: r.mark,
             })
             .filter(|r| {
                 !r.pattern.is_empty() && r.pattern.len() <= MAX_PATTERN && is_hex_color(&r.color)
@@ -1005,23 +1014,28 @@ mod tests {
             HighlightRule {
                 pattern: " ok ".into(),
                 color: "#AABBCC".into(),
+                ..Default::default()
             },
             HighlightRule {
                 pattern: "".into(),
                 color: "#aabbcc".into(),
+                ..Default::default()
             },
             HighlightRule {
                 pattern: "x".into(),
                 color: "red".into(),
+                ..Default::default()
             },
             HighlightRule {
                 pattern: "y".repeat(MAX_PATTERN + 1),
                 color: "#aabbcc".into(),
+                ..Default::default()
             },
         ];
         rules.extend((0..30).map(|i| HighlightRule {
             pattern: format!("r{i}"),
             color: "#000000".into(),
+            ..Default::default()
         }));
         s.apply(SettingsPatch {
             highlights: Some(HighlightSettings {
@@ -1037,9 +1051,23 @@ mod tests {
             s.highlights.rules[0],
             HighlightRule {
                 pattern: "ok".into(),
-                color: "#aabbcc".into()
+                color: "#aabbcc".into(),
+                ..Default::default()
             }
         );
+    }
+
+    #[test]
+    fn rule_triggers_survive_and_old_rules_have_none() {
+        let mut s = Settings::default();
+        let rule = HighlightRule { pattern: "ready".into(), color: "#00ff00".into(), notify: true, mark: true };
+        s.apply(SettingsPatch {
+            highlights: Some(HighlightSettings { rules: vec![rule.clone()], ..Default::default() }),
+            ..Default::default()
+        });
+        assert_eq!(s.highlights.rules, vec![rule]);
+        let old: HighlightRule = serde_json::from_str(r##"{"pattern":"x","color":"#000000"}"##).unwrap();
+        assert!(!old.notify && !old.mark);
     }
 
     #[test]

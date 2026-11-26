@@ -10,9 +10,12 @@ import {
   findCustom,
   findLinks,
   findTokens,
+  findTriggers,
   type Severity,
   type TextMatch,
   type TokenKind,
+  type TriggerHit,
+  triggerGate,
 } from './matchers'
 
 export interface HighlightColors {
@@ -27,6 +30,8 @@ interface Options {
   cwd: () => string | null
   /** Linha de erro/aviso nova (para o contador da aba). */
   onSeverity: (severity: Severity) => void
+  /** Uma regra com avisar/marcar casou com uma linha nova (já limitado a um por regra a cada 5 s). */
+  onTrigger?: (hit: TriggerHit) => void
 }
 
 /** Quantas linhas para trás olhar depois de uma saída grande (o resto fica sem marca). */
@@ -60,6 +65,7 @@ export class TerminalHighlights implements IDisposable {
   private timer: ReturnType<typeof setTimeout> | undefined
   private decorations: IDecoration[] = []
   private disposables: IDisposable[] = []
+  private gate = triggerGate()
 
   constructor(
     private term: Terminal,
@@ -164,6 +170,9 @@ export class TerminalHighlights implements IDisposable {
       }
       if (anyToken) {
         for (const t of findTokens(text, tokens)) this.paint(offset, t.start, t.end - t.start, this.tokenColor(t.kind))
+      }
+      if (this.opts.onTrigger) {
+        for (const t of findTriggers(text, this.rules)) if (this.gate(t.pattern)) this.opts.onTrigger(t)
       }
       for (const hit of findCustom(text, this.rules)) {
         const marker = this.term.registerMarker(offset)

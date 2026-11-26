@@ -102,11 +102,25 @@ export function classifyLine(line: string): Severity | null {
 export interface CustomRule {
   pattern: string
   color: string
+  notify?: boolean
+  mark?: boolean
 }
 
 export interface CompiledRule {
   re: RegExp
   color: string
+  /** O padrão como foi escrito (aparece no aviso do gatilho). */
+  pattern: string
+  notify: boolean
+  mark: boolean
+}
+
+/** Regra que disparou numa linha (gatilho): o que fazer e a linha inteira. */
+export interface TriggerHit {
+  pattern: string
+  notify: boolean
+  mark: boolean
+  line: string
 }
 
 /** Compila as regras do usuário; padrões inválidos são ignorados (não quebram o terminal). */
@@ -115,12 +129,45 @@ export function compileRules(rules: readonly CustomRule[]): CompiledRule[] {
   for (const r of rules) {
     if (!r.pattern || r.pattern.length > 200 || !/^#[0-9a-f]{6}$/i.test(r.color)) continue
     try {
-      out.push({ re: new RegExp(r.pattern, 'gi'), color: r.color })
+      out.push({
+        re: new RegExp(r.pattern, 'gi'),
+        color: r.color,
+        pattern: r.pattern,
+        notify: r.notify === true,
+        mark: r.mark === true,
+      })
     } catch {
       // regex inválida: ignora
     }
   }
   return out
+}
+
+/** Gatilhos da linha: cada regra com avisar ou marcar que casa com ela (mesmo se outra regra pintou o trecho). */
+export function findTriggers(line: string, rules: readonly CompiledRule[]): TriggerHit[] {
+  const out: TriggerHit[] = []
+  for (const r of rules) {
+    if (!r.notify && !r.mark) continue
+    r.re.lastIndex = 0
+    const hit = r.re.test(line)
+    r.re.lastIndex = 0
+    if (hit) out.push({ pattern: r.pattern, notify: r.notify, mark: r.mark, line: line.trim() })
+  }
+  return out
+}
+
+/** Um disparo por regra a cada `TRIGGER_INTERVAL_MS` por aba: saída em laço não inunda a central. */
+export const TRIGGER_INTERVAL_MS = 5000
+
+export function triggerGate(now: () => number = Date.now) {
+  const last = new Map<string, number>()
+  return (pattern: string) => {
+    const t = now()
+    const prev = last.get(pattern)
+    if (prev != null && t - prev < TRIGGER_INTERVAL_MS) return false
+    last.set(pattern, t)
+    return true
+  }
 }
 
 /** Trechos da linha que casam com as regras próprias (sem sobreposição, a primeira regra vence). */

@@ -13,6 +13,8 @@ export type InboxKind =
   | 'session-failed'
   /** Aviso mandado por um programa no terminal (OSC 9 / OSC 777). */
   | 'program'
+  /** Uma regra própria com o sino ligado casou com a saída (gatilho). */
+  | 'trigger'
 
 export interface InboxItem {
   id: string

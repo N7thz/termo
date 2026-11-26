@@ -1,5 +1,16 @@
 import { describe, expect, test } from 'bun:test'
-import { classifyLine, compileRules, diffLine, findCustom, findLinks, findTokens, isValidRulePattern } from './matchers'
+import {
+  classifyLine,
+  compileRules,
+  diffLine,
+  findCustom,
+  findLinks,
+  findTokens,
+  findTriggers,
+  isValidRulePattern,
+  TRIGGER_INTERVAL_MS,
+  triggerGate,
+} from './matchers'
 
 const kinds = (line: string) => findLinks(line).map((m) => `${m.kind}:${m.text}`)
 
@@ -186,4 +197,30 @@ describe('diffLine', () => {
       ]),
     ).toEqual([null, null, null, null, 'hunk', null, 'removed', 'added', null, null])
   })
+})
+
+test('gatilhos: só regras com avisar/marcar, mesmo com o trecho pintado por outra', () => {
+  const rules = compileRules([
+    { pattern: 'ready', color: '#00ff00' },
+    { pattern: 'ready on', color: '#ff0000', notify: true },
+    { pattern: 'FAIL', color: '#ff0000', mark: true },
+  ])
+  expect(findTriggers('  ready on localhost:5173 ', rules)).toEqual([
+    { pattern: 'ready on', notify: true, mark: false, line: 'ready on localhost:5173' },
+  ])
+  expect(findTriggers('2 FAIL, 3 ok', rules).map((t) => t.pattern)).toEqual(['FAIL'])
+  expect(findTriggers('nada aqui', rules)).toEqual([])
+  // A regex é global: testar duas vezes seguidas dá o mesmo resultado.
+  expect(findTriggers('FAIL', rules)).toHaveLength(1)
+  expect(findTriggers('FAIL', rules)).toHaveLength(1)
+})
+
+test('gatilhos: um disparo por regra a cada 5 s', () => {
+  let t = 0
+  const gate = triggerGate(() => t)
+  expect(gate('a')).toBe(true)
+  expect(gate('a')).toBe(false)
+  expect(gate('b')).toBe(true)
+  t = TRIGGER_INTERVAL_MS
+  expect(gate('a')).toBe(true)
 })

@@ -44,6 +44,8 @@ export interface Inbox {
   command: (tabKey: number, title: string, cmd: FinishedCommand) => void
   /** Um programa da aba mandou um aviso (OSC 9 / OSC 777); `title` vazio usa o nome da aba. */
   program: (tabKey: number, tabTitle: string, title: string, body: string) => void
+  /** Uma regra com o sino ligado casou com uma linha da saída da aba. */
+  trigger: (tabKey: number, tabTitle: string, pattern: string, line: string) => void
   read: (id: string) => void
   readAll: () => void
   clear: () => void
@@ -146,6 +148,11 @@ export function useInbox(opts: { persist: boolean; commandSecs: number }): Inbox
           detail: title ? `${body}${body ? ' · ' : ''}${name}` : body,
           tabKey,
         })
+      },
+      trigger(tabKey, tabTitle, pattern, line) {
+        const name = tabTitle.trim() || 'Terminal'
+        const text = line.length > 200 ? `${line.slice(0, 199)}…` : line
+        add({ kind: 'trigger', title: name, detail: `${text} · regra ${pattern}`, tabKey })
       },
       read: (id) => setItems((list) => markRead(list, id)),
       readAll: () => setItems((list) => markAllRead(list)),

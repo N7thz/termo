@@ -7,6 +7,8 @@ export interface TabAlertState {
   warnings: number
   /** Um comando demorado terminou enquanto a aba estava escondida. */
   finished?: TabFinished
+  /** Linha que disparou uma regra com a bandeira ligada (gatilho) enquanto a aba estava escondida. */
+  trigger?: string
 }
 
 const CHECK = (
@@ -18,6 +20,20 @@ const CHECK = (
       strokeWidth="2.2"
       strokeLinecap="round"
       strokeLinejoin="round"
+    />
+  </svg>
+)
+
+const FLAG = (
+  <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
+    <path
+      d="M4 14V2.5M4 3h7.5l-1.8 2.8L11.5 8.5H4"
+      fill="currentColor"
+      fillOpacity="0.25"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinejoin="round"
+      strokeLinecap="round"
     />
   </svg>
 )
@@ -91,6 +107,22 @@ export function TabAlert({
     )
   }
   if (!alert) return null
+  if (alert.trigger) {
+    const label = `Apareceu: ${alert.trigger}`
+    return (
+      <>
+        <span
+          className="grid size-4 shrink-0 animate-fade-in place-items-center text-accent motion-reduce:animate-none"
+          title={label}
+          role="img"
+          aria-label={label}
+        >
+          {FLAG}
+        </span>
+        <TabAlert alert={{ ...alert, trigger: undefined }} colors={colors} />
+      </>
+    )
+  }
   const done = alert.finished
   const doneLabel = done
     ? `${done.ok ? 'Terminou' : 'Falhou'}: ${done.command} · ${formatSeconds(done.durationMs)}`
