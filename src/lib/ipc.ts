@@ -7,6 +7,7 @@ import { listen } from '@tauri-apps/api/event'
 import type { BrowserBounds } from '../features/browser/types'
 import type { ClaudeLine } from '../features/claude-bar/claude'
 import type { FileDiff, ReviewStatus } from '../features/code-review/diff'
+import type { ImportFile } from '../features/config-io/configFile'
 import type { GitBranchInfo } from '../features/git-branch/types'
 import type { NodeInfo, NodeVersions } from '../features/node-version/types'
 import type { AgentDef } from '../features/roles/RolesContext'
@@ -136,6 +137,10 @@ export const ipc = {
 
   getSettings: () => invoke<Settings>('settings_get'),
   setSettings: (patch: Partial<Settings>) => invoke<Settings>('settings_set', { patch }),
+  /** Grava as configurações num arquivo escolhido no "Salvar como"; `null` se cancelou. */
+  configExport: (exportedAt: string) => invoke<string | null>('config_export', { exportedAt }),
+  /** Escolhe e lê um arquivo de configurações (não aplica nada); `null` se cancelou. */
+  configImportRead: () => invoke<ImportFile | null>('config_import_read'),
 
   /** Aviso do Windows e piscar na barra de tarefas (respeita `notifications.enabled` no Rust). */
   notify: (title: string, body: string) => invoke<void>('notify', { title, body }),

@@ -41,6 +41,13 @@ Uso:
   termo focus [N]               traz o Termo para a frente (e ativa a aba N)
   termo close <N>               fecha a aba N
                                 N é o número (termo tabs) ou o nome da aba
+  termo config export [arquivo|-] [--force]
+                                grava as configurações (padrão: termo-config.json aqui; - mostra o JSON)
+  termo config import <arquivo> [--only perfis,workflows] [--keep-missing] [--dry-run]
+                                importa: listas se juntam às suas; pastas que não existem aqui ficam de
+                                fora (--keep-missing mantém); --dry-run só mostra o que mudaria.
+                                Seções: aparencia, terminal, fundo, destaques, perfis, workflows,
+                                layouts, sistema
   termo --claude [--cwd <pasta>] [--title <nome>] [--prompt-file <arq>] [--close-on-exit] [-- <args>]
                                 repassa as flags ao Termo.exe (aba do Claude no Termo aberto)
   termo help | --version
@@ -143,7 +150,7 @@ fn opens_folder_only(args: &[String], cwd: &Path) -> bool {
 }
 
 fn is_subcommand(a: &str) -> bool {
-    matches!(a, "open" | "run" | "claude" | "split" | "tabs" | "ls" | "send" | "focus" | "close" | "title" | "nota" | "note")
+    matches!(a, "open" | "run" | "claude" | "split" | "tabs" | "ls" | "send" | "focus" | "close" | "title" | "nota" | "note" | "config")
 }
 
 /// `termo title`/`termo nota` rodados dentro de um terminal do Termo valem para a própria aba: o app põe o número do

@@ -3,6 +3,7 @@ mod agents;
 mod ai;
 mod browser;
 mod cli;
+mod config_io;
 mod control;
 mod coord;
 mod editor;
@@ -397,6 +398,23 @@ fn settings_set(app: AppHandle, settings: State<SettingsStore>, patch: SettingsP
     Ok(saved)
 }
 
+/// Exporta as configurações atuais para um arquivo escolhido no "Salvar como". `None`: cancelou.
+#[tauri::command]
+async fn config_export(app: AppHandle, exported_at: String) -> Result<Option<String>, String> {
+    let current = app.state::<SettingsStore>().get();
+    tauri::async_runtime::spawn_blocking(move || config_io::export(&app, &current, &exported_at))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Escolhe e lê um arquivo de configurações para importar (nada é aplicado aqui). `None`: cancelou.
+#[tauri::command]
+async fn config_import_read(app: AppHandle) -> Result<Option<config_io::ImportFile>, String> {
+    tauri::async_runtime::spawn_blocking(move || config_io::pick_and_read(&app))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// Aviso do Windows (Claude esperando, comando longo). Respeita a configuração.
 #[tauri::command]
 fn notify(app: AppHandle, window: tauri::WebviewWindow, settings: State<SettingsStore>, title: String, body: String) -> Result<(), String> {
@@ -755,6 +773,8 @@ pub fn run() {
             history_read,
             settings_get,
             settings_set,
+            config_export,
+            config_import_read,
             clipboard_read,
             clipboard_write,
             open_in_editor,

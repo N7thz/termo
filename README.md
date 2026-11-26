@@ -37,6 +37,8 @@ termo title "API: testes"      dá nome à aba (sem --tab: a do próprio termina
 termo nota --add "testes ok"   nota da aba (sem texto mostra; --add junta uma linha; --clear apaga)
 termo send --tab 3 "git pull"  escreve na aba e tecla Enter (--no-enter só cola); --tab aceita número ou nome
 termo focus [N] / close N      traz o Termo para a frente (e ativa a aba) / fecha a aba
+termo config export [arq|-]    grava as configurações (padrão: termo-config.json aqui; - mostra o JSON; --force troca)
+termo config import <arq>      importa como o botão da tela (--only perfis,workflows / --keep-missing / --dry-run)
 ```
 
 Como funciona: ao abrir, o app escuta em 127.0.0.1 numa porta livre e grava a porta e um token em `%APPDATA%\dev.termo.app\control.json` (`src-tauri/src/control.rs`); o cliente (`cli/`, binário de console só com std e serde_json) manda os argumentos e a pasta atual e mostra a resposta. Os mesmos subcomandos também funcionam como `Termo.exe run ...`, pela instância única, só que sem resposta. `bun run build:cli` compila o cliente (o `tauri dev`/`build` já chama).
@@ -89,6 +91,7 @@ src/                 frontend (React + xterm.js)
   features/autocomplete  sugestão em cinza (histórico por pasta) e autocomplete de git/bun/npm/cargo/winget/docker
   features/layouts   layouts salvos (abas, grupos, divisões, pastas e comandos)
   features/broadcast  digitar em vários painéis
+  features/config-io  levar as configurações para outra máquina: seções, mesclar listas e pastas que faltam
 scripts/release.ts   versão numa fonte só e conferência da tag no workflow
 scripts/updater-manifest.ts  latest.json do atualizador para o instalador assinado pelo SignPath
 src-tauri/           backend (Rust)
@@ -111,6 +114,7 @@ src-tauri/           backend (Rust)
   src/logging.rs     log em arquivo (tauri-plugin-log) e registro de pânicos com backtrace
   src/ssh.rs         hosts do ~/.ssh/config para as abas SSH (sem curingas, nomes validados)
   src/export.rs      "Salvar como" dos blocos exportados (.txt, .md, PNG)
+  src/config_io.rs   arquivo de configurações (`termo-config.json`): exportar e ler para importar
   resources/         conpty.dll e OpenConsole.exe (ConPTY moderno, copiados ao lado do .exe)
 ```
 
@@ -171,6 +175,7 @@ src-tauri/           backend (Rust)
 - Claude Code numa cópia isolada (seta do + ou paleta): cria um `git worktree` na branch `termo/<tarefa>`, numa pasta ao lado do projeto (`<repo>.worktrees/<tarefa>`), e abre o Claude nela. A janela lista as cópias com commits e alterações pendentes, abre Claude ou shell nelas, junta na branch da pasta principal (merge, recusado com alterações não commitadas; conflito desfaz o merge) ou descarta (cópia, branch e commits), fechando antes as abas que estão dentro da cópia
 - Central de avisos (sino na barra de título ou Ctrl+Shift+O, com as não lidas): histórico do Claude terminou ou pede permissão (pedidos pendentes no topo, até o Claude voltar a trabalhar), comandos longos que terminaram ou falharam (repetidos viram "×3") e sessões do coord que concluíram o plano. Agrupado por dia, até 200 avisos, guardado entre aberturas; clicar marca como lido e leva à aba ou à tela de Sessões. Os avisos do Windows continuam só com a janela sem foco
 - Nota por aba: o Claude da aba registra progresso e decisões com `termo nota` (o contexto do Termo ensina a usar), a última linha aparece na lateral abaixo do nome e a nota inteira no tooltip; "Nota da aba…" no menu da aba lê e edita. Fica guardada com a sessão
+- Levar as configurações para outra máquina (Configurações → Outra máquina): **Exportar…** grava um `termo-config.json` com tema, fonte, terminal, fundo, destaques, perfis, workflows, layouts, avisos e sistema. **Importar…** lê esse arquivo (ou o `settings.json` de outra instalação), mostra o que muda em cada seção e aplica só as que você deixar ligadas. Perfis, workflows e layouts se juntam aos seus (os de mesmo nome são substituídos, nada é apagado), e as pastas e imagens que não existem na máquina nova ficam de fora, se você quiser. Não leva as abas abertas nem o histórico. Pela linha de comando: `termo config export` e `termo config import termo-config.json` (bom para montar uma máquina nova por script)
 
 ## Roadmap
 

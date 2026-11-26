@@ -1,6 +1,8 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useEffect, useRef } from 'react'
+import type { Settings } from '../../shared/types'
+import { planCliImport } from '../config-io/configFile'
 import type { TerminalActions } from '../context-menu/types'
 import type { TabsState } from '../tabs/tabs'
 import { type CliAction, type CliReply, type CliRequest, type CliTab, fail, formatTabs, ok, resolveTab } from './cli'
@@ -22,6 +24,10 @@ export interface CliContext {
   rename: (key: number, label: string | null) => void
   /** Troca a nota da aba (`null` apaga); `append` junta uma linha no fim. */
   setNote: (key: number, note: string | null, append: boolean) => void
+  /** Configurações atuais (lidas na hora). */
+  settings: () => Settings
+  /** Grava pelo `settings_set` e atualiza a interface; falha se o Rust recusar. */
+  applySettings: (patch: Partial<Settings>) => Promise<unknown>
 }
 
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
@@ -104,6 +110,14 @@ async function perform(ctx: CliContext, a: CliAction): Promise<CliReply> {
       if (a.text == null && !a.clear) return ok(s.tabs.find((x) => x.key === t.key)?.note ?? '')
       ctx.setNote(t.key, a.clear ? null : a.text, a.append)
       return ok()
+    }
+    case 'configImport': {
+      if (!a.file) return fail('o arquivo não foi lido')
+      const plan = planCliImport(a.file, ctx.settings(), { sections: a.sections, keepMissing: a.keepMissing })
+      if (Object.keys(plan.patch).length === 0) return ok(`${plan.report}\nnada para importar: já está assim`)
+      if (a.dryRun) return ok(`${plan.report}\nnada foi aplicado (--dry-run)`)
+      await ctx.applySettings(plan.patch)
+      return ok(`${plan.report}\nimportado`)
     }
   }
 }

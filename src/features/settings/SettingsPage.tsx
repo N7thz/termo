@@ -8,6 +8,7 @@ import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useSta
 import { actionButton, tooltip } from '../../lib/ui'
 import type { Settings } from '../../shared/types'
 import { BackgroundSettingsSection } from '../background/BackgroundSettingsSection'
+import { ConfigTransferSection } from '../config-io/ConfigTransferSection'
 import { HighlightSettingsSection } from '../highlights/HighlightSettingsSection'
 import { ShellSettingsSection } from '../shell-profiles/ShellSettingsSection'
 import { findTheme } from '../theme/themes'
@@ -41,6 +42,7 @@ const GROUPS: { id: SettingsGroupId; label: string }[] = [
   { id: 'background', label: 'Imagem de fundo' },
   { id: 'highlights', label: 'Destaques' },
   { id: 'system', label: 'Avisos e sistema' },
+  { id: 'transfer', label: 'Outra máquina' },
 ]
 
 type SaveStatus = { kind: 'idle' } | { kind: 'saved' } | { kind: 'error'; patch: Partial<Settings> }
@@ -346,6 +348,14 @@ export function SettingsPage({ settings, onChange, onClose, onOpenThemes, onOpen
                 switchClass={SWITCH}
                 thumbClass={THUMB}
                 inputClass={INPUT}
+              />
+            </Group>
+            <Group id="transfer">
+              <ConfigTransferSection
+                settings={settings}
+                onChange={(patch) => void onChange(patch).catch(() => undefined)}
+                switchClass={SWITCH}
+                thumbClass={THUMB}
               />
             </Group>
           </div>

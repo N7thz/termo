@@ -578,6 +578,8 @@ export function App() {
       },
       rename: (key, label) => dispatch({ type: 'rename', key, label }),
       setNote: (key, note, append) => dispatch({ type: 'note', key, note, append }),
+      settings: () => settingsRef.current,
+      applySettings: (patch) => ipc.setSettings(patch).then(setSettings),
     },
     IS_MAIN_WINDOW,
   )

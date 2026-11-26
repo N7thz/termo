@@ -54,17 +54,106 @@ pub enum Action {
     /// Nota da aba (mesma escolha de aba do `Title`). `text: None` sem `clear` mostra a nota atual;
     /// `append` junta uma linha no fim em vez de trocar tudo.
     Note { tab: Option<String>, pty: Option<u32>, text: Option<String>, append: bool, clear: bool },
+    /// Exporta as configurações para `path` (`None`: devolve o JSON na saída). Feito aqui no Rust,
+    /// sem passar pela interface.
+    ConfigExport { path: Option<String>, force: bool },
+    /// Importa um arquivo de configurações. O Rust lê o arquivo e preenche `file` antes de mandar à
+    /// interface, que aplica as mesmas regras da tela (seções, mesclar listas, pastas que faltam).
+    /// `sections` vazio = todas.
+    #[serde(rename_all = "camelCase")]
+    ConfigImport {
+        path: String,
+        sections: Vec<String>,
+        keep_missing: bool,
+        dry_run: bool,
+        file: Option<crate::config_io::ImportFile>,
+    },
 }
 
 impl Action {
     /// Pedidos que abrem ou mostram algo trazem a janela para a frente.
     fn shows_window(&self) -> bool {
-        !matches!(self, Action::Tabs { .. } | Action::Send { .. } | Action::Title { .. } | Action::Note { .. })
+        !matches!(
+            self,
+            Action::Tabs { .. }
+                | Action::Send { .. }
+                | Action::Title { .. }
+                | Action::Note { .. }
+                | Action::ConfigExport { .. }
+                | Action::ConfigImport { .. }
+        )
     }
 }
 
 /// Subcomandos que o argv do `Termo.exe` (instância única) reconhece.
-const SUBCOMMANDS: &[&str] = &["open", "run", "claude", "split", "tabs", "send", "focus", "close", "title", "nota", "note"];
+const SUBCOMMANDS: &[&str] =
+    &["open", "run", "claude", "split", "tabs", "send", "focus", "close", "title", "nota", "note", "config"];
+
+/// Seções do `termo config import --only`: o nome em português ou o id da interface (`configFile.ts`).
+const CONFIG_SECTIONS: &[(&str, &str)] = &[
+    ("aparencia", "appearance"),
+    ("appearance", "appearance"),
+    ("terminal", "terminal"),
+    ("fundo", "background"),
+    ("background", "background"),
+    ("destaques", "highlights"),
+    ("highlights", "highlights"),
+    ("perfis", "profiles"),
+    ("profiles", "profiles"),
+    ("workflows", "workflows"),
+    ("layouts", "layouts"),
+    ("sistema", "system"),
+    ("avisos", "system"),
+    ("system", "system"),
+];
+
+const CONFIG_USAGE: &str = "uso: termo config export [arquivo|-] [--force] | termo config import <arquivo> [--only perfis,workflows] [--keep-missing] [--dry-run]";
+
+fn parse_config(rest: &[String], cwd: &Path) -> Result<Action, String> {
+    let Some((sub, rest)) = rest.split_first() else { return Err(CONFIG_USAGE.into()) };
+    if sub != "export" && sub != "import" {
+        return Err(CONFIG_USAGE.into());
+    }
+    let mut target: Option<&str> = None;
+    let mut force = false;
+    let mut keep_missing = false;
+    let mut dry_run = false;
+    let mut sections: Vec<String> = Vec::new();
+    let mut it = rest.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--force" | "-f" if sub == "export" => force = true,
+            "--keep-missing" if sub == "import" => keep_missing = true,
+            "--dry-run" | "-n" if sub == "import" => dry_run = true,
+            "--only" if sub == "import" => {
+                let list = it.next().ok_or("--only precisa das seções (ex.: --only perfis,workflows)")?;
+                for name in list.split(',').map(str::trim).filter(|n| !n.is_empty()) {
+                    let key = name.to_lowercase().replace('ê', "e");
+                    let id = CONFIG_SECTIONS.iter().find(|(n, _)| *n == key).map(|(_, id)| id.to_string()).ok_or_else(|| {
+                        format!("seção desconhecida: {name} (use aparencia, terminal, fundo, destaques, perfis, workflows, layouts ou sistema)")
+                    })?;
+                    if !sections.contains(&id) {
+                        sections.push(id);
+                    }
+                }
+            }
+            "-" if sub == "export" && target.is_none() => target = Some("-"),
+            s if s.starts_with('-') => return Err(format!("opção desconhecida: {s}")),
+            s if target.is_none() => target = Some(s),
+            s => return Err(format!("argumento a mais: {s}")),
+        }
+    }
+    if sub == "export" {
+        let path = match target {
+            Some("-") => None,
+            Some(t) => Some(strip_verbatim(&cwd.join(t))),
+            None => Some(strip_verbatim(&cwd.join(crate::config_io::DEFAULT_NAME))),
+        };
+        return Ok(Action::ConfigExport { path, force });
+    }
+    let t = target.ok_or("faltou o arquivo: termo config import <arquivo>")?;
+    Ok(Action::ConfigImport { path: strip_verbatim(&cwd.join(t)), sections, keep_missing, dry_run, file: None })
+}
 
 /// Interpreta os argumentos do cliente (sem o nome do programa). `cwd` é a pasta de quem chamou.
 pub fn parse(args: &[String], cwd: &Path) -> Result<Action, String> {
@@ -246,6 +335,7 @@ pub fn parse(args: &[String], cwd: &Path) -> Result<Action, String> {
                 (true, _, _) => Err("--clear não leva texto nem --add".into()),
             }
         }
+        "config" => parse_config(rest, cwd),
         // `termo .`, `termo D:\projeto`: abre aba na pasta, como o `code .`.
         a if !a.starts_with('-') && rest.is_empty() && cwd.join(a).is_dir() => {
             Ok(Action::Open { cwd: dir(Some(a), cwd)?, shell: None, split: false })
@@ -326,8 +416,28 @@ pub fn cli_reply(pending: tauri::State<'_, Arc<Pending>>, id: u64, reply: Reply)
     }
 }
 
-/// Manda a ação para a janela principal e espera a resposta.
+/// Manda a ação para a janela principal e espera a resposta. O `config export` roda aqui mesmo e,
+/// no import, o arquivo é lido antes de mandar.
 fn dispatch(app: &AppHandle, action: &Action) -> Reply {
+    match action {
+        Action::ConfigExport { path, force } => return config_export(app, path.as_deref(), *force),
+        Action::ConfigImport { path, sections, keep_missing, dry_run, file: None } => {
+            return match crate::config_io::read_file(Path::new(path)) {
+                Ok(file) => dispatch(
+                    app,
+                    &Action::ConfigImport {
+                        path: path.clone(),
+                        sections: sections.clone(),
+                        keep_missing: *keep_missing,
+                        dry_run: *dry_run,
+                        file: Some(file),
+                    },
+                ),
+                Err(e) => Reply::err(e),
+            };
+        }
+        _ => {}
+    }
     let Some(pending) = app.try_state::<Arc<Pending>>().map(|s| Arc::clone(&s)) else {
         return Reply::err("o Termo ainda está abrindo; tente de novo");
     };
@@ -369,6 +479,22 @@ pub fn subcommand(app: &AppHandle, argv: &[String], cwd: &str) -> bool {
     true
 }
 
+fn config_export(app: &AppHandle, path: Option<&str>, force: bool) -> Reply {
+    let Some(store) = app.try_state::<crate::settings::SettingsStore>() else {
+        return Reply::err("o Termo ainda está abrindo; tente de novo");
+    };
+    let settings = store.get();
+    let result = match path {
+        None => crate::config_io::envelope(&settings, &crate::config_io::now_iso()),
+        Some(p) => crate::config_io::export_to(Path::new(p), &settings, force)
+            .map(|written| format!("exportado em {}", written.display())),
+    };
+    match result {
+        Ok(output) => Reply { ok: true, output, error: String::new() },
+        Err(e) => Reply::err(e),
+    }
+}
+
 fn action_name(a: &Action) -> &'static str {
     match a {
         Action::Open { .. } => "open",
@@ -380,6 +506,8 @@ fn action_name(a: &Action) -> &'static str {
         Action::Close { .. } => "close",
         Action::Title { .. } => "title",
         Action::Note { .. } => "note",
+        Action::ConfigExport { .. } => "config export",
+        Action::ConfigImport { .. } => "config import",
     }
 }
 
@@ -649,6 +777,49 @@ mod tests {
         assert!(parse(&args(&["title"]), &here()).is_err());
         assert!(parse(&args(&["title", "--clear", "x"]), &here()).is_err());
         assert!(parse(&args(&["title", "--pty", "x", "y"]), &here()).is_err());
+    }
+
+    #[test]
+    fn config_export_and_import() {
+        let at = |f: &str| strip_verbatim(&here().join(f));
+        assert_eq!(
+            parse(&args(&["config", "export"]), &here()).unwrap(),
+            Action::ConfigExport { path: Some(at("termo-config.json")), force: false }
+        );
+        assert_eq!(
+            parse(&args(&["config", "export", "-", "--force"]), &here()).unwrap(),
+            Action::ConfigExport { path: None, force: true }
+        );
+        assert_eq!(
+            parse(&args(&["config", "import", "x.json", "--only", "Perfis, workflows,perfis", "--dry-run"]), &here())
+                .unwrap(),
+            Action::ConfigImport {
+                path: at("x.json"),
+                sections: vec!["profiles".into(), "workflows".into()],
+                keep_missing: false,
+                dry_run: true,
+                file: None
+            }
+        );
+        assert!(parse(&args(&["config", "import"]), &here()).unwrap_err().contains("faltou o arquivo"));
+        assert!(parse(&args(&["config", "import", "x", "--only", "abas"]), &here()).unwrap_err().contains("desconhecida"));
+        assert!(parse(&args(&["config", "export", "--dry-run"]), &here()).is_err());
+        assert!(parse(&args(&["config", "import", "x", "--force"]), &here()).is_err());
+        assert!(parse(&args(&["config"]), &here()).unwrap_err().starts_with("uso:"));
+        assert!(parse(&args(&["config", "sync"]), &here()).unwrap_err().starts_with("uso:"));
+    }
+
+    #[test]
+    fn config_import_json_shape() {
+        let a = Action::ConfigImport { path: "x".into(), sections: vec![], keep_missing: true, dry_run: false, file: None };
+        let v = serde_json::to_value(Envelope { id: 1, action: &a }).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({
+                "id": 1, "type": "configImport", "path": "x", "sections": [],
+                "keepMissing": true, "dryRun": false, "file": null
+            })
+        );
     }
 
     #[test]

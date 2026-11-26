@@ -1,4 +1,5 @@
 import type { SessionKind } from '../../shared/types'
+import type { ImportFile } from '../config-io/configFile'
 
 /** Pedido do `termo` (linha de comando), já interpretado pelo Rust (`control.rs`). */
 export type CliAction =
@@ -13,6 +14,15 @@ export type CliAction =
   | { type: 'title'; tab: string | null; pty: number | null; label: string | null }
   /** Nota da aba: `text` troca (ou, com `append`, junta uma linha); sem texto, mostra (ou apaga, com `clear`). */
   | { type: 'note'; tab: string | null; pty: number | null; text: string | null; append: boolean; clear: boolean }
+  /** `termo config import`: o Rust já leu o arquivo (`file`); `sections` vazio = todas. */
+  | {
+      type: 'configImport'
+      path: string
+      sections: string[]
+      keepMissing: boolean
+      dryRun: boolean
+      file: ImportFile | null
+    }
 
 export type CliRequest = CliAction & { id: number }
 
