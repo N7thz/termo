@@ -55,6 +55,9 @@ export function TerminalMenu({ children, actions, onAction }: Props) {
         <MenuItem className={menuItem} value="find" shortcut="mod+shift+f" disabled={!ready}>
           Buscar na saída…
         </MenuItem>
+        <MenuItem className={menuItem} value="quick-select" shortcut="mod+shift+space" disabled={!ready}>
+          Seleção rápida…
+        </MenuItem>
         <MenuSeparator className={menuSeparator} />
         <MenuItem className={menuItem} value="new-shell" shortcut="mod+shift+t">
           Nova aba

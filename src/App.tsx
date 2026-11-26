@@ -660,6 +660,8 @@ export function App() {
         return term?.clear()
       case 'find':
         return term?.find()
+      case 'quick-select':
+        return term?.quickSelect?.()
       case 'new-shell':
         return openTab('shell')
       case 'new-claude':
@@ -1295,6 +1297,16 @@ export function App() {
                 })),
                 { id: 'themes', label: 'Temas', keys: 'mod+shift+,', run: openThemes },
                 { id: 'settings', label: 'Configurações', keys: 'mod+,', run: () => setShowSettings(true) },
+                {
+                  id: 'quick-select',
+                  label: 'Seleção rápida: copiar URL, caminho, hash ou número da tela',
+                  keys: 'mod+shift+space',
+                  // A paleta fecha antes e devolve o foco; o rAF espera isso para os rótulos ficarem com o teclado.
+                  run: () =>
+                    requestAnimationFrame(() =>
+                      state.active != null ? terminalActions.current.get(state.active)?.quickSelect?.() : undefined,
+                    ),
+                },
                 {
                   id: 'new-window',
                   label: 'Nova janela',

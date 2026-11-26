@@ -10,6 +10,8 @@ export interface TerminalActions {
   clear: () => void
   /** Abre a busca na saída (o mesmo do Ctrl+Shift+F). */
   find: () => void
+  /** Rótulos sobre URLs, caminhos, hashes e números da tela para copiar pelo teclado (Ctrl+Shift+Espaço). */
+  quickSelect?: () => void
   /** Cola o texto como uma colagem (bracketed paste) e manda Enter: assim o Claude Code recebe uma mensagem só. */
   sendText?: (text: string) => void
   /** Cola o texto sem mandar Enter (contexto para o Claude Code: a pessoa completa com a pergunta). */
@@ -55,6 +57,7 @@ export type TerminalMenuAction =
   | 'select-all'
   | 'clear'
   | 'find'
+  | 'quick-select'
   | 'new-shell'
   | 'new-claude'
   | 'themes'

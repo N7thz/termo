@@ -41,6 +41,8 @@ import { MODE_TONE, modeOf } from '../shell-profiles/modes'
 import { isAppShortcut } from '../tabs/shortcuts'
 import { ContextBar } from './ContextBar'
 import { attachProgramOsc, type Progress } from './programOsc'
+import { type CellGeometry, QuickSelectOverlay } from './QuickSelectOverlay'
+import { findTargets, readScreen, type Target } from './quickSelect'
 
 interface Props {
   kind: SessionKind
@@ -202,6 +204,11 @@ export function TerminalView({
   showEditorRef.current = showEditor
   historyReadyRef.current = settings.historySearch && kind === 'shell' && idle && !altBuffer && !dead
   const openSearchRef = useRef<() => void>(() => {})
+  /** Seleção rápida (Ctrl+Shift+Espaço): alvos da tela com rótulo e onde fica a grade de células. */
+  const [quick, setQuick] = useState<{ targets: Target[]; geometry: CellGeometry } | null>(null)
+  const [quickNote, setQuickNote] = useState<string | null>(null)
+  const openQuickRef = useRef<() => void>(() => {})
+  const insertTextRef = useRef<(text: string) => void>(() => {})
   // Arquivos que entraram na linha (imagem colada, arquivos arrastados): faixa de miniaturas.
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [attachError, setAttachError] = useState<string | null>(null)
@@ -422,6 +429,33 @@ export function TerminalView({
         term.focus()
       }
     }
+    insertTextRef.current = (text) => {
+      if (!exited) insertText(text)
+    }
+    openQuickRef.current = () => {
+      const screen = term.element?.querySelector<HTMLElement>('.xterm-screen')
+      if (!screen || term.rows === 0 || term.cols === 0) return
+      const targets = findTargets(readScreen(term))
+      if (targets.length === 0) {
+        setQuickNote('Nada para selecionar na tela')
+        return
+      }
+      const s = screen.getBoundingClientRect()
+      const w = wrap.getBoundingClientRect()
+      setQuickNote(null)
+      setQuick({
+        targets,
+        geometry: {
+          left: s.left - w.left,
+          top: s.top - w.top,
+          cellW: s.width / term.cols,
+          cellH: s.height / term.rows,
+        },
+      })
+    }
+    // A tela mudou de lugar: os rótulos ficariam sobre o texto errado.
+    term.onScroll(() => setQuick(null))
+    term.onResize(() => setQuick(null))
     insertPathsRef.current = (paths) => {
       if (exited || paths.length === 0) return
       const target: PathTarget = kindRef.current === 'claude' ? 'claude' : shellFamilyRef.current
@@ -494,6 +528,7 @@ export function TerminalView({
         term.focus()
       },
       find: () => openSearchRef.current(),
+      quickSelect: () => openQuickRef.current(),
       command: (text, run) => putCommandRef.current(text, run),
       pasteText: (text) => {
         term.focus()
@@ -822,6 +857,36 @@ export function TerminalView({
     if (termRef.current) termRef.current.options.minimumContrastRatio = settings.minimumContrast
   }, [settings.minimumContrast])
 
+  // Ctrl+Shift+Espaço abre a seleção rápida, do xterm ou do editor de entrada (captura antes deles).
+  useEffect(() => {
+    const wrap = wrapRef.current
+    if (!wrap) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && e.code === 'Space') {
+        e.preventDefault()
+        e.stopPropagation()
+        openQuickRef.current()
+      }
+    }
+    wrap.addEventListener('keydown', onKey, true)
+    return () => wrap.removeEventListener('keydown', onKey, true)
+  }, [])
+
+  // "Copiado" e "nada para selecionar" somem sozinhos.
+  useEffect(() => {
+    if (!quickNote) return
+    const t = window.setTimeout(() => setQuickNote(null), 1600)
+    return () => window.clearTimeout(t)
+  }, [quickNote])
+
+  const closeQuick = () => {
+    setQuick(null)
+    requestAnimationFrame(() => {
+      if (showEditorRef.current) inputRef.current?.focus()
+      else termRef.current?.focus()
+    })
+  }
+
   // Foco vindo de dentro do xterm (clique na metade da tela dividida): avisa quem controla a aba ativa.
   const onFocusRef = useRef(onFocus)
   onFocusRef.current = onFocus
@@ -861,6 +926,32 @@ export function TerminalView({
         style={{ background: MODE_TONE[modeOf(kind, shellProfile)] }}
       />
       <div className="min-h-0 w-full flex-1" ref={hostRef} />
+      {quick && (
+        <QuickSelectOverlay
+          targets={quick.targets}
+          geometry={quick.geometry}
+          onClose={closeQuick}
+          onPick={(target, insert) => {
+            closeQuick()
+            if (insert) {
+              insertTextRef.current(target.text)
+              return
+            }
+            void ipc.writeClipboard(target.text).then(
+              () => setQuickNote(`Copiado: ${target.text.length > 60 ? `${target.text.slice(0, 59)}…` : target.text}`),
+              () => setQuickNote('Não deu para copiar'),
+            )
+          }}
+        />
+      )}
+      {quickNote && (
+        <div
+          role="status"
+          className="pointer-events-none absolute top-3 left-1/2 z-20 max-w-[80%] -translate-x-1/2 animate-pop-in truncate rounded-md border border-hairline bg-surface px-2.5 py-1 font-mono text-[12px] text-text shadow-tip motion-reduce:animate-none"
+        >
+          {quickNote}
+        </div>
+      )}
       {/* Tela dividida: o painel sem o foco fica apagado; o clique passa e o foca. */}
       <div
         aria-hidden
