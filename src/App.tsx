@@ -7,8 +7,15 @@ import { Plus, Radio, X } from 'lucide-react'
 import { type CSSProperties, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { type AgentState, withAgentState } from './features/agent-status/agentState'
 import { BackgroundLayer, requestNextBackground } from './features/background/BackgroundLayer'
-import { isBackgroundActive, transparentTheme, wantsTransparentTerminal } from './features/background/background'
+import {
+  isBackgroundActive,
+  transparentTheme,
+  wantsGlow,
+  wantsTransparentTerminal,
+} from './features/background/background'
+import { GlowLayer } from './features/background/GlowLayer'
 import { SAVE_WORKFLOW_EVENT } from './features/blocks/commandBlocks'
+import { bootDone } from './features/boot/boot'
 import { broadcastTargets, isTyped } from './features/broadcast/broadcast'
 import { BrowserPanel } from './features/browser/BrowserPanel'
 import { installCliOnPath, useCliActions } from './features/cli/useCliActions'
@@ -43,7 +50,7 @@ import { ShortcutsDialog } from './features/shortcuts/ShortcutsDialog'
 import { ClaudeIcon } from './features/tabs/ClaudeIcon'
 import { PaneNotice } from './features/tabs/PaneNotice'
 import { SplitDivider } from './features/tabs/SplitDivider'
-import { actionFor } from './features/tabs/shortcuts'
+import { actionFor, keysFor, setKeybindings } from './features/tabs/shortcuts'
 import { TabKindIcon } from './features/tabs/TabKindIcon'
 import {
   initialTabs,
@@ -127,7 +134,8 @@ export function App() {
   const [previewTheme, setPreviewTheme] = useState<string | null>(null)
   const theme = useTheme(previewTheme ?? settings.theme)
   // Com imagem atrás do terminal, o fundo do xterm fica transparente para ela aparecer.
-  const transparentTerminal = wantsTransparentTerminal(settings.background)
+  // O brilho do tema também fica atrás do texto (ver features/background/GlowLayer).
+  const transparentTerminal = wantsTransparentTerminal(settings.background) || wantsGlow(settings.background)
   const terminalTheme = useMemo(
     () => (transparentTerminal ? transparentTheme(theme.terminal) : theme.terminal),
     [theme.terminal, transparentTerminal],
@@ -263,7 +271,10 @@ export function App() {
         console.error('[termo] falha ao iniciar', err)
         openTab('shell')
       })
-      .finally(() => setReady(true))
+      .finally(() => {
+        setReady(true)
+        bootDone()
+      })
   }, [])
 
   // Perfis: o atual (ou o primeiro, se o atual sumiu da lista) e as abas dele.
@@ -693,6 +704,8 @@ export function App() {
   )
   // Tamanho da interface (zoom do webview): vale com a tela de configurações aberta ou não.
   useInterfaceZoom(settings.interfaceSize)
+  // Atalhos trocados pela pessoa valem para o teclado, as dicas e a folha de atalhos.
+  setKeybindings(settings.keybindings)
 
   // Barra de tarefas: o progresso da aba ativa; sem ele, o de outra aba desta janela (um erro primeiro).
   const taskbar = taskbarProgress(progress, state.active)
@@ -992,7 +1005,7 @@ export function App() {
                   {!layout.sidebar && (
                     <>
                       {/* Os atalhos são ligados em actionFor; o shortcut do Tooltip só mostra e anuncia. */}
-                      <Tooltip shortcut="mod+shift+t">
+                      <Tooltip shortcut={keysFor('new-shell')}>
                         <TooltipTrigger
                           render={
                             <Button className={actionButton} aria-label="Nova aba" onClick={() => openTab('shell')} />
@@ -1010,7 +1023,7 @@ export function App() {
                       />
                     </>
                   )}
-                  <Tooltip shortcut="mod+shift+k">
+                  <Tooltip shortcut={keysFor('new-claude')}>
                     <TooltipTrigger
                       render={
                         <Button
@@ -1045,6 +1058,7 @@ export function App() {
                   className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-[10px] bg-bg shadow-card outline-accent [transition:outline-color_140ms_ease-out] data-drop-active:outline-2 data-drop-active:-outline-offset-2"
                 >
                   {/* Imagem de fundo atrás das abas (o xterm fica transparente; ver features/background). */}
+                  <GlowLayer settings={settings.background} theme={theme} />
                   <BackgroundLayer settings={settings.background} target="terminal" />
                   {state.tabs.map((tab) => (
                     // Painel próprio (não o TabsPanel): na tela dividida duas abas ficam visíveis ao mesmo tempo.
@@ -1246,7 +1260,12 @@ export function App() {
                 />
               )}
             </div>
-            <ShortcutsDialog open={showShortcuts} onOpenChange={setShowShortcuts} />
+            <ShortcutsDialog
+              open={showShortcuts}
+              onOpenChange={setShowShortcuts}
+              bindings={settings.keybindings ?? {}}
+              onChange={(keybindings) => updateSettings({ keybindings })}
+            />
             <NoteDialog
               tab={(() => {
                 const t = noteKey == null ? undefined : tabs.find((x) => x.key === noteKey)
@@ -1292,11 +1311,11 @@ export function App() {
               active={state.active}
               info={workspace.info}
               actions={[
-                { id: 'new-shell', label: 'Nova aba', keys: 'mod+shift+t', run: () => openTab('shell') },
+                { id: 'new-shell', label: 'Nova aba', keys: keysFor('new-shell'), run: () => openTab('shell') },
                 {
                   id: 'new-claude',
                   label: 'Nova aba com Claude Code',
-                  keys: 'mod+shift+k',
+                  keys: keysFor('new-claude'),
                   run: () => openTab('claude'),
                 },
                 {
@@ -1316,8 +1335,8 @@ export function App() {
                   label: `Nova aba: ${s.label}`,
                   run: () => openTab('shell', { shellId: s.id }),
                 })),
-                { id: 'themes', label: 'Temas', keys: 'mod+shift+,', run: openThemes },
-                { id: 'settings', label: 'Configurações', keys: 'mod+,', run: () => setShowSettings(true) },
+                { id: 'themes', label: 'Temas', keys: keysFor('themes'), run: openThemes },
+                { id: 'settings', label: 'Configurações', keys: keysFor('settings'), run: () => setShowSettings(true) },
                 {
                   id: 'copy-mode',
                   label: 'Modo de cópia: selecionar a saída pelo teclado',
@@ -1340,31 +1359,31 @@ export function App() {
                 {
                   id: 'new-window',
                   label: 'Nova janela',
-                  keys: 'mod+shift+n',
+                  keys: keysFor('new-window'),
                   run: () => void ipc.newWindow(state.active != null ? workspace.info(state.active).cwd : cwd),
                 },
                 {
                   id: 'code-review',
                   label: showReview ? 'Fechar a revisão de código' : 'Revisão de código',
-                  keys: 'mod+shift+g',
+                  keys: keysFor('code-review'),
                   run: () => setShowReview((v) => !v),
                 },
                 {
                   id: 'sessions',
                   label: 'Sessões do Claude Code',
-                  keys: 'mod+shift+a',
+                  keys: keysFor('sessions'),
                   run: () => setShowSessions(true),
                 },
                 {
                   id: 'sidebar',
                   label: layout.sidebar ? 'Ocultar abas na lateral' : 'Mostrar abas na lateral',
-                  keys: 'mod+shift+b',
+                  keys: keysFor('toggle-sidebar'),
                   run: () => updateSettings({ layout: { ...layout, sidebar: !layout.sidebar } }),
                 },
                 {
                   id: 'collapse-sidebar',
                   label: layout.sidebarCollapsed ? 'Expandir a lateral' : 'Minimizar a lateral',
-                  keys: 'mod+alt+b',
+                  keys: keysFor('collapse-sidebar'),
                   run: () =>
                     updateSettings({
                       layout: { ...layout, sidebar: true, sidebarCollapsed: !layout.sidebarCollapsed },
@@ -1375,7 +1394,7 @@ export function App() {
                   label: broadcast
                     ? 'Parar de digitar em vários painéis'
                     : 'Digitar em vários painéis (grupo ou tela dividida)',
-                  keys: 'mod+alt+i',
+                  keys: keysFor('broadcast'),
                   run: () => setBroadcast((v) => !v),
                 },
                 ...(split
@@ -1383,7 +1402,7 @@ export function App() {
                       {
                         id: 'zoom-pane',
                         label: zoomed ? 'Voltar aos dois painéis' : 'Ampliar o painel atual',
-                        keys: 'mod+shift+enter',
+                        keys: keysFor('zoom-pane'),
                         run: () => state.active != null && dispatch({ type: 'zoom', key: state.active }),
                       },
                     ]
@@ -1399,14 +1418,19 @@ export function App() {
                   label: `Abrir layout: ${l.name}`,
                   run: () => openLayout(l),
                 })),
-                { id: 'shortcuts', label: 'Atalhos de teclado', keys: 'f1', run: () => setShowShortcuts(true) },
+                {
+                  id: 'shortcuts',
+                  label: 'Atalhos de teclado',
+                  keys: keysFor('shortcuts'),
+                  run: () => setShowShortcuts(true),
+                },
                 ...(isBackgroundActive(settings.background) && settings.background.images.length > 1
                   ? [{ id: 'background-next', label: 'Próxima imagem de fundo', run: requestNextBackground }]
                   : []),
                 {
                   id: 'workflows',
                   label: 'Workflows (comandos salvos)',
-                  keys: 'mod+shift+r',
+                  keys: keysFor('workflows'),
                   run: () => setWorkflowDialog({ open: true, initial: null }),
                 },
                 ...profiles

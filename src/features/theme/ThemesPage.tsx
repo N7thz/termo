@@ -6,6 +6,7 @@ import type { ITheme } from '@xterm/xterm'
 import { ArrowLeft } from 'lucide-react'
 import { type KeyboardEvent, useEffect, useMemo, useState } from 'react'
 import { ipc } from '../../lib/ipc'
+import { Scroller } from '../../lib/Scroller'
 import { actionButton } from '../../lib/ui'
 import { filterGallery, rowStep, type SchemeFilter } from './gallery'
 import { DEFAULT_DARK, DEFAULT_LIGHT, findTheme, THEME_OPTIONS, type ThemeOption } from './themes'
@@ -90,30 +91,32 @@ export function ThemesPage({ value, onChange, onPreview, onClose }: Props) {
         />
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4" onPointerLeave={() => preview(null)}>
-        {groups.length === 0 && <p className="py-16 text-center text-[13px] text-muted">Nenhum tema encontrado.</p>}
-        {groups.map((group) => (
-          <section key={group.label} aria-label={group.label} className="mb-6">
-            <h2 className="mb-2.5 text-[11px] font-semibold tracking-[0.06em] text-muted uppercase">{group.label}</h2>
-            <Listbox
-              aria-label={group.label}
-              orientation="horizontal"
-              activation="manual"
-              value={group.options.some((o) => o.id === value) ? value : null}
-              onValueChange={(id) => {
-                if (typeof id === 'string' && id) onChange(id)
-              }}
-              onHighlight={(id) => preview(typeof id === 'string' ? id : null)}
-              onKeyDown={moveByRow}
-              className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3"
-            >
-              {group.options.map((option) => (
-                <ThemeCard key={option.id} option={option} onPointerEnter={() => preview(option.id)} />
-              ))}
-            </Listbox>
-          </section>
-        ))}
-      </div>
+      <Scroller className="min-h-0 flex-1">
+        <div className="px-5 py-4" onPointerLeave={() => preview(null)}>
+          {groups.length === 0 && <p className="py-16 text-center text-[13px] text-muted">Nenhum tema encontrado.</p>}
+          {groups.map((group) => (
+            <section key={group.label} aria-label={group.label} className="mb-6">
+              <h2 className="mb-2.5 text-[11px] font-semibold tracking-[0.06em] text-muted uppercase">{group.label}</h2>
+              <Listbox
+                aria-label={group.label}
+                orientation="horizontal"
+                activation="manual"
+                value={group.options.some((o) => o.id === value) ? value : null}
+                onValueChange={(id) => {
+                  if (typeof id === 'string' && id) onChange(id)
+                }}
+                onHighlight={(id) => preview(typeof id === 'string' ? id : null)}
+                onKeyDown={moveByRow}
+                className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3"
+              >
+                {group.options.map((option) => (
+                  <ThemeCard key={option.id} option={option} onPointerEnter={() => preview(option.id)} />
+                ))}
+              </Listbox>
+            </section>
+          ))}
+        </div>
+      </Scroller>
 
       <footer className="flex items-center gap-3 border-t border-hairline px-5 py-2 text-[11px] text-muted">
         <span>Setas navegam · Enter aplica · digite para pular pelo nome · Esc volta</span>

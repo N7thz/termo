@@ -1,5 +1,6 @@
 //! Configurações em `<app config>/settings.json`, com validação e gravação atômica.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -66,6 +67,20 @@ pub struct Settings {
     pub osc_clipboard: bool,
     /// Programas podem mandar avisos pelo OSC 9 / OSC 777 (`printf '\e]9;pronto\a'`).
     pub osc_notifications: bool,
+    /// Atalhos trocados pela pessoa: ação do app (`new-shell`, `palette`...) → combinação (`Ctrl+Alt+T`).
+    /// Vazio desliga o atalho; a ação que não está aqui usa o padrão.
+    pub keybindings: BTreeMap<String, String>,
+}
+
+pub const MAX_KEYBINDINGS: usize = 100;
+
+/// Ações com id válido (letras minúsculas, números e hífen) e combinações no formato do atalho global.
+fn sanitize_keybindings(map: BTreeMap<String, String>) -> BTreeMap<String, String> {
+    map.into_iter()
+        .map(|(k, v)| (k, v.trim().to_string()))
+        .filter(|(k, v)| is_valid_theme_id(k) && is_valid_hotkey(v))
+        .take(MAX_KEYBINDINGS)
+        .collect()
 }
 
 pub const CONTRAST_LEVELS: &[f64] = &[1.0, 3.0, 4.5, 7.0];
@@ -213,6 +228,10 @@ pub struct BackgroundSettings {
     pub change_secs: u32,
     /// Ordem aleatória no slideshow.
     pub shuffle: bool,
+    /// Brilho suave atrás do terminal, nas cores do tema (some com a imagem atrás do terminal).
+    pub glow: bool,
+    /// Intensidade do brilho, em %: `GLOW_MIN` a 100.
+    pub glow_strength: u8,
 }
 
 impl Default for BackgroundSettings {
@@ -226,12 +245,15 @@ impl Default for BackgroundSettings {
             fit: "cover".into(),
             change_secs: 0,
             shuffle: false,
+            glow: true,
+            glow_strength: 50,
         }
     }
 }
 
 pub const MAX_BACKGROUNDS: usize = 50;
 pub const BG_OPACITY_MIN: u8 = 5;
+pub const GLOW_MIN: u8 = 10;
 pub const BG_BLUR_MAX: u8 = 40;
 pub const BG_CHANGE_MIN: u32 = 5;
 pub const BG_CHANGE_MAX: u32 = 86_400;
@@ -259,6 +281,7 @@ fn sanitize_background(mut b: BackgroundSettings) -> BackgroundSettings {
         b.fit = "cover".into();
     }
     b.opacity = b.opacity.clamp(BG_OPACITY_MIN, 100);
+    b.glow_strength = b.glow_strength.clamp(GLOW_MIN, 100);
     b.blur = b.blur.min(BG_BLUR_MAX);
     if b.change_secs != 0 {
         b.change_secs = b.change_secs.clamp(BG_CHANGE_MIN, BG_CHANGE_MAX);
@@ -623,6 +646,7 @@ impl Default for Settings {
             minimum_contrast: 1.0,
             osc_clipboard: true,
             osc_notifications: true,
+            keybindings: BTreeMap::new(),
         }
     }
 }
@@ -662,6 +686,8 @@ pub struct SettingsPatch {
     pub minimum_contrast: Option<f64>,
     pub osc_clipboard: Option<bool>,
     pub osc_notifications: Option<bool>,
+    /// Substitui todos os atalhos trocados de uma vez (validados no apply).
+    pub keybindings: Option<BTreeMap<String, String>>,
 }
 
 fn is_contrast_level(v: f64) -> bool {
@@ -775,6 +801,9 @@ impl Settings {
         if let Some(v) = patch.osc_clipboard {
             self.osc_clipboard = v;
         }
+        if let Some(v) = patch.keybindings {
+            self.keybindings = sanitize_keybindings(v);
+        }
         if let Some(v) = patch.osc_notifications {
             self.osc_notifications = v;
         }
@@ -813,6 +842,7 @@ impl SettingsStore {
                 }
                 s.background = sanitize_background(std::mem::take(&mut s.background));
                 s.layouts = sanitize_layouts(std::mem::take(&mut s.layouts));
+                s.keybindings = sanitize_keybindings(std::mem::take(&mut s.keybindings));
                 if !is_contrast_level(s.minimum_contrast) {
                     s.minimum_contrast = 1.0;
                 }
@@ -887,6 +917,8 @@ mod tests {
                 fit: "stretch".into(),
                 change_secs: 1,
                 shuffle: true,
+                glow: true,
+                glow_strength: 0,
             }),
             ..Default::default()
         });
@@ -894,6 +926,7 @@ mod tests {
         assert_eq!(b.images, vec!["C:/a.png".to_string(), "D:/b.jpg".to_string()]);
         assert_eq!((b.target.as_str(), b.fit.as_str()), ("terminal", "cover"));
         assert_eq!((b.opacity, b.blur, b.change_secs), (BG_OPACITY_MIN, BG_BLUR_MAX, BG_CHANGE_MIN));
+        assert_eq!(b.glow_strength, GLOW_MIN);
         // Arquivo antigo, sem o campo: desligado.
         let old: Settings = serde_json::from_str("{}").unwrap();
         assert_eq!(old.background, BackgroundSettings::default());
@@ -1176,6 +1209,24 @@ mod tests {
         assert_eq!(s.interface_size, "large");
         let old: Settings = serde_json::from_str(r#"{"theme":"dracula"}"#).unwrap();
         assert_eq!(old.interface_size, "medium");
+    }
+
+    #[test]
+    fn keybindings_keep_only_valid_entries() {
+        let mut s = Settings::default();
+        let map: BTreeMap<String, String> = [
+            ("new-shell", "Ctrl+Alt+T"),
+            ("palette", ""),
+            ("Bad Id", "Ctrl+X"),
+            ("themes", "Ctrl+<script>"),
+            ("font-up", " Ctrl+Equal "),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        s.apply(SettingsPatch { keybindings: Some(map), ..Default::default() });
+        let got: Vec<(&str, &str)> = s.keybindings.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        assert_eq!(got, vec![("font-up", "Ctrl+Equal"), ("new-shell", "Ctrl+Alt+T"), ("palette", "")]);
     }
 
     #[test]

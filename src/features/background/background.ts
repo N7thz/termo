@@ -92,9 +92,13 @@ export function imageStyle(b: Pick<BackgroundSettings, 'fit' | 'blur'>, url: str
 /** Fundo do tema com transparência total, no formato que o xterm entende. */
 export const TRANSPARENT = '#00000000'
 
-/** O tema do terminal com o fundo transparente (a cor da seleção e do cursor continuam). */
+/**
+ * O tema do terminal com o fundo transparente (a cor da seleção e do cursor continuam). Mantém o RGB
+ * do fundo com alfa 0: o contraste mínimo do xterm calcula contra ele, e não contra o preto.
+ */
 export function transparentTheme<T extends { background?: string }>(theme: T): T {
-  return { ...theme, background: TRANSPARENT }
+  const bg = theme.background?.trim()
+  return { ...theme, background: bg && /^#[0-9a-f]{6}$/i.test(bg) ? `${bg}00` : TRANSPARENT }
 }
 
 /** Cor com alfa abaixo de 1 (`#rrggbbaa`, `rgba(...)`, `transparent`): o xterm precisa de `allowTransparency`. */
@@ -107,4 +111,68 @@ export function isTranslucent(color: string | undefined): boolean {
   if (!m) return false
   const parts = m[1].split(/[\s,/]+/).filter(Boolean)
   return parts.length === 4 && Number.parseFloat(parts[3]) < 1
+}
+
+/** Limites do brilho do tema (mesmos do Rust). */
+export const GLOW_MIN = 10
+export const clampGlow = (n: number) => clamp(n, GLOW_MIN, 100, 50)
+
+/** O brilho aparece: ligado e sem imagem atrás do terminal (a imagem manda). */
+export function wantsGlow(b: BackgroundSettings | undefined): boolean {
+  return (b?.glow ?? true) && !wantsTransparentTerminal(b)
+}
+
+/** Opacidade máxima de cada halo em 100%: baixa para o texto nunca perder contraste. */
+const GLOW_PEAK = { dark: 0.3, light: 0.18 } as const
+
+function rgbOf(hex: string | undefined): [number, number, number] | null {
+  const m = /^#([0-9a-f]{6})(?:[0-9a-f]{2})?$/i.exec(hex?.trim() ?? '')
+  if (!m) return null
+  const v = Number.parseInt(m[1], 16)
+  return [(v >> 16) & 255, (v >> 8) & 255, v & 255]
+}
+
+/** Distância simples entre duas cores (0 a ~441); null se alguma não for hex. */
+export function colorDistance(a: string | undefined, b: string | undefined): number | null {
+  const x = rgbOf(a)
+  const y = rgbOf(b)
+  if (!x || !y) return null
+  return Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2])
+}
+
+/**
+ * Segundo tom do brilho: o magenta do tema, ou o ciano quando o magenta é quase o destaque
+ * (dois halos da mesma cor viram uma mancha só).
+ */
+export function glowTone(accent: string, ansi: { magenta?: string; cyan?: string; blue?: string }): string {
+  const candidates = [ansi.magenta, ansi.cyan, ansi.blue].filter((c): c is string => !!c)
+  for (const c of candidates) {
+    const d = colorDistance(c, accent)
+    if (d === null || d > 60) return c
+  }
+  return candidates[0] ?? accent
+}
+
+/**
+ * Fundo do cartão do terminal com o brilho: a cor de fundo do terminal e dois halos difusos,
+ * o destaque no alto à esquerda e o segundo tom embaixo à direita.
+ */
+export function glowStyle(opts: {
+  base: string
+  accent: string
+  tone: string
+  scheme: 'dark' | 'light'
+  strength: number
+}): CSSProperties {
+  const alpha = (GLOW_PEAK[opts.scheme] * clampGlow(opts.strength)) / 100
+  const pct = (a: number) => `${Math.round(a * 1000) / 10}%`
+  const halo = (color: string, a: number, at: string, size: string) =>
+    `radial-gradient(${size} at ${at}, color-mix(in srgb, ${color} ${pct(a)}, transparent), transparent 70%)`
+  return {
+    backgroundColor: opts.base,
+    backgroundImage: [
+      halo(opts.accent, alpha, '0% 0%', '70% 65%'),
+      halo(opts.tone, alpha * 0.8, '100% 100%', '65% 60%'),
+    ].join(', '),
+  }
 }

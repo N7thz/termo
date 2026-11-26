@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { rememberBootTheme } from '../boot/boot'
 import { resolveTheme, type ThemeDefinition, type UiTokens } from './themes'
 
 const VAR_NAMES: Record<Exclude<keyof UiTokens, 'shadowStrength'>, string> = {
@@ -43,7 +44,10 @@ export function useTheme(themeId: string): ThemeDefinition {
 
   const theme = useMemo(() => resolveTheme(themeId, prefersDark), [themeId, prefersDark])
 
-  useEffect(() => applyTheme(theme), [theme])
+  useEffect(() => {
+    applyTheme(theme)
+    rememberBootTheme(theme)
+  }, [theme])
 
   return theme
 }

@@ -5,6 +5,7 @@ import { Switch, SwitchThumb } from '@ui-sdk/react/switch'
 import { Download, Upload } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { ipc } from '../../lib/ipc'
+import { Scroller } from '../../lib/Scroller'
 import type { Settings } from '../../shared/types'
 import { formatExportedAt, type ImportFile, isEmptyPatch, patchFor, previewImport, type SectionId } from './configFile'
 
@@ -187,79 +188,81 @@ function ImportDialog({
           </span>
         </div>
 
-        <div className="flex min-h-0 flex-col gap-2.5 overflow-y-auto px-4 py-3">
-          {changing.length === 0 ? (
-            <p className="m-0 py-4 text-center text-[13px] text-muted" role="status">
-              O arquivo é igual às suas configurações: não há nada para importar.
-            </p>
-          ) : (
-            <>
-              <p className={DESCRIPTION}>
-                Escolha o que trazer. Perfis, workflows e layouts se juntam aos seus: os de mesmo nome são substituídos
-                e nada seu é apagado.
+        <Scroller className="min-h-0">
+          <div className="flex flex-col gap-2.5 px-4 py-3">
+            {changing.length === 0 ? (
+              <p className="m-0 py-4 text-center text-[13px] text-muted" role="status">
+                O arquivo é igual às suas configurações: não há nada para importar.
               </p>
-              {previews.map((p) => {
-                const unchanged = isEmptyPatch(p.patch)
-                return (
-                  <Field key={p.id} className={ROW}>
-                    <span className="flex min-w-0 flex-col">
-                      <FieldLabel className={unchanged ? 'opacity-50' : undefined}>{p.label}</FieldLabel>
-                      <span className="text-[11.5px] text-muted">{p.summary}</span>
-                    </span>
-                    <Switch
-                      className={switchClass}
-                      checked={chosen.has(p.id)}
-                      disabled={unchanged || saving}
-                      onCheckedChange={(on) =>
-                        setOff((prev) => {
-                          const next = new Set(prev)
-                          if (on) next.delete(p.id)
-                          else next.add(p.id)
-                          return next
-                        })
-                      }
-                    >
-                      <SwitchThumb className={thumbClass} />
-                    </Switch>
-                  </Field>
-                )
-              })}
-            </>
-          )}
+            ) : (
+              <>
+                <p className={DESCRIPTION}>
+                  Escolha o que trazer. Perfis, workflows e layouts se juntam aos seus: os de mesmo nome são
+                  substituídos e nada seu é apagado.
+                </p>
+                {previews.map((p) => {
+                  const unchanged = isEmptyPatch(p.patch)
+                  return (
+                    <Field key={p.id} className={ROW}>
+                      <span className="flex min-w-0 flex-col">
+                        <FieldLabel className={unchanged ? 'opacity-50' : undefined}>{p.label}</FieldLabel>
+                        <span className="text-[11.5px] text-muted">{p.summary}</span>
+                      </span>
+                      <Switch
+                        className={switchClass}
+                        checked={chosen.has(p.id)}
+                        disabled={unchanged || saving}
+                        onCheckedChange={(on) =>
+                          setOff((prev) => {
+                            const next = new Set(prev)
+                            if (on) next.delete(p.id)
+                            else next.add(p.id)
+                            return next
+                          })
+                        }
+                      >
+                        <SwitchThumb className={thumbClass} />
+                      </Switch>
+                    </Field>
+                  )
+                })}
+              </>
+            )}
 
-          {file && file.missing.length > 0 && (
-            <Field className="flex flex-col gap-1 border-t border-hairline pt-2.5 text-[13px]">
-              <span className={ROW}>
-                <FieldLabel>Deixar de fora o que não existe nesta máquina</FieldLabel>
-                <Switch
-                  className={switchClass}
-                  checked={dropMissing}
-                  disabled={saving}
-                  onCheckedChange={setDropMissing}
-                >
-                  <SwitchThumb className={thumbClass} />
-                </Switch>
-              </span>
-              <details className="text-[11.5px] text-muted">
-                <summary className="cursor-pointer select-none">
-                  {file.missing.length} {file.missing.length === 1 ? 'pasta ou imagem' : 'pastas e imagens'} do arquivo
-                  não {file.missing.length === 1 ? 'existe' : 'existem'} aqui
-                </summary>
-                <ul className="m-0 mt-1 flex list-none flex-col gap-0.5 p-0 font-mono text-[11px] break-all">
-                  {file.missing.map((p) => (
-                    <li key={p}>{p}</li>
-                  ))}
-                </ul>
-              </details>
-            </Field>
-          )}
+            {file && file.missing.length > 0 && (
+              <Field className="flex flex-col gap-1 border-t border-hairline pt-2.5 text-[13px]">
+                <span className={ROW}>
+                  <FieldLabel>Deixar de fora o que não existe nesta máquina</FieldLabel>
+                  <Switch
+                    className={switchClass}
+                    checked={dropMissing}
+                    disabled={saving}
+                    onCheckedChange={setDropMissing}
+                  >
+                    <SwitchThumb className={thumbClass} />
+                  </Switch>
+                </span>
+                <details className="text-[11.5px] text-muted">
+                  <summary className="cursor-pointer select-none">
+                    {file.missing.length} {file.missing.length === 1 ? 'pasta ou imagem' : 'pastas e imagens'} do
+                    arquivo não {file.missing.length === 1 ? 'existe' : 'existem'} aqui
+                  </summary>
+                  <ul className="m-0 mt-1 flex list-none flex-col gap-0.5 p-0 font-mono text-[11px] break-all">
+                    {file.missing.map((p) => (
+                      <li key={p}>{p}</li>
+                    ))}
+                  </ul>
+                </details>
+              </Field>
+            )}
 
-          {error && (
-            <p className="m-0 text-[11.5px] text-(--tone-red,var(--claude))" role="alert">
-              Não deu para importar: {error}
-            </p>
-          )}
-        </div>
+            {error && (
+              <p className="m-0 text-[11.5px] text-(--tone-red,var(--claude))" role="alert">
+                Não deu para importar: {error}
+              </p>
+            )}
+          </div>
+        </Scroller>
 
         <div className="flex items-center justify-end gap-2 border-t border-hairline px-4 py-2.5">
           <button type="button" className={BUTTON} disabled={saving} onClick={onClose}>

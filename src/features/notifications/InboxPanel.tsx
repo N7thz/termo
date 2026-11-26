@@ -12,6 +12,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react'
+import { Scroller } from '../../lib/Scroller'
 import { actionButton } from '../../lib/ui'
 import { ClaudeIcon } from '../tabs/ClaudeIcon'
 import { badgeText, groupByDay, type InboxItem, type InboxKind, pending, relativeTime, unreadCount } from './inbox'
@@ -218,29 +219,31 @@ export function InboxPanel({ inbox, open, onOpenChange: setOpen, tabExists, onOp
             </p>
           </div>
         ) : (
-          // biome-ignore lint/a11y/noStaticElementInteractions: só repassa as setas para as linhas (botões)
-          <div
-            ref={listRef}
-            className="min-h-0 flex-1 overflow-y-auto p-1"
-            onKeyDown={onListKey}
-            onPointerEnter={() => setFrozen(inbox.items)}
-            onPointerLeave={() => setFrozen(null)}
-          >
-            {waiting.length > 0 && (
-              <section aria-label="Esperando você">
-                <div className={GROUP_LABEL} style={{ color: YELLOW }}>
-                  Esperando você
-                </div>
-                <ul className="m-0 flex list-none flex-col p-0">{waiting.map(row)}</ul>
-              </section>
-            )}
-            {groups.map((g) => (
-              <section key={g.label} aria-label={g.label}>
-                <div className={GROUP_LABEL}>{g.label}</div>
-                <ul className="m-0 flex list-none flex-col p-0">{g.items.map(row)}</ul>
-              </section>
-            ))}
-          </div>
+          <Scroller className="min-h-0 flex-1">
+            {/* biome-ignore lint/a11y/noStaticElementInteractions: só repassa as setas para as linhas (botões) */}
+            <div
+              ref={listRef}
+              className="p-1"
+              onKeyDown={onListKey}
+              onPointerEnter={() => setFrozen(inbox.items)}
+              onPointerLeave={() => setFrozen(null)}
+            >
+              {waiting.length > 0 && (
+                <section aria-label="Esperando você">
+                  <div className={GROUP_LABEL} style={{ color: YELLOW }}>
+                    Esperando você
+                  </div>
+                  <ul className="m-0 flex list-none flex-col p-0">{waiting.map(row)}</ul>
+                </section>
+              )}
+              {groups.map((g) => (
+                <section key={g.label} aria-label={g.label}>
+                  <div className={GROUP_LABEL}>{g.label}</div>
+                  <ul className="m-0 flex list-none flex-col p-0">{g.items.map(row)}</ul>
+                </section>
+              ))}
+            </div>
+          </Scroller>
         )}
 
         {(inbox.coordDown || inbox.saveFailed) && (

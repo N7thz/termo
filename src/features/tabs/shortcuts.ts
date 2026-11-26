@@ -1,3 +1,5 @@
+import { comboFromEvent } from '../settings/hotkey'
+
 export type TabNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
 export type ProfileNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
 
@@ -299,15 +301,94 @@ export const SHORTCUTS: readonly Shortcut[] = [
 
 export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = ['Abas', 'Perfis', 'Terminal', 'Janela']
 
-/** Atalhos do app, no estilo do Warp / Windows Terminal. */
+// ---- Atalhos trocados pela pessoa (Configurações → Atalhos de teclado) ----
+
+/** Ação → combinação no formato do atalho global (`Ctrl+Alt+T`); `''` desliga. Vem de `settings.keybindings`. */
+let bindings: Readonly<Record<string, string>> = {}
+/** A folha de atalhos está gravando uma combinação: nenhuma ação dispara. */
+let recording = false
+
+export function setKeybindings(map: Readonly<Record<string, string>> | undefined) {
+  bindings = map ?? {}
+}
+
+export function setRecordingShortcut(on: boolean) {
+  recording = on
+}
+
+const isOverridden = (action: string) => Object.hasOwn(bindings, action)
+const ACTIONS = new Set<string>(SHORTCUTS.flatMap((s) => (s.action ? [s.action] : [])))
+
+/** Atalhos do app, no estilo do Warp / Windows Terminal; os trocados valem antes dos padrões. */
 export function actionFor(e: KeyboardEvent): AppAction | null {
-  for (const s of SHORTCUTS) if (s.action && s.match?.(e)) return s.action
+  if (recording) return null
+  const combo = comboFromEvent(e)
+  if (combo) {
+    const n = normalizeKeys(uiKeys(combo))
+    for (const [action, c] of Object.entries(bindings)) {
+      if (c && ACTIONS.has(action) && normalizeKeys(uiKeys(c)) === n) return action as AppAction
+    }
+  }
+  for (const s of SHORTCUTS) if (s.action && !isOverridden(s.action) && s.match?.(e)) return s.action
   return null
 }
 
 export const isAppShortcut = (e: KeyboardEvent) => actionFor(e) !== null
 
+/** Tecla física (`code`) → tecla no formato do UI SDK. */
+const CODE_KEYS: Record<string, string> = {
+  Comma: ',',
+  Period: '.',
+  Slash: '/',
+  IntlRo: '/',
+  Backslash: '\\',
+  Minus: '-',
+  Equal: '=',
+  Semicolon: ';',
+  Quote: "'",
+  BracketLeft: '[',
+  BracketRight: ']',
+  Backquote: '`',
+}
+const MOD_KEYS: Record<string, string> = { Ctrl: 'mod', Alt: 'alt', Shift: 'shift', Super: 'meta' }
+
+/** `Ctrl+Shift+Comma` → `mod+shift+,` (o formato das dicas de atalho do UI SDK). */
+export function uiKeys(combo: string): string {
+  const parts = combo.split('+')
+  const last = parts.pop() ?? ''
+  const mods = parts.map((m) => MOD_KEYS[m] ?? m.toLowerCase())
+  return [...mods, CODE_KEYS[last] ?? last.toLowerCase()].join('+')
+}
+
+/** Mesma combinação com os modificadores em qualquer ordem (`shift+mod+t` = `mod+shift+t`). */
+export function normalizeKeys(keys: string): string {
+  const parts = keys.toLowerCase().split('+')
+  const last = parts.pop() ?? ''
+  return [...parts.sort(), last].join('+')
+}
+
+/** Teclas que valem agora para o atalho: as trocadas (vazio se desligado) ou as padrão. */
+export function effectiveKeys(s: Shortcut): readonly string[] {
+  if (!s.action || !isOverridden(s.action)) return s.keys
+  const c = bindings[s.action]
+  return c ? [uiKeys(c)] : []
+}
+
 /** O primeiro atalho de uma ação, no formato do UI SDK, para dicas em menus e tooltips. */
 export function keysFor(action: AppAction): string | undefined {
-  return SHORTCUTS.find((s) => s.action === action)?.keys[0]
+  const s = SHORTCUTS.find((x) => x.action === action)
+  return s ? effectiveKeys(s)[0] : undefined
+}
+
+/**
+ * Quem já usa a combinação: outra ação do app (que pode ceder) ou um atalho do terminal (Copiar, Colar,
+ * Buscar..., que não muda). `null` se está livre.
+ */
+export function conflictOf(action: AppAction, combo: string): { action?: AppAction; label: string } | null {
+  const n = normalizeKeys(uiKeys(combo))
+  for (const s of SHORTCUTS) {
+    if (s.action === action) continue
+    if (effectiveKeys(s).some((k) => normalizeKeys(k) === n)) return { action: s.action, label: s.label }
+  }
+  return null
 }

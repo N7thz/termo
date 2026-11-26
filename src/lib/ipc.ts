@@ -32,6 +32,8 @@ import type {
 
 export const ipc = {
   launchInfo: () => invoke<LaunchInfo>('launch_info'),
+  /** Fundo da janela nativa (#rrggbb), guardado para a próxima abertura já começar com ele. */
+  setWindowColor: (color: string) => invoke<void>('set_window_color', { color }),
 
   /** Abre uma sessão; `onEvent` recebe a saída e o fim do processo. */
   createSession(opts: CreateSessionOptions, onEvent: (ev: PtyEvent) => void) {

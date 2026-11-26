@@ -62,6 +62,18 @@ movimento com mola e respeito a "reduzir movimento". A cor aparece pouco e signi
   plano" e "terminou/falhou" (segundo plano), para não virar ruído. Aprovado pelo usuário.
 - 2026-11-25: worktree e nota por aba entram nos padrões existentes: janela de diálogo como a de Layouts, item
   no menu da seta do +; a nota é uma terceira linha no cartão da aba (ícone de nota + última linha).
+- 2026-11-26: tela de carregamento da janela (`#boot` no index.html + public/boot.js, some por `bootDone()`
+  quando as configurações e a sessão chegam). Ícone + "Termo" com cursor piscando no `--accent`, entrada com
+  fade subindo; barra fina só após 400 ms (abertura rápida não pisca nada); após 8 s, "Está demorando mais que o
+  normal" + Fechar. A camada toda arrasta a janela. Cores do último tema guardadas (localStorage para a página,
+  arquivo `window-color` para a janela nativa pelo Rust), porque o tema só é conhecido depois que o JS carrega.
+  Reduzir movimento: sem animação. Aprovado pelo usuário, que pediu a animação.
+- 2026-11-26: brilho do tema atrás do terminal (escolhido: "brilho suave", com chave e intensidade). Dois halos
+  radiais parados: `--accent` no alto à esquerda e um tom ANSI (magenta, ou ciano/azul se o magenta for quase o
+  destaque) embaixo à direita, sobre o fundo do terminal; um por cartão. Pico de 30% (escuro) / 18% (claro) em
+  100%, padrão ligado em 50%, ajuste 10–100% em Configurações › Imagem de fundo › "Brilho do tema". Some quando
+  há imagem atrás do terminal; com contraste alto ou transparência reduzida fica só a cor lisa. O xterm fica
+  transparente mantendo o RGB do fundo (`#rrggbb00`), para o contraste mínimo calcular contra a cor certa.
 
 ## Open questions
 

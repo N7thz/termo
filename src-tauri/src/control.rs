@@ -105,6 +105,8 @@ const CONFIG_SECTIONS: &[(&str, &str)] = &[
     ("sistema", "system"),
     ("avisos", "system"),
     ("system", "system"),
+    ("atalhos", "keybindings"),
+    ("keybindings", "keybindings"),
 ];
 
 const CONFIG_USAGE: &str = "uso: termo config export [arquivo|-] [--force] | termo config import <arquivo> [--only perfis,workflows] [--keep-missing] [--dry-run]";
@@ -130,7 +132,7 @@ fn parse_config(rest: &[String], cwd: &Path) -> Result<Action, String> {
                 for name in list.split(',').map(str::trim).filter(|n| !n.is_empty()) {
                     let key = name.to_lowercase().replace('ê', "e");
                     let id = CONFIG_SECTIONS.iter().find(|(n, _)| *n == key).map(|(_, id)| id.to_string()).ok_or_else(|| {
-                        format!("seção desconhecida: {name} (use aparencia, terminal, fundo, destaques, perfis, workflows, layouts ou sistema)")
+                        format!("seção desconhecida: {name} (use aparencia, terminal, fundo, destaques, perfis, workflows, layouts, sistema ou atalhos)")
                     })?;
                     if !sections.contains(&id) {
                         sections.push(id);

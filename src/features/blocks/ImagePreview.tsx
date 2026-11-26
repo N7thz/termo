@@ -1,6 +1,7 @@
 import { ImageOff, LoaderCircle, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { ipc } from '../../lib/ipc'
+import { Scroller } from '../../lib/Scroller'
 
 /** Onde o popover abre, em px dentro da área do terminal: alinhado à direita do botão, embaixo dele. */
 export interface ImagePreviewAnchor {
@@ -88,32 +89,38 @@ export function ImagePreview({
           <X size={13} />
         </button>
       </div>
-      <div className="grid min-h-0 grid-cols-3 gap-2 overflow-y-auto px-3 pb-3">
-        {paths.map((p) => {
-          const t = thumbs[p] ?? { state: 'loading' }
-          return (
-            <button
-              key={p}
-              type="button"
-              title={t.state === 'error' ? `${p}\n${t.message}` : p}
-              className="group flex min-w-0 flex-col gap-1 rounded-lg p-1 text-left outline-none hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-accent"
-              onClick={() => void ipc.imageOpen(p).catch(() => undefined)}
-            >
-              <span className="grid aspect-square w-full place-items-center overflow-hidden rounded-md border border-hairline bg-bg">
-                {t.state === 'ok' ? (
-                  <img src={t.src} alt="" className="size-full object-contain" draggable={false} />
-                ) : t.state === 'loading' ? (
-                  <LoaderCircle aria-hidden size={16} className="animate-spin text-muted motion-reduce:animate-none" />
-                ) : (
-                  <ImageOff aria-hidden size={16} className="text-muted" />
-                )}
-              </span>
-              <span className="truncate px-0.5 text-[11.5px]">{fileName(p)}</span>
-              {t.state === 'ok' && <span className="px-0.5 text-[10.5px] text-muted">{size(t.bytes)}</span>}
-            </button>
-          )
-        })}
-      </div>
+      <Scroller className="min-h-0">
+        <div className="grid grid-cols-3 gap-2 px-3 pb-3">
+          {paths.map((p) => {
+            const t = thumbs[p] ?? { state: 'loading' }
+            return (
+              <button
+                key={p}
+                type="button"
+                title={t.state === 'error' ? `${p}\n${t.message}` : p}
+                className="group flex min-w-0 flex-col gap-1 rounded-lg p-1 text-left outline-none hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-accent"
+                onClick={() => void ipc.imageOpen(p).catch(() => undefined)}
+              >
+                <span className="grid aspect-square w-full place-items-center overflow-hidden rounded-md border border-hairline bg-bg">
+                  {t.state === 'ok' ? (
+                    <img src={t.src} alt="" className="size-full object-contain" draggable={false} />
+                  ) : t.state === 'loading' ? (
+                    <LoaderCircle
+                      aria-hidden
+                      size={16}
+                      className="animate-spin text-muted motion-reduce:animate-none"
+                    />
+                  ) : (
+                    <ImageOff aria-hidden size={16} className="text-muted" />
+                  )}
+                </span>
+                <span className="truncate px-0.5 text-[11.5px]">{fileName(p)}</span>
+                {t.state === 'ok' && <span className="px-0.5 text-[10.5px] text-muted">{size(t.bytes)}</span>}
+              </button>
+            )
+          })}
+        </div>
+      </Scroller>
     </div>
   )
 }

@@ -4,8 +4,123 @@
     <meta charset="UTF-8" />
     <!-- A CSP fica no tauri.conf.json (app.security.csp), que o Tauri injeta no build. -->
     <title>Termo</title>
+    <!-- Tela de carregamento: estilo aqui (e não no CSS do app) para valer antes do bundle chegar. -->
+    <style>
+      html { background: #0f1117; }
+      #boot {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        display: grid;
+        place-items: center;
+        background: var(--boot-bg, #0f1117);
+        color: var(--boot-muted, #7d8597);
+        font: 13px / 1.4 "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+        user-select: none;
+        cursor: default;
+        transition: opacity 180ms ease-out;
+      }
+      #boot.is-done { opacity: 0; pointer-events: none; }
+      #boot .boot-center { position: relative; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+      #boot .boot-brand { display: flex; align-items: center; gap: 10px; }
+      #boot .boot-brand img { width: 28px; height: 28px; opacity: 0.9; }
+      #boot .boot-brand span { font-size: 15px; font-weight: 500; letter-spacing: 0.01em; color: var(--boot-text, #d7dce4); opacity: 0.85; }
+      #boot.is-done .boot-center { transform: scale(1.04); transition: transform 180ms ease-out; }
+      /* Entrada: a marca sobe e aparece; o cursor pisca como no terminal. */
+      #boot .boot-brand { animation: boot-in 420ms cubic-bezier(0.2, 0.9, 0.3, 1.15) both; }
+      #boot .boot-cursor {
+        display: inline-block;
+        width: 2px;
+        height: 16px;
+        margin-left: 2px;
+        vertical-align: -3px;
+        border-radius: 1px;
+        background: var(--boot-accent, #7aa2ff);
+        animation: boot-blink 1s steps(1, end) 420ms infinite;
+      }
+      #boot .boot-track {
+        position: relative;
+        width: 120px;
+        height: 2px;
+        overflow: hidden;
+        border-radius: 2px;
+        background: color-mix(in oklab, var(--boot-muted, #7d8597) 22%, transparent);
+        opacity: 0;
+        transition: opacity 200ms ease-out;
+      }
+      #boot .boot-track::after {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 40%;
+        border-radius: 2px;
+        background: var(--boot-accent, #7aa2ff);
+        animation: boot-slide 1.1s ease-in-out infinite;
+      }
+      #boot.is-waiting .boot-track { opacity: 1; }
+      /* Fora do fluxo: o aviso aparece abaixo sem tirar a marca do centro. */
+      #boot .boot-stuck {
+        position: absolute;
+        top: calc(100% + 20px);
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        white-space: nowrap;
+        visibility: hidden;
+      }
+      #boot.is-stuck .boot-stuck { visibility: visible; }
+      #boot .boot-stuck button {
+        font: inherit;
+        color: var(--boot-text, #d7dce4);
+        background: transparent;
+        border: 1px solid color-mix(in oklab, var(--boot-muted, #7d8597) 40%, transparent);
+        border-radius: 6px;
+        padding: 3px 12px;
+      }
+      #boot .boot-stuck button:hover { background: color-mix(in oklab, var(--boot-muted, #7d8597) 14%, transparent); }
+      #boot .boot-stuck button:focus-visible { outline: 2px solid var(--boot-accent, #7aa2ff); outline-offset: 2px; }
+      @keyframes boot-in {
+        from { opacity: 0; transform: translateY(6px) scale(0.98); }
+        to { opacity: 1; transform: none; }
+      }
+      @keyframes boot-blink {
+        50% { opacity: 0; }
+      }
+      @keyframes boot-slide {
+        from { transform: translateX(-100%); }
+        to { transform: translateX(250%); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #boot { transition: none; }
+        #boot .boot-brand, #boot .boot-cursor { animation: none; }
+        #boot.is-done .boot-center { transform: none; }
+        #boot .boot-track::after { animation: none; width: 100%; opacity: 0.55; }
+      }
+      @media (prefers-contrast: more) {
+        #boot { color: var(--boot-text, #d7dce4); }
+        #boot .boot-track { background: var(--boot-muted, #7d8597); }
+      }
+    </style>
   </head>
   <body>
+    <!-- A camada inteira arrasta a janela (sem bordas, a barra de título ainda não existe). -->
+    <div id="boot" data-tauri-drag-region role="status" aria-live="polite" aria-label="Carregando o Termo">
+      <div class="boot-center" data-tauri-drag-region>
+        <div class="boot-brand" data-tauri-drag-region>
+          <img src="/boot-icon.png" alt="" draggable="false" data-tauri-drag-region />
+          <span data-tauri-drag-region>Termo<i class="boot-cursor" data-tauri-drag-region></i></span>
+        </div>
+        <div class="boot-track" data-tauri-drag-region></div>
+        <div class="boot-stuck" data-tauri-drag-region>
+          <span data-tauri-drag-region>Está demorando mais que o normal.</span>
+          <button id="boot-close" type="button">Fechar</button>
+        </div>
+      </div>
+    </div>
+    <script src="/boot.js"></script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

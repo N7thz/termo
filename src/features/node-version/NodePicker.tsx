@@ -2,6 +2,7 @@ import { Menu, MenuContent, MenuGroup, MenuGroupLabel, MenuItem, MenuSeparator, 
 import { Check, ChevronDown, Download, Hexagon } from 'lucide-react'
 import { useState } from 'react'
 import { ipc } from '../../lib/ipc'
+import { Scroller } from '../../lib/Scroller'
 import { menuContent, menuItem, menuSeparator } from '../../lib/ui'
 import { INSTALL_FNM, installCommand, MANAGER_NAME, satisfies, switchCommand } from './commands'
 import type { NodeInfo, NodeVersions } from './types'
@@ -57,72 +58,76 @@ export function NodePicker({ info, color, className = '', canRun, onRun }: Props
       </MenuTrigger>
       <MenuContent
         // font-sans: o menu herda a fonte do terminal da linha de contexto; os menus usam a da interface.
-        className={`${menuContent} max-h-[min(420px,70vh)] max-w-[min(380px,90vw)] overflow-y-auto font-sans`}
+        className={`${menuContent} max-w-[min(380px,90vw)] font-sans`}
         side="top"
         align="start"
         sideOffset={6}
         collisionPadding={8}
         aria-label="Versões do Node"
       >
-        {!canRun && <div className="px-2.5 py-[5px] text-muted">Espere o comando atual terminar</div>}
-        {list == null && <div className="px-2.5 py-[5px] text-muted">Procurando versões…</div>}
-        {list && manager == null && (
-          <>
-            <div className="max-w-[300px] px-2.5 py-[5px] text-[12px] text-muted">
-              Nenhum gerenciador de versões encontrado (fnm, nvm-windows ou Volta). Instale o fnm e abra uma aba nova
-              para trocar de versão por aqui.
-            </div>
-            <MenuItem className={menuItem} disabled={!canRun} onSelect={() => run(INSTALL_FNM)}>
-              <Download aria-hidden size={13} className="flex-none text-muted" />
-              <span className="flex-1">Instalar o fnm</span>
-              <span className="font-mono text-[11px] text-muted">winget</span>
-            </MenuItem>
-          </>
-        )}
-        {manager && (
-          <MenuGroup>
-            <MenuGroupLabel className={groupLabel}>Instaladas · {MANAGER_NAME[manager]}</MenuGroupLabel>
-            {list?.versions.length === 0 && <div className="px-2.5 py-[5px] text-muted">Nenhuma versão instalada</div>}
-            {list?.versions.map((v) => {
-              const current = v === info.version
-              return (
+        <Scroller viewportClassName="max-h-[min(420px,70vh)] min-h-0">
+          {!canRun && <div className="px-2.5 py-[5px] text-muted">Espere o comando atual terminar</div>}
+          {list == null && <div className="px-2.5 py-[5px] text-muted">Procurando versões…</div>}
+          {list && manager == null && (
+            <>
+              <div className="max-w-[300px] px-2.5 py-[5px] text-[12px] text-muted">
+                Nenhum gerenciador de versões encontrado (fnm, nvm-windows ou Volta). Instale o fnm e abra uma aba nova
+                para trocar de versão por aqui.
+              </div>
+              <MenuItem className={menuItem} disabled={!canRun} onSelect={() => run(INSTALL_FNM)}>
+                <Download aria-hidden size={13} className="flex-none text-muted" />
+                <span className="flex-1">Instalar o fnm</span>
+                <span className="font-mono text-[11px] text-muted">winget</span>
+              </MenuItem>
+            </>
+          )}
+          {manager && (
+            <MenuGroup>
+              <MenuGroupLabel className={groupLabel}>Instaladas · {MANAGER_NAME[manager]}</MenuGroupLabel>
+              {list?.versions.length === 0 && (
+                <div className="px-2.5 py-[5px] text-muted">Nenhuma versão instalada</div>
+              )}
+              {list?.versions.map((v) => {
+                const current = v === info.version
+                return (
+                  <MenuItem
+                    key={v}
+                    className={menuItem}
+                    disabled={!canRun}
+                    onSelect={() => !current && run(switchCommand(manager, v))}
+                  >
+                    <span className="grid size-3.5 flex-none place-items-center">
+                      {current && <Check aria-hidden size={13} className="text-accent" />}
+                    </span>
+                    <span className={`flex-1 font-mono ${current ? 'font-[600]' : ''}`}>v{v}</span>
+                    {info.wanted && satisfies(v, info.wanted) && (
+                      <span className="text-[11px] text-muted">pedida pelo projeto</span>
+                    )}
+                  </MenuItem>
+                )
+              })}
+            </MenuGroup>
+          )}
+          {manager && (
+            <>
+              <MenuSeparator className={menuSeparator} />
+              {info.wanted && !wantedInstalled && (
                 <MenuItem
-                  key={v}
                   className={menuItem}
                   disabled={!canRun}
-                  onSelect={() => !current && run(switchCommand(manager, v))}
+                  onSelect={() => run(installCommand(manager, info.wanted as string))}
                 >
-                  <span className="grid size-3.5 flex-none place-items-center">
-                    {current && <Check aria-hidden size={13} className="text-accent" />}
-                  </span>
-                  <span className={`flex-1 font-mono ${current ? 'font-[600]' : ''}`}>v{v}</span>
-                  {info.wanted && satisfies(v, info.wanted) && (
-                    <span className="text-[11px] text-muted">pedida pelo projeto</span>
-                  )}
+                  <Download aria-hidden size={13} className="flex-none text-muted" />
+                  <span className="flex-1">Instalar a {info.wanted} (pedida pelo projeto)</span>
                 </MenuItem>
-              )
-            })}
-          </MenuGroup>
-        )}
-        {manager && (
-          <>
-            <MenuSeparator className={menuSeparator} />
-            {info.wanted && !wantedInstalled && (
-              <MenuItem
-                className={menuItem}
-                disabled={!canRun}
-                onSelect={() => run(installCommand(manager, info.wanted as string))}
-              >
+              )}
+              <MenuItem className={menuItem} disabled={!canRun} onSelect={() => run(installCommand(manager, 'lts'))}>
                 <Download aria-hidden size={13} className="flex-none text-muted" />
-                <span className="flex-1">Instalar a {info.wanted} (pedida pelo projeto)</span>
+                <span className="flex-1">Instalar a LTS mais recente</span>
               </MenuItem>
-            )}
-            <MenuItem className={menuItem} disabled={!canRun} onSelect={() => run(installCommand(manager, 'lts'))}>
-              <Download aria-hidden size={13} className="flex-none text-muted" />
-              <span className="flex-1">Instalar a LTS mais recente</span>
-            </MenuItem>
-          </>
-        )}
+            </>
+          )}
+        </Scroller>
       </MenuContent>
     </Menu>
   )

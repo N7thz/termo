@@ -1,19 +1,37 @@
 import { formatShortcut } from '@ui-sdk/core/shortcuts'
 import { Dialog, DialogBackdrop, DialogClose, DialogContent, DialogTitle } from '@ui-sdk/react/dialog'
-import { X } from 'lucide-react'
-import { Fragment } from 'react'
+import { RotateCcw, X } from 'lucide-react'
+import { Fragment, useEffect, useState } from 'react'
+import { Scroller } from '../../lib/Scroller'
 import { actionButton } from '../../lib/ui'
-import { SHORTCUT_GROUPS, SHORTCUTS } from '../tabs/shortcuts'
+import { comboFromEvent } from '../settings/hotkey'
+import {
+  type AppAction,
+  conflictOf,
+  effectiveKeys,
+  normalizeKeys,
+  SHORTCUT_GROUPS,
+  SHORTCUTS,
+  type Shortcut,
+  setRecordingShortcut,
+  uiKeys,
+} from '../tabs/shortcuts'
 
 interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Atalhos trocados (`settings.keybindings`). */
+  bindings: Readonly<Record<string, string>>
+  /** Grava a lista inteira de atalhos trocados. */
+  onChange: (next: Record<string, string>) => void
 }
 
 interface Row {
   label: string
   keys: readonly string[]
   range: boolean
+  /** Atalho que dá para trocar (os do terminal e o "Ir para a aba 1 a 8" não). */
+  shortcut?: Shortcut & { action: AppAction }
 }
 
 const tabJumps = SHORTCUTS.filter((s) => s.action?.startsWith('tab-'))
@@ -26,59 +44,193 @@ function rows(group: string): Row[] {
     if (s === tabJumps[0]) {
       out.push({ label: 'Ir para a aba 1 a 8', keys: [s.keys[0], tabJumps[tabJumps.length - 1].keys[0]], range: true })
     } else if (!tabJumps.includes(s)) {
-      out.push({ label: s.label, keys: s.keys, range: false })
+      out.push({
+        label: s.label,
+        keys: effectiveKeys(s),
+        range: false,
+        shortcut: s.action ? (s as Shortcut & { action: AppAction }) : undefined,
+      })
     }
   }
   return out
 }
 
+const KBD =
+  'rounded-[5px] border border-border bg-field px-1.5 py-0.5 font-mono text-[11px] text-text shadow-[inset_0_-1px_0_var(--border)]'
+
 function Keys({ keys, range }: { keys: readonly string[]; range: boolean }) {
+  if (keys.length === 0) return <span className="text-[11.5px] text-muted italic">sem atalho</span>
   return (
     <span className="flex flex-wrap items-center justify-end gap-1.5">
       {keys.map((k, i) => (
         <Fragment key={k}>
           {i > 0 && <span className="text-[11px] text-muted">{range ? 'a' : 'ou'}</span>}
-          <kbd className="rounded-[5px] border border-border bg-field px-1.5 py-0.5 font-mono text-[11px] text-text shadow-[inset_0_-1px_0_var(--border)]">
-            {formatShortcut(k)}
-          </kbd>
+          <kbd className={KBD}>{formatShortcut(k)}</kbd>
         </Fragment>
       ))}
     </span>
   )
 }
 
-export function ShortcutsDialog({ open, onOpenChange }: Props) {
+type Notice = { action: AppAction; kind: 'error' | 'info'; text: string }
+
+/**
+ * Folha de atalhos (F1). Os atalhos do app se trocam aqui: clique na combinação, aperte a nova
+ * (Backspace desliga, Esc cancela). Usar a combinação de outra ação tira dela; as do terminal (Copiar,
+ * Colar, Buscar...) não mudam.
+ */
+export function ShortcutsDialog({ open, onOpenChange, bindings, onChange }: Props) {
+  const [recording, setRecording] = useState<AppAction | null>(null)
+  const [notice, setNotice] = useState<Notice | null>(null)
+
+  // Enquanto grava, nenhum atalho do app dispara (a tecla é para gravar).
+  useEffect(() => {
+    setRecordingShortcut(recording != null)
+    return () => setRecordingShortcut(false)
+  }, [recording])
+  useEffect(() => {
+    if (!open) {
+      setRecording(null)
+      setNotice(null)
+    }
+  }, [open])
+
+  const assign = (s: Shortcut & { action: AppAction }, combo: string) => {
+    const next = { ...bindings }
+    const conflict = combo ? conflictOf(s.action, combo) : null
+    if (conflict && !conflict.action) {
+      setNotice({ action: s.action, kind: 'error', text: `Usado pelo terminal: ${conflict.label}` })
+      return
+    }
+    // A combinação padrão volta a ser só o padrão (não fica guardada como troca).
+    const isDefault = combo && s.keys.some((k) => normalizeKeys(k) === normalizeKeys(uiKeys(combo)))
+    if (isDefault) delete next[s.action]
+    else next[s.action] = combo
+    if (conflict?.action) next[conflict.action] = ''
+    onChange(next)
+    setNotice(
+      conflict?.action
+        ? { action: s.action, kind: 'info', text: `Tirado de "${conflict.label}", que ficou sem atalho.` }
+        : null,
+    )
+  }
+
+  const reset = (action: AppAction) => {
+    const next = { ...bindings }
+    delete next[action]
+    onChange(next)
+    setNotice(null)
+  }
+
+  const changed = Object.keys(bindings).length
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogBackdrop className="fixed inset-0 bg-black/40 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
-      <DialogContent className="m-auto flex max-h-[min(640px,calc(100vh-48px))] w-[min(720px,calc(100vw-48px))] flex-col overflow-hidden rounded-[14px] border border-hairline bg-material-thick p-0 text-text shadow-panel backdrop-blur-[28px] backdrop-saturate-180 [transition:opacity_160ms_ease-out,scale_300ms_var(--spring)] data-ending-style:scale-[0.96] data-ending-style:opacity-0 data-starting-style:scale-[0.96] data-starting-style:opacity-0 reduced-transparency:bg-surface reduced-transparency:backdrop-blur-none motion-reduce:scale-100">
+      <DialogContent className="m-auto flex max-h-[min(640px,calc(100vh-48px))] w-[min(760px,calc(100vw-48px))] flex-col overflow-hidden rounded-[14px] border border-hairline bg-material-thick p-0 text-text shadow-panel backdrop-blur-[28px] backdrop-saturate-180 [transition:opacity_160ms_ease-out,scale_300ms_var(--spring)] data-ending-style:scale-[0.96] data-ending-style:opacity-0 data-starting-style:scale-[0.96] data-starting-style:opacity-0 reduced-transparency:bg-surface reduced-transparency:backdrop-blur-none motion-reduce:scale-100">
         <header className="flex items-center gap-3 border-b border-hairline px-5 py-3">
           <DialogTitle className="flex-1 text-[15px] font-semibold tracking-[0.01em]">Atalhos de teclado</DialogTitle>
+          {changed > 0 && (
+            <button
+              type="button"
+              className="rounded-md px-2 py-1 text-[12px] text-accent hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-accent"
+              onClick={() => {
+                onChange({})
+                setNotice(null)
+              }}
+            >
+              Voltar todos ao padrão ({changed})
+            </button>
+          )}
           <DialogClose className={actionButton} aria-label="Fechar">
             <X size={15} />
           </DialogClose>
         </header>
-        <div className="grid min-h-0 flex-1 gap-x-8 gap-y-5 overflow-y-auto px-5 py-4 sm:grid-cols-2">
-          {SHORTCUT_GROUPS.map((group) => (
-            <section key={group} aria-label={group} className={group === 'Abas' ? 'sm:row-span-2' : undefined}>
-              <h2 className="mb-2 text-[11px] font-semibold tracking-[0.06em] text-muted uppercase">{group}</h2>
-              <dl className="flex flex-col">
-                {rows(group).map((r) => (
-                  <div
-                    key={r.label}
-                    className="flex items-center justify-between gap-4 border-b border-hairline py-1.5 text-[13px] last:border-0"
-                  >
-                    <dt>{r.label}</dt>
-                    <dd>
-                      <Keys keys={r.keys} range={r.range} />
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            </section>
-          ))}
-        </div>
+        <Scroller className="min-h-0 flex-1">
+          <div className="grid gap-x-8 gap-y-5 px-5 py-4 sm:grid-cols-2">
+            {SHORTCUT_GROUPS.map((group) => (
+              <section key={group} aria-label={group} className={group === 'Abas' ? 'sm:row-span-2' : undefined}>
+                <h2 className="mb-2 text-[11px] font-semibold tracking-[0.06em] text-muted uppercase">{group}</h2>
+                <dl className="flex flex-col">
+                  {rows(group).map((r) => {
+                    const s = r.shortcut
+                    const isRecording = s != null && recording === s.action
+                    const overridden = s != null && Object.hasOwn(bindings, s.action)
+                    const note = s && notice?.action === s.action ? notice : null
+                    return (
+                      <div key={r.label} className="flex flex-col border-b border-hairline py-1.5 last:border-0">
+                        <div className="flex items-center justify-between gap-3 text-[13px]">
+                          <dt className={overridden ? 'text-accent' : undefined}>{r.label}</dt>
+                          <dd className="flex items-center gap-1">
+                            {s ? (
+                              <button
+                                type="button"
+                                aria-label={`Trocar o atalho de ${r.label}`}
+                                title="Clique e aperte a nova combinação"
+                                className={`rounded-md px-1 py-0.5 hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-accent ${isRecording ? 'bg-surface-hover outline-2 outline-accent' : ''}`}
+                                onClick={() => {
+                                  setNotice(null)
+                                  setRecording(s.action)
+                                }}
+                                onBlur={() => isRecording && setRecording(null)}
+                                onKeyDown={(e) => {
+                                  if (!isRecording) return
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  if (e.key === 'Escape') return setRecording(null)
+                                  if (e.key === 'Backspace' || e.key === 'Delete') {
+                                    setRecording(null)
+                                    return assign(s, '')
+                                  }
+                                  const combo = comboFromEvent(e)
+                                  if (!combo) return
+                                  setRecording(null)
+                                  assign(s, combo)
+                                }}
+                              >
+                                {isRecording ? (
+                                  <span className="text-[11.5px] text-accent">Aperte a combinação…</span>
+                                ) : (
+                                  <Keys keys={r.keys} range={r.range} />
+                                )}
+                              </button>
+                            ) : (
+                              <Keys keys={r.keys} range={r.range} />
+                            )}
+                            {overridden && !isRecording && s && (
+                              <button
+                                type="button"
+                                aria-label={`Voltar ${r.label} ao atalho padrão`}
+                                title="Voltar ao padrão"
+                                className="grid size-6 place-items-center rounded-md text-muted hover:bg-surface-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
+                                onClick={() => reset(s.action)}
+                              >
+                                <RotateCcw size={12} />
+                              </button>
+                            )}
+                          </dd>
+                        </div>
+                        {isRecording && (
+                          <span className="text-[11px] text-muted">Backspace deixa sem atalho · Esc cancela</span>
+                        )}
+                        {note && (
+                          <span
+                            className={`text-[11px] ${note.kind === 'error' ? 'text-(--tone-red,var(--claude))' : 'text-muted'}`}
+                            role={note.kind === 'error' ? 'alert' : 'status'}
+                          >
+                            {note.text}
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })}
+                </dl>
+              </section>
+            ))}
+          </div>
+        </Scroller>
         <footer className="border-t border-hairline px-5 py-2 text-[11px] text-muted">
+          Clique num atalho do app para trocar. Os do terminal (Copiar, Colar, Buscar...) e o "Ir para a aba" não mudam.
           Os atalhos com Ctrl+Shift não chegam ao shell; Ctrl+letra continua indo para o programa no terminal.
         </footer>
       </DialogContent>

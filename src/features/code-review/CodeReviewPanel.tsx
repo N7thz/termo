@@ -31,6 +31,7 @@ import {
   useState,
 } from 'react'
 import { ipc } from '../../lib/ipc'
+import { Scroller } from '../../lib/Scroller'
 import { ResizeEdge, useStoredWidth } from '../layout/ResizeEdge'
 import {
   type ChangedFile,
@@ -299,45 +300,47 @@ export function CodeReviewPanel({ open, cwd, version, colors, fontFamily, onClos
         </div>
       )}
 
-      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
-        {error && (
-          <p className="m-2.5 rounded-lg border border-border bg-surface p-2.5 text-[12px] text-muted" role="alert">
-            {error}
-          </p>
-        )}
-        {!cwd && <Empty text="Abra uma aba para revisar as alterações da pasta dela." />}
-        {cwd && status === null && !loading && !error && <Empty text="Esta pasta não é um repositório git." />}
-        {status && files.length === 0 && <Empty text="Nenhuma alteração para revisar. Tudo commitado." />}
-        {root && showIndex && files.length > 0 && (
-          <FileIndex
-            files={files}
-            onGo={goToFile}
-            onStage={(f, staged) => act(() => ipc.reviewStage(root, f.path, staged))}
-          />
-        )}
-        {root &&
-          files.map((f) => (
-            <FileSection
-              key={f.path}
-              file={f}
-              root={root}
-              version={version}
-              open={open}
-              expanded={isExpanded(f.path)}
-              onToggle={() => setToggled((t) => ({ ...t, [f.path]: !isExpanded(f.path) }))}
-              wrap={wrap}
-              fontFamily={fontFamily}
-              comments={comments.filter((c) => c.path === f.path)}
-              onComment={(c) => {
-                setComments((list) => [...list, c])
-                setHintSeen(true)
-              }}
-              onRemoveComment={(id) => setComments((list) => list.filter((c) => c.id !== id))}
-              onStage={(staged) => act(() => ipc.reviewStage(root, f.path, staged))}
-              onDiscard={() => act(() => ipc.reviewDiscard(root, f.path))}
+      <Scroller viewportRef={scroller} className="min-h-0 flex-1">
+        <div>
+          {error && (
+            <p className="m-2.5 rounded-lg border border-border bg-surface p-2.5 text-[12px] text-muted" role="alert">
+              {error}
+            </p>
+          )}
+          {!cwd && <Empty text="Abra uma aba para revisar as alterações da pasta dela." />}
+          {cwd && status === null && !loading && !error && <Empty text="Esta pasta não é um repositório git." />}
+          {status && files.length === 0 && <Empty text="Nenhuma alteração para revisar. Tudo commitado." />}
+          {root && showIndex && files.length > 0 && (
+            <FileIndex
+              files={files}
+              onGo={goToFile}
+              onStage={(f, staged) => act(() => ipc.reviewStage(root, f.path, staged))}
             />
-          ))}
-      </div>
+          )}
+          {root &&
+            files.map((f) => (
+              <FileSection
+                key={f.path}
+                file={f}
+                root={root}
+                version={version}
+                open={open}
+                expanded={isExpanded(f.path)}
+                onToggle={() => setToggled((t) => ({ ...t, [f.path]: !isExpanded(f.path) }))}
+                wrap={wrap}
+                fontFamily={fontFamily}
+                comments={comments.filter((c) => c.path === f.path)}
+                onComment={(c) => {
+                  setComments((list) => [...list, c])
+                  setHintSeen(true)
+                }}
+                onRemoveComment={(id) => setComments((list) => list.filter((c) => c.id !== id))}
+                onStage={(staged) => act(() => ipc.reviewStage(root, f.path, staged))}
+                onDiscard={() => act(() => ipc.reviewDiscard(root, f.path))}
+              />
+            ))}
+        </div>
+      </Scroller>
 
       {comments.length > 0 && (
         <div className="flex flex-none items-center gap-1 border-t border-hairline py-1 pr-1.5 pl-2.5">

@@ -1,5 +1,6 @@
 import { Copy, Regex, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Scroller } from '../../lib/Scroller'
 import { filterOutput, matchedText } from './blockNav'
 
 interface Props {
@@ -74,17 +75,19 @@ export function BlockFilter({ command, output, onCopy, onClose }: Props) {
       {result.error ? (
         <p className="border-hairline border-t px-3 py-2 text-[11px] text-claude">{result.error}</p>
       ) : (
-        <pre className="m-0 min-h-0 flex-1 overflow-auto border-hairline border-t px-3 py-2 font-mono text-[12px] leading-snug whitespace-pre-wrap text-text">
-          {shown.map((l) => (
-            <div key={l.n}>
-              <span className="mr-2 inline-block w-8 text-right text-muted tabular-nums select-none">{l.n}</span>
-              {l.text}
-            </div>
-          ))}
-          {result.lines.length > shown.length && (
-            <div className="text-muted">… mais {result.lines.length - shown.length} linhas (use Copiar)</div>
-          )}
-        </pre>
+        <Scroller className="min-h-0 flex-1 border-hairline border-t">
+          <pre className="m-0 px-3 py-2 font-mono text-[12px] leading-snug whitespace-pre-wrap text-text">
+            {shown.map((l) => (
+              <div key={l.n}>
+                <span className="mr-2 inline-block w-8 text-right text-muted tabular-nums select-none">{l.n}</span>
+                {l.text}
+              </div>
+            ))}
+            {result.lines.length > shown.length && (
+              <div className="text-muted">… mais {result.lines.length - shown.length} linhas (use Copiar)</div>
+            )}
+          </pre>
+        </Scroller>
       )}
     </section>
   )

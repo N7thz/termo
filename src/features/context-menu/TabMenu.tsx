@@ -9,6 +9,7 @@ import {
 } from '@ui-sdk/react/menu'
 import type { ReactElement, ReactNode } from 'react'
 import { menuContent, menuItem, menuSeparator } from '../../lib/ui'
+import { keysFor } from '../tabs/shortcuts'
 import type { TabMenuAction } from './types'
 
 interface Props {
@@ -44,13 +45,13 @@ export function TabMenu(props: Props) {
     <Menu onAction={(value) => onAction(value as TabMenuAction)}>
       <MenuContextTrigger render={trigger}>{children}</MenuContextTrigger>
       <MenuContent className={menuContent} aria-label="Ações da aba">
-        <MenuItem className={menuItem} value="new-shell" shortcut="mod+shift+t">
+        <MenuItem className={menuItem} value="new-shell" shortcut={keysFor('new-shell')}>
           Nova aba
         </MenuItem>
-        <MenuItem className={menuItem} value="new-claude" shortcut="mod+shift+k">
+        <MenuItem className={menuItem} value="new-claude" shortcut={keysFor('new-claude')}>
           Nova aba com Claude Code
         </MenuItem>
-        <MenuItem className={menuItem} value="duplicate" shortcut="mod+shift+d">
+        <MenuItem className={menuItem} value="duplicate" shortcut={keysFor('duplicate-tab')}>
           Duplicar aba
         </MenuItem>
         <MenuItem className={menuItem} value="rename">
@@ -72,7 +73,7 @@ export function TabMenu(props: Props) {
           </MenuItem>
         )}
         <MenuSeparator className={menuSeparator} />
-        <MenuItem className={menuItem} value="split-new" shortcut="mod+shift+e">
+        <MenuItem className={menuItem} value="split-new" shortcut={keysFor('split-tab')}>
           Dividir com uma aba nova
         </MenuItem>
         {canSplitWithActive && (
@@ -115,7 +116,7 @@ export function TabMenu(props: Props) {
           </MenuItem>
         )}
         <MenuSeparator className={menuSeparator} />
-        <MenuItem className={menuItem} value="close" shortcut="mod+shift+w">
+        <MenuItem className={menuItem} value="close" shortcut={keysFor('close-tab')}>
           Fechar aba
         </MenuItem>
         <MenuItem className={menuItem} value="close-others" disabled={alone} destructive>

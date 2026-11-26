@@ -1,6 +1,7 @@
 mod agent_status;
 mod agents;
 mod ai;
+mod boot_color;
 mod browser;
 mod cli;
 mod config_io;
@@ -696,6 +697,8 @@ pub fn run() {
             let store = SettingsStore::load(&dir);
             let initial = store.get();
             app.manage(store);
+            // Antes do WebView pintar: a janela já com o fundo do último tema usado.
+            boot_color::apply_saved(app.handle());
             app.manage(updater::PendingUpdate::default());
             if let Err(e) = hotkey::apply(app.handle(), "", &initial.global_hotkey) {
                 log::warn!("atalho global: {e}");
@@ -759,6 +762,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             launch_info,
+            boot_color::set_window_color,
             pty_create,
             shell_list,
             ssh_hosts,

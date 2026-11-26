@@ -1,6 +1,7 @@
 import { Dialog, DialogBackdrop, DialogContent, DialogTitle } from '@ui-sdk/react/dialog'
 import { ArrowLeft, Play, Plus, Settings2, Workflow as WorkflowIcon } from 'lucide-react'
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { Scroller } from '../../lib/Scroller'
 import type { Workflow } from '../../shared/types'
 import { rank } from '../history-search/fuzzy'
 import { EXAMPLE_WORKFLOWS, MAX_WORKFLOWS } from './model'
@@ -124,32 +125,36 @@ export function WorkflowDialog({ open, onOpenChange, workflows, initial, canRun,
                 {chosen.description && <div className="truncate text-[12px] text-muted">{chosen.description}</div>}
               </div>
             </header>
-            <div className="flex min-h-0 flex-col gap-3 overflow-y-auto px-4 py-3">
-              {params.length === 0 && <p className="m-0 text-[12.5px] text-muted">Este workflow não tem parâmetros.</p>}
-              {params.map((name, i) => (
-                <label key={name} className="flex flex-col gap-1 text-[12px] text-muted">
-                  {name}
-                  <input
-                    data-param={name}
-                    onKeyDown={onFormKey}
-                    autoFocus={i === 0}
-                    value={values[name] ?? ''}
-                    onChange={(e) => setValues((v) => ({ ...v, [name]: e.currentTarget.value }))}
-                    spellCheck={false}
-                    autoComplete="off"
-                    aria-invalid={!(values[name] ?? '').trim() || undefined}
-                    className={FIELD}
-                  />
-                </label>
-              ))}
-              <div className="flex flex-col gap-1 text-[12px] text-muted">
-                Comando
-                <pre className="m-0 max-h-32 overflow-auto rounded-[7px] border border-hairline bg-bg px-2.5 py-2 font-mono text-[12.5px] whitespace-pre-wrap break-all text-text">
-                  {filled}
-                </pre>
+            <Scroller className="min-h-0">
+              <div className="flex flex-col gap-3 px-4 py-3">
+                {params.length === 0 && (
+                  <p className="m-0 text-[12.5px] text-muted">Este workflow não tem parâmetros.</p>
+                )}
+                {params.map((name, i) => (
+                  <label key={name} className="flex flex-col gap-1 text-[12px] text-muted">
+                    {name}
+                    <input
+                      data-param={name}
+                      onKeyDown={onFormKey}
+                      autoFocus={i === 0}
+                      value={values[name] ?? ''}
+                      onChange={(e) => setValues((v) => ({ ...v, [name]: e.currentTarget.value }))}
+                      spellCheck={false}
+                      autoComplete="off"
+                      aria-invalid={!(values[name] ?? '').trim() || undefined}
+                      className={FIELD}
+                    />
+                  </label>
+                ))}
+                <div className="flex flex-col gap-1 text-[12px] text-muted">
+                  Comando
+                  <pre className="m-0 max-h-32 overflow-auto rounded-[7px] border border-hairline bg-bg px-2.5 py-2 font-mono text-[12.5px] whitespace-pre-wrap break-all text-text">
+                    {filled}
+                  </pre>
+                </div>
+                {!canRun && <p className="m-0 text-[12px] text-muted">Abra uma aba de shell para usar este comando.</p>}
               </div>
-              {!canRun && <p className="m-0 text-[12px] text-muted">Abra uma aba de shell para usar este comando.</p>}
-            </div>
+            </Scroller>
             <footer className="flex items-center gap-2 border-t border-hairline px-3 py-2 text-[11.5px] text-muted">
               {missing.length > 0 && <span>Preencha {missing.map((m) => `“${m}”`).join(', ')}.</span>}
               <span className="ml-auto" />
@@ -184,59 +189,61 @@ export function WorkflowDialog({ open, onOpenChange, workflows, initial, canRun,
                 <Settings2 aria-hidden size={13} /> Gerenciar
               </button>
             </div>
-            <ul className="m-0 min-h-0 flex-1 list-none overflow-y-auto p-1.5">
-              {shown.map((w, i) => (
-                <li key={`${w.name}:${w.command}`}>
-                  <button
-                    type="button"
-                    onMouseMove={() => setSelected(i)}
-                    onClick={() => choose(w)}
-                    className={`flex w-full cursor-pointer flex-col gap-0.5 rounded-md px-2.5 py-1.5 text-left ${
-                      i === selected ? 'bg-surface-hover' : ''
-                    }`}
-                  >
-                    <span className="truncate text-[13px]">{w.name}</span>
-                    <span className="truncate font-mono text-[11.5px] text-muted">{w.command}</span>
-                  </button>
-                </li>
-              ))}
-              {workflows.length > 0 && shown.length === 0 && (
-                <li className="px-3 py-6 text-center text-[13px] text-muted">Nenhum workflow combina.</li>
-              )}
-              {workflows.length === 0 && (
-                <li className="px-2 pt-2 pb-1">
-                  <p className="m-0 mb-2 text-[12.5px] text-muted">
-                    Ainda não há workflows. Comandos salvos com <code className="font-mono">{'{{parâmetros}}'}</code>{' '}
-                    viram um formulário para preencher. Algumas sugestões (nada é salvo sem você pedir):
-                  </p>
-                  <ul className="m-0 flex list-none flex-col gap-1 p-0">
-                    {EXAMPLE_WORKFLOWS.map((w) => (
-                      <li
-                        key={w.name}
-                        className="flex items-center gap-2 rounded-md border border-hairline px-2.5 py-1.5"
-                      >
-                        <button
-                          type="button"
-                          className="min-w-0 flex-1 cursor-pointer text-left"
-                          onClick={() => choose(w)}
+            <Scroller className="min-h-0 flex-1">
+              <ul className="m-0 list-none p-1.5">
+                {shown.map((w, i) => (
+                  <li key={`${w.name}:${w.command}`}>
+                    <button
+                      type="button"
+                      onMouseMove={() => setSelected(i)}
+                      onClick={() => choose(w)}
+                      className={`flex w-full cursor-pointer flex-col gap-0.5 rounded-md px-2.5 py-1.5 text-left ${
+                        i === selected ? 'bg-surface-hover' : ''
+                      }`}
+                    >
+                      <span className="truncate text-[13px]">{w.name}</span>
+                      <span className="truncate font-mono text-[11.5px] text-muted">{w.command}</span>
+                    </button>
+                  </li>
+                ))}
+                {workflows.length > 0 && shown.length === 0 && (
+                  <li className="px-3 py-6 text-center text-[13px] text-muted">Nenhum workflow combina.</li>
+                )}
+                {workflows.length === 0 && (
+                  <li className="px-2 pt-2 pb-1">
+                    <p className="m-0 mb-2 text-[12.5px] text-muted">
+                      Ainda não há workflows. Comandos salvos com <code className="font-mono">{'{{parâmetros}}'}</code>{' '}
+                      viram um formulário para preencher. Algumas sugestões (nada é salvo sem você pedir):
+                    </p>
+                    <ul className="m-0 flex list-none flex-col gap-1 p-0">
+                      {EXAMPLE_WORKFLOWS.map((w) => (
+                        <li
+                          key={w.name}
+                          className="flex items-center gap-2 rounded-md border border-hairline px-2.5 py-1.5"
                         >
-                          <span className="block truncate text-[13px]">{w.name}</span>
-                          <span className="block truncate font-mono text-[11.5px] text-muted">{w.command}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className={GHOST}
-                          disabled={workflows.length >= MAX_WORKFLOWS}
-                          onClick={() => onAdd(w)}
-                        >
-                          <Plus aria-hidden size={13} /> Adicionar
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </li>
-              )}
-            </ul>
+                          <button
+                            type="button"
+                            className="min-w-0 flex-1 cursor-pointer text-left"
+                            onClick={() => choose(w)}
+                          >
+                            <span className="block truncate text-[13px]">{w.name}</span>
+                            <span className="block truncate font-mono text-[11.5px] text-muted">{w.command}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className={GHOST}
+                            disabled={workflows.length >= MAX_WORKFLOWS}
+                            onClick={() => onAdd(w)}
+                          >
+                            <Plus aria-hidden size={13} /> Adicionar
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </li>
+                )}
+              </ul>
+            </Scroller>
           </div>
         )}
       </DialogContent>

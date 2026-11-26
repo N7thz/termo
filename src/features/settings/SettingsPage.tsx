@@ -5,6 +5,7 @@ import { Switch, SwitchThumb } from '@ui-sdk/react/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@ui-sdk/react/tooltip'
 import { ArrowLeft, Check, ChevronRight, Settings2 } from 'lucide-react'
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Scroller } from '../../lib/Scroller'
 import { actionButton, tooltip } from '../../lib/ui'
 import { CONTRAST_LEVELS } from '../../shared/settings'
 import type { Settings } from '../../shared/types'
@@ -235,7 +236,7 @@ export function SettingsPage({ settings, onChange, onClose, onOpenThemes, onOpen
           </button>
         </nav>
 
-        <div ref={scrollRef} onScroll={onScroll} className="min-w-0 flex-1 overflow-y-auto px-6 py-5">
+        <Scroller viewportRef={scrollRef} onScroll={onScroll} className="min-w-0 flex-1" contentClassName="px-6 py-5">
           <div className="mx-auto flex max-w-170 flex-col gap-4 pb-8">
             {noResults && (
               <div className="flex flex-col items-center gap-3 py-16 text-center text-[13px] text-muted" role="status">
@@ -396,7 +397,7 @@ export function SettingsPage({ settings, onChange, onClose, onOpenThemes, onOpen
               />
             </Group>
           </div>
-        </div>
+        </Scroller>
       </div>
     </section>
   )

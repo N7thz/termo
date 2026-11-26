@@ -47,7 +47,7 @@ Uso:
                                 importa: listas se juntam às suas; pastas que não existem aqui ficam de
                                 fora (--keep-missing mantém); --dry-run só mostra o que mudaria.
                                 Seções: aparencia, terminal, fundo, destaques, perfis, workflows,
-                                layouts, sistema
+                                layouts, sistema, atalhos
   termo --claude [--cwd <pasta>] [--title <nome>] [--prompt-file <arq>] [--close-on-exit] [-- <args>]
                                 repassa as flags ao Termo.exe (aba do Claude no Termo aberto)
   termo help | --version

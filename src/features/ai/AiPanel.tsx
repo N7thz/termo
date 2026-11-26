@@ -1,6 +1,7 @@
 import { Button } from '@ui-sdk/react/button'
 import { Copy, Play, Sparkles, X } from 'lucide-react'
 import { useEffect, useRef } from 'react'
+import { Scroller } from '../../lib/Scroller'
 import { fixCommand, parseAnswer } from './answer'
 
 export interface AiPanelState {
@@ -55,33 +56,35 @@ export function AiPanel({ state, fontFamily, onClose, onCopy, onRun }: Props) {
           <X aria-hidden size={14} />
         </Button>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2.5 text-[12.5px]/[1.55]" aria-live="polite">
-        {state.status === 'loading' && (
-          <span className="inline-flex items-center gap-2 text-muted">
-            <span className="size-2 animate-ping rounded-full bg-claude motion-reduce:animate-none" aria-hidden />
-            Perguntando ao Claude…
-          </span>
-        )}
-        {state.status === 'error' && <p className="m-0 text-muted">{state.text}</p>}
-        {state.status === 'done' &&
-          parseAnswer(state.text).map((part, i) =>
-            part.type === 'text' ? (
-              // biome-ignore lint/suspicious/noArrayIndexKey: a resposta não muda depois de pronta
-              <p key={i} className="m-0 mb-2 whitespace-pre-wrap">
-                {part.text}
-              </p>
-            ) : (
-              <pre
-                // biome-ignore lint/suspicious/noArrayIndexKey: a resposta não muda depois de pronta
-                key={i}
-                className="m-0 mb-2 overflow-x-auto rounded-md bg-bg px-2.5 py-2 text-[12px]"
-                style={{ fontFamily }}
-              >
-                {part.code}
-              </pre>
-            ),
+      <Scroller className="min-h-0 flex-1">
+        <div className="px-3 py-2.5 text-[12.5px]/[1.55]" aria-live="polite">
+          {state.status === 'loading' && (
+            <span className="inline-flex items-center gap-2 text-muted">
+              <span className="size-2 animate-ping rounded-full bg-claude motion-reduce:animate-none" aria-hidden />
+              Perguntando ao Claude…
+            </span>
           )}
-      </div>
+          {state.status === 'error' && <p className="m-0 text-muted">{state.text}</p>}
+          {state.status === 'done' &&
+            parseAnswer(state.text).map((part, i) =>
+              part.type === 'text' ? (
+                // biome-ignore lint/suspicious/noArrayIndexKey: a resposta não muda depois de pronta
+                <p key={i} className="m-0 mb-2 whitespace-pre-wrap">
+                  {part.text}
+                </p>
+              ) : (
+                <pre
+                  // biome-ignore lint/suspicious/noArrayIndexKey: a resposta não muda depois de pronta
+                  key={i}
+                  className="m-0 mb-2 overflow-x-auto rounded-md bg-bg px-2.5 py-2 text-[12px]"
+                  style={{ fontFamily }}
+                >
+                  {part.code}
+                </pre>
+              ),
+            )}
+        </div>
+      </Scroller>
       {fix && (
         <footer className="flex items-center justify-end gap-1 border-t border-border px-2 py-1.5">
           <Button className={iconButton} onClick={() => onCopy(fix)}>

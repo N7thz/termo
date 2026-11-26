@@ -4,14 +4,18 @@ import {
   addImages,
   clampBlur,
   clampChangeSecs,
+  clampGlow,
   clampOpacity,
   fileName,
+  glowStyle,
+  glowTone,
   imageStyle,
   isBackgroundActive,
   isTranslucent,
   MAX_BACKGROUNDS,
   nextIndex,
   transparentTheme,
+  wantsGlow,
   wantsTransparentTerminal,
 } from './background'
 
@@ -93,14 +97,47 @@ describe('estilo', () => {
 
   test('tema transparente e detecção de alfa', () => {
     expect(transparentTheme({ background: '#1a1b26', foreground: '#fff' })).toEqual({
-      background: '#00000000',
+      background: '#1a1b2600',
       foreground: '#fff',
     })
+    expect(transparentTheme({ background: 'rgb(1, 2, 3)' }).background).toBe('#00000000')
     expect(isTranslucent('#00000000')).toBe(true)
     expect(isTranslucent('#1a1b26ff')).toBe(false)
     expect(isTranslucent('#1a1b26')).toBe(false)
     expect(isTranslucent('rgba(0, 0, 0, 0.5)')).toBe(true)
     expect(isTranslucent('rgb(0 0 0 / 1)')).toBe(false)
     expect(isTranslucent(undefined)).toBe(false)
+  })
+})
+
+describe('brilho do tema', () => {
+  const bg = (over: Partial<typeof DEFAULT_SETTINGS.background> = {}) => ({ ...DEFAULT_SETTINGS.background, ...over })
+
+  test('liga por padrão e some só com a imagem atrás do terminal', () => {
+    expect(wantsGlow(bg())).toBe(true)
+    expect(wantsGlow(bg({ glow: false }))).toBe(false)
+    expect(wantsGlow(bg({ enabled: true, images: ['C:/a.png'], target: 'terminal' }))).toBe(false)
+    expect(wantsGlow(bg({ enabled: true, images: ['C:/a.png'], target: 'window' }))).toBe(true)
+    expect(wantsGlow(bg({ enabled: false, images: ['C:/a.png'] }))).toBe(true)
+  })
+
+  test('intensidade presa entre 10 e 100', () => {
+    expect([clampGlow(0), clampGlow(55), clampGlow(400), clampGlow(Number.NaN)]).toEqual([10, 55, 100, 50])
+  })
+
+  test('segundo tom foge do destaque', () => {
+    expect(glowTone('#7aa2ff', { magenta: '#bb9af7', cyan: '#7dcfff' })).toBe('#bb9af7')
+    expect(glowTone('#bd93f9', { magenta: '#ff79c6', cyan: '#8be9fd' })).toBe('#ff79c6')
+    expect(glowTone('#ff79c6', { magenta: '#ff79c6', cyan: '#8be9fd' })).toBe('#8be9fd')
+    expect(glowTone('#123456', {})).toBe('#123456')
+  })
+
+  test('halo mais fraco no tema claro e proporcional à intensidade', () => {
+    const style = (scheme: 'dark' | 'light', strength: number) =>
+      String(glowStyle({ base: '#000000', accent: '#ff0000', tone: '#00ff00', scheme, strength }).backgroundImage)
+    expect(style('dark', 100)).toContain('#ff0000 30%')
+    expect(style('dark', 50)).toContain('#ff0000 15%')
+    expect(style('light', 100)).toContain('#ff0000 18%')
+    expect(style('dark', 100)).toContain('#00ff00 24%')
   })
 })

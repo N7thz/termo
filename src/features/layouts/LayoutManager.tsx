@@ -1,6 +1,7 @@
 import { Dialog, DialogBackdrop, DialogContent, DialogTitle } from '@ui-sdk/react/dialog'
 import { LayoutGrid, Pencil, Play, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { Scroller } from '../../lib/Scroller'
 import type { SavedLayout } from '../../shared/types'
 import { TabKindIcon } from '../tabs/TabKindIcon'
 import {
@@ -96,71 +97,73 @@ export function LayoutManager({ open, onOpenChange, layouts, current, startSavin
         </DialogTitle>
 
         {mode.kind === 'save' && (
-          <form
-            className="flex min-h-0 flex-col gap-3 overflow-y-auto px-4 py-3"
-            onSubmit={(e) => {
-              e.preventDefault()
-              save()
-            }}
-          >
-            <label className="flex flex-col gap-1 text-[12px] text-muted">
-              Nome
-              <input
-                autoFocus
-                className={FIELD}
-                value={mode.name}
-                maxLength={MAX_LAYOUT_NAME}
-                placeholder="Dev: servidor + Claude + git"
-                onChange={(e) => {
-                  setMode({ ...mode, name: e.currentTarget.value })
-                  setError(null)
-                }}
-              />
-            </label>
-            <p className="m-0 text-[12px] text-muted">
-              Guarda as abas deste perfil com tipo, shell, pasta, grupo e divisão. O comando inicial (opcional) roda
-              quando a aba abre.
-            </p>
-            <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
-              {mode.draft.tabs.map((t, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: as abas do rascunho não mudam de ordem aqui
-                <li key={i} className="flex items-center gap-2">
-                  <TabKindIcon kind={t.kind} shell={t.shell || undefined} size={14} />
-                  <span className="w-32 flex-none truncate text-[12.5px]" title={t.cwd || t.title}>
-                    {t.title}
-                  </span>
-                  {t.kind === 'shell' && !t.shell.startsWith('ssh:') ? (
-                    <input
-                      className={`${FIELD} min-w-0 flex-1 font-mono text-[12px]`}
-                      value={t.command}
-                      maxLength={MAX_LAYOUT_COMMAND}
-                      spellCheck={false}
-                      aria-label={`Comando inicial de ${t.title}`}
-                      placeholder="comando inicial (opcional)"
-                      onChange={(e) => setCommand(i, e.currentTarget.value)}
-                    />
-                  ) : (
-                    <span className="flex-1 text-[12px] text-muted">
-                      {t.kind === 'claude' ? 'Claude Code' : 'Conexão SSH'}
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-            {error && (
-              <p role="alert" className="m-0 text-[12px] text-claude">
-                {error}
+          <Scroller className="min-h-0">
+            <form
+              className="flex flex-col gap-3 px-4 py-3"
+              onSubmit={(e) => {
+                e.preventDefault()
+                save()
+              }}
+            >
+              <label className="flex flex-col gap-1 text-[12px] text-muted">
+                Nome
+                <input
+                  autoFocus
+                  className={FIELD}
+                  value={mode.name}
+                  maxLength={MAX_LAYOUT_NAME}
+                  placeholder="Dev: servidor + Claude + git"
+                  onChange={(e) => {
+                    setMode({ ...mode, name: e.currentTarget.value })
+                    setError(null)
+                  }}
+                />
+              </label>
+              <p className="m-0 text-[12px] text-muted">
+                Guarda as abas deste perfil com tipo, shell, pasta, grupo e divisão. O comando inicial (opcional) roda
+                quando a aba abre.
               </p>
-            )}
-            <div className="flex justify-end gap-2">
-              <button type="button" className={BUTTON} onClick={back}>
-                Cancelar
-              </button>
-              <button type="submit" className={PRIMARY}>
-                Salvar
-              </button>
-            </div>
-          </form>
+              <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+                {mode.draft.tabs.map((t, i) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: as abas do rascunho não mudam de ordem aqui
+                  <li key={i} className="flex items-center gap-2">
+                    <TabKindIcon kind={t.kind} shell={t.shell || undefined} size={14} />
+                    <span className="w-32 flex-none truncate text-[12.5px]" title={t.cwd || t.title}>
+                      {t.title}
+                    </span>
+                    {t.kind === 'shell' && !t.shell.startsWith('ssh:') ? (
+                      <input
+                        className={`${FIELD} min-w-0 flex-1 font-mono text-[12px]`}
+                        value={t.command}
+                        maxLength={MAX_LAYOUT_COMMAND}
+                        spellCheck={false}
+                        aria-label={`Comando inicial de ${t.title}`}
+                        placeholder="comando inicial (opcional)"
+                        onChange={(e) => setCommand(i, e.currentTarget.value)}
+                      />
+                    ) : (
+                      <span className="flex-1 text-[12px] text-muted">
+                        {t.kind === 'claude' ? 'Claude Code' : 'Conexão SSH'}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              {error && (
+                <p role="alert" className="m-0 text-[12px] text-claude">
+                  {error}
+                </p>
+              )}
+              <div className="flex justify-end gap-2">
+                <button type="button" className={BUTTON} onClick={back}>
+                  Cancelar
+                </button>
+                <button type="submit" className={PRIMARY}>
+                  Salvar
+                </button>
+              </div>
+            </form>
+          </Scroller>
         )}
 
         {mode.kind === 'rename' && (
@@ -205,66 +208,68 @@ export function LayoutManager({ open, onOpenChange, layouts, current, startSavin
                 Nenhum layout salvo. Monte as abas, grupos e divisões que quer e salve o conjunto aqui.
               </p>
             ) : (
-              <ul className="m-0 min-h-0 flex-1 list-none overflow-y-auto p-1.5">
-                {layouts.map((l, i) => (
-                  <li key={l.name} className="flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-surface-hover">
-                    <LayoutGrid aria-hidden size={14} className="flex-none text-muted" />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-[13px]">{l.name}</div>
-                      <div className="truncate text-[11.5px] text-muted">
-                        {l.tabs.length} aba(s)
-                        {l.groups.length > 0 && ` · ${l.groups.length} grupo(s)`}
-                        {l.splits.length > 0 && ` · ${l.splits.length} divisão(ões)`}
-                        {l.tabs.some((t) => t.command) && ' · com comandos'}
+              <Scroller className="min-h-0 flex-1">
+                <ul className="m-0 list-none p-1.5">
+                  {layouts.map((l, i) => (
+                    <li key={l.name} className="flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-surface-hover">
+                      <LayoutGrid aria-hidden size={14} className="flex-none text-muted" />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[13px]">{l.name}</div>
+                        <div className="truncate text-[11.5px] text-muted">
+                          {l.tabs.length} aba(s)
+                          {l.groups.length > 0 && ` · ${l.groups.length} grupo(s)`}
+                          {l.splits.length > 0 && ` · ${l.splits.length} divisão(ões)`}
+                          {l.tabs.some((t) => t.command) && ' · com comandos'}
+                        </div>
                       </div>
-                    </div>
-                    <button
-                      type="button"
-                      className={BUTTON}
-                      onClick={() => {
-                        onOpenChange(false)
-                        onOpenLayout(l)
-                      }}
-                    >
-                      <Play aria-hidden size={12} /> Abrir
-                    </button>
-                    <button
-                      type="button"
-                      className={BUTTON}
-                      aria-label={`Renomear ${l.name}`}
-                      onClick={() => {
-                        setRenameText(l.name)
-                        setError(null)
-                        setMode({ kind: 'rename', index: i })
-                      }}
-                    >
-                      <Pencil aria-hidden size={13} />
-                    </button>
-                    {confirmDelete === i ? (
-                      <button
-                        type="button"
-                        className={`${BUTTON} text-claude`}
-                        onClick={() => {
-                          setConfirmDelete(null)
-                          onChange(deleteLayout(layouts, i))
-                        }}
-                        onBlur={() => setConfirmDelete(null)}
-                      >
-                        Excluir mesmo?
-                      </button>
-                    ) : (
                       <button
                         type="button"
                         className={BUTTON}
-                        aria-label={`Excluir ${l.name}`}
-                        onClick={() => setConfirmDelete(i)}
+                        onClick={() => {
+                          onOpenChange(false)
+                          onOpenLayout(l)
+                        }}
                       >
-                        <Trash2 aria-hidden size={13} />
+                        <Play aria-hidden size={12} /> Abrir
                       </button>
-                    )}
-                  </li>
-                ))}
-              </ul>
+                      <button
+                        type="button"
+                        className={BUTTON}
+                        aria-label={`Renomear ${l.name}`}
+                        onClick={() => {
+                          setRenameText(l.name)
+                          setError(null)
+                          setMode({ kind: 'rename', index: i })
+                        }}
+                      >
+                        <Pencil aria-hidden size={13} />
+                      </button>
+                      {confirmDelete === i ? (
+                        <button
+                          type="button"
+                          className={`${BUTTON} text-claude`}
+                          onClick={() => {
+                            setConfirmDelete(null)
+                            onChange(deleteLayout(layouts, i))
+                          }}
+                          onBlur={() => setConfirmDelete(null)}
+                        >
+                          Excluir mesmo?
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className={BUTTON}
+                          aria-label={`Excluir ${l.name}`}
+                          onClick={() => setConfirmDelete(i)}
+                        >
+                          <Trash2 aria-hidden size={13} />
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </Scroller>
             )}
             <div className="flex items-center justify-end gap-2 border-t border-hairline px-4 py-2.5">
               <button

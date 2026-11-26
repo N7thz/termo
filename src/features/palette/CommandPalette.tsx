@@ -13,6 +13,7 @@ import { Dialog, DialogBackdrop, DialogContent, DialogTitle } from '@ui-sdk/reac
 import { File, History, Search, Workflow as WorkflowIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { ipc } from '../../lib/ipc'
+import { Scroller } from '../../lib/Scroller'
 import type { FileHit, Workflow } from '../../shared/types'
 import { TabKindIcon } from '../tabs/TabKindIcon'
 import type { Tab } from '../tabs/tabs'
@@ -128,103 +129,105 @@ export function CommandPalette({
             />
           </div>
           <CommandEmpty className="px-4 py-6 text-center text-[13px] text-muted">Nada encontrado.</CommandEmpty>
-          <CommandList className="min-h-0 flex-1 overflow-y-auto p-1.5">
-            <CommandGroup>
-              <CommandGroupLabel className={GROUP_LABEL}>Abas</CommandGroupLabel>
-              {tabs.map((tab) => {
-                const { cwd: tabCwd, git } = info(tab.key)
-                return (
-                  <CommandItem
-                    key={tab.key}
-                    value={`tab:${tab.key}`}
-                    label={tab.title}
-                    keywords={[tabCwd ?? '', git?.branch ?? '']}
-                    className={ITEM}
-                  >
-                    <span className={ICON}>
-                      <TabKindIcon kind={tab.kind} shell={tab.shell} />
-                    </span>
-                    <span className="truncate">{tab.title}</span>
-                    {tabCwd && <span className="truncate text-[12px] text-muted">{shortPath(tabCwd)}</span>}
-                    {tab.key === active && <span className="ml-auto text-[11px] text-muted">atual</span>}
-                  </CommandItem>
-                )
-              })}
-            </CommandGroup>
-
-            {workflows.length > 0 && (
-              <>
-                <CommandSeparator className="mx-1 my-1 h-px bg-hairline" />
-                <CommandGroup>
-                  <CommandGroupLabel className={GROUP_LABEL}>Workflows</CommandGroupLabel>
-                  {workflows.map((w, i) => (
+          <Scroller className="min-h-0 flex-1">
+            <CommandList className="p-1.5">
+              <CommandGroup>
+                <CommandGroupLabel className={GROUP_LABEL}>Abas</CommandGroupLabel>
+                {tabs.map((tab) => {
+                  const { cwd: tabCwd, git } = info(tab.key)
+                  return (
                     <CommandItem
-                      // biome-ignore lint/suspicious/noArrayIndexKey: o índice é o valor da escolha; a lista só muda ao salvar
-                      key={i}
-                      value={`workflow:${i}`}
-                      label={`workflow ${w.name}`}
-                      keywords={[w.description, w.command, 'wf']}
+                      key={tab.key}
+                      value={`tab:${tab.key}`}
+                      label={tab.title}
+                      keywords={[tabCwd ?? '', git?.branch ?? '']}
                       className={ITEM}
                     >
                       <span className={ICON}>
-                        <WorkflowIcon size={13} />
+                        <TabKindIcon kind={tab.kind} shell={tab.shell} />
                       </span>
-                      <span className="truncate">workflow {w.name}</span>
-                      {w.description && <span className="truncate text-[12px] text-muted">{w.description}</span>}
+                      <span className="truncate">{tab.title}</span>
+                      {tabCwd && <span className="truncate text-[12px] text-muted">{shortPath(tabCwd)}</span>}
+                      {tab.key === active && <span className="ml-auto text-[11px] text-muted">atual</span>}
                     </CommandItem>
-                  ))}
-                </CommandGroup>
-              </>
-            )}
+                  )
+                })}
+              </CommandGroup>
 
-            {files.length > 0 && (
-              <>
-                <CommandSeparator className="mx-1 my-1 h-px bg-hairline" />
-                <CommandGroup>
-                  <CommandGroupLabel className={GROUP_LABEL}>Arquivos em {folderName(cwd)}</CommandGroupLabel>
-                  {files.map((f) => (
-                    <CommandItem key={f.path} value={`file:${f.path}`} label={f.path} className={ITEM}>
-                      <span className={ICON}>
-                        <File size={13} />
-                      </span>
-                      <span className="truncate">{f.path.split('/').pop()}</span>
-                      <span className="truncate text-[12px] text-muted">{f.path}</span>
-                    </CommandItem>
-                  ))}
-                </CommandGroup>
-              </>
-            )}
+              {workflows.length > 0 && (
+                <>
+                  <CommandSeparator className="mx-1 my-1 h-px bg-hairline" />
+                  <CommandGroup>
+                    <CommandGroupLabel className={GROUP_LABEL}>Workflows</CommandGroupLabel>
+                    {workflows.map((w, i) => (
+                      <CommandItem
+                        // biome-ignore lint/suspicious/noArrayIndexKey: o índice é o valor da escolha; a lista só muda ao salvar
+                        key={i}
+                        value={`workflow:${i}`}
+                        label={`workflow ${w.name}`}
+                        keywords={[w.description, w.command, 'wf']}
+                        className={ITEM}
+                      >
+                        <span className={ICON}>
+                          <WorkflowIcon size={13} />
+                        </span>
+                        <span className="truncate">workflow {w.name}</span>
+                        {w.description && <span className="truncate text-[12px] text-muted">{w.description}</span>}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </>
+              )}
 
-            {dirs.length > 0 && (
-              <>
-                <CommandSeparator className="mx-1 my-1 h-px bg-hairline" />
-                <CommandGroup>
-                  <CommandGroupLabel className={GROUP_LABEL}>Pastas recentes (cd na aba atual)</CommandGroupLabel>
-                  {dirs.map((dir) => (
-                    <CommandItem key={dir} value={`dir:${dir}`} label={dir} className={ITEM}>
-                      <span className={ICON}>
-                        <History size={13} />
-                      </span>
-                      <span className="truncate">{folderName(dir)}</span>
-                      <span className="truncate text-[12px] text-muted">{dir}</span>
-                    </CommandItem>
-                  ))}
-                </CommandGroup>
-              </>
-            )}
+              {files.length > 0 && (
+                <>
+                  <CommandSeparator className="mx-1 my-1 h-px bg-hairline" />
+                  <CommandGroup>
+                    <CommandGroupLabel className={GROUP_LABEL}>Arquivos em {folderName(cwd)}</CommandGroupLabel>
+                    {files.map((f) => (
+                      <CommandItem key={f.path} value={`file:${f.path}`} label={f.path} className={ITEM}>
+                        <span className={ICON}>
+                          <File size={13} />
+                        </span>
+                        <span className="truncate">{f.path.split('/').pop()}</span>
+                        <span className="truncate text-[12px] text-muted">{f.path}</span>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </>
+              )}
 
-            <CommandSeparator className="mx-1 my-1 h-px bg-hairline" />
-            <CommandGroup>
-              <CommandGroupLabel className={GROUP_LABEL}>Ações</CommandGroupLabel>
-              {actions.map((a) => (
-                <CommandItem key={a.id} value={`action:${a.id}`} label={a.label} shortcut={a.keys} className={ITEM}>
-                  <span className={ICON}>›</span>
-                  <span className="truncate">{a.label}</span>
-                  {a.keys && <CommandShortcut />}
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </CommandList>
+              {dirs.length > 0 && (
+                <>
+                  <CommandSeparator className="mx-1 my-1 h-px bg-hairline" />
+                  <CommandGroup>
+                    <CommandGroupLabel className={GROUP_LABEL}>Pastas recentes (cd na aba atual)</CommandGroupLabel>
+                    {dirs.map((dir) => (
+                      <CommandItem key={dir} value={`dir:${dir}`} label={dir} className={ITEM}>
+                        <span className={ICON}>
+                          <History size={13} />
+                        </span>
+                        <span className="truncate">{folderName(dir)}</span>
+                        <span className="truncate text-[12px] text-muted">{dir}</span>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </>
+              )}
+
+              <CommandSeparator className="mx-1 my-1 h-px bg-hairline" />
+              <CommandGroup>
+                <CommandGroupLabel className={GROUP_LABEL}>Ações</CommandGroupLabel>
+                {actions.map((a) => (
+                  <CommandItem key={a.id} value={`action:${a.id}`} label={a.label} shortcut={a.keys} className={ITEM}>
+                    <span className={ICON}>›</span>
+                    <span className="truncate">{a.label}</span>
+                    {a.keys && <CommandShortcut />}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </CommandList>
+          </Scroller>
         </Command>
       </DialogContent>
     </Dialog>

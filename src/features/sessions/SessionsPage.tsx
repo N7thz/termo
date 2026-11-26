@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { ipc } from '../../lib/ipc'
+import { Scroller } from '../../lib/Scroller'
 import { openLink } from '../browser/links'
 import {
   type AgentSession,
@@ -399,7 +400,7 @@ export function SessionsPage({ cwd, active, onClose, onOpen }: Props) {
   return (
     <section
       aria-label="Sessões do Claude Code"
-      className="absolute inset-0 z-10 animate-pop-in overflow-y-auto bg-bg text-text motion-reduce:animate-none"
+      className="absolute inset-0 z-10 flex animate-pop-in flex-col bg-bg text-text motion-reduce:animate-none"
       onKeyDown={(e) => {
         if (e.key === 'Escape' && !e.defaultPrevented) {
           e.preventDefault()
@@ -407,90 +408,92 @@ export function SessionsPage({ cwd, active, onClose, onOpen }: Props) {
         }
       }}
     >
-      <div className="mx-auto flex max-w-[880px] flex-col gap-6 px-6 py-6">
-        <header className="flex flex-wrap items-center gap-3">
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <h1 className="m-0 text-[18px] font-semibold tracking-[-0.01em] text-text">Sessões</h1>
-            <p className="m-0 text-[12.5px] text-muted">
-              {agents
-                ? `${busy} trabalhando · ${waiting} esperando você · ${history.length} concluídas recentemente`
-                : 'Lendo as sessões (a primeira leitura leva alguns segundos)…'}
-            </p>
-          </div>
-          <Button className={smallButton} onClick={() => void load()} aria-label="Atualizar">
-            <RefreshCw aria-hidden size={13} className={loading ? 'animate-spin motion-reduce:animate-none' : ''} />
-            Atualizar
-          </Button>
-          <Button
-            className={smallButton}
-            onClick={() => openLink(PANEL_URL, false)}
-            title="Abrir o painel do coord (127.0.0.1:4747) no painel de navegador"
-          >
-            <ExternalLink aria-hidden size={13} /> Painel completo
-          </Button>
-          <Button
-            className="inline-flex size-8 items-center justify-center rounded-lg text-muted hover:bg-surface-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
-            onClick={onClose}
-            aria-label="Voltar ao terminal"
-            autoFocus
-          >
-            <X aria-hidden size={15} />
-          </Button>
-        </header>
+      <Scroller className="min-h-0 flex-1" label="Sessões">
+        <div className="mx-auto flex max-w-[880px] flex-col gap-6 px-6 py-6">
+          <header className="flex flex-wrap items-center gap-3">
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <h1 className="m-0 text-[18px] font-semibold tracking-[-0.01em] text-text">Sessões</h1>
+              <p className="m-0 text-[12.5px] text-muted">
+                {agents
+                  ? `${busy} trabalhando · ${waiting} esperando você · ${history.length} concluídas recentemente`
+                  : 'Lendo as sessões (a primeira leitura leva alguns segundos)…'}
+              </p>
+            </div>
+            <Button className={smallButton} onClick={() => void load()} aria-label="Atualizar">
+              <RefreshCw aria-hidden size={13} className={loading ? 'animate-spin motion-reduce:animate-none' : ''} />
+              Atualizar
+            </Button>
+            <Button
+              className={smallButton}
+              onClick={() => openLink(PANEL_URL, false)}
+              title="Abrir o painel do coord (127.0.0.1:4747) no painel de navegador"
+            >
+              <ExternalLink aria-hidden size={13} /> Painel completo
+            </Button>
+            <Button
+              className="inline-flex size-8 items-center justify-center rounded-lg text-muted hover:bg-surface-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
+              onClick={onClose}
+              aria-label="Voltar ao terminal"
+              autoFocus
+            >
+              <X aria-hidden size={15} />
+            </Button>
+          </header>
 
-        {error && (
-          <div className="rounded-[12px] border border-border bg-surface p-4 text-[12.5px] text-muted" role="alert">
-            Não foi possível ler o painel de sessões: {error}
-          </div>
-        )}
+          {error && (
+            <div className="rounded-[12px] border border-border bg-surface p-4 text-[12.5px] text-muted" role="alert">
+              Não foi possível ler o painel de sessões: {error}
+            </div>
+          )}
 
-        {agents?.erro && <p className="m-0 text-[12px] text-muted">Aviso do painel: {agents.erro}</p>}
+          {agents?.erro && <p className="m-0 text-[12px] text-muted">Aviso do painel: {agents.erro}</p>}
 
-        {!agents && !error && (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-3" aria-hidden>
-            {[0, 1].map((i) => (
-              <div key={i} className="h-36 animate-pulse rounded-[12px] bg-surface motion-reduce:animate-none" />
-            ))}
-          </div>
-        )}
-
-        {groups.length === 0 && agents && !error && (
-          <p className="m-0 text-[13px] text-muted">Nenhuma sessão ativa agora.</p>
-        )}
-
-        {groups.map((g) => (
-          <section key={g.key} className="flex flex-col gap-3" aria-label={`Projeto ${g.name}`}>
-            <h2 className="m-0 flex items-center gap-2 text-[12px] font-semibold tracking-[0.04em] text-muted uppercase">
-              <FolderOpen aria-hidden size={13} />
-              {g.name}
-              {g.current && <span className="font-normal tracking-normal normal-case">· esta pasta</span>}
-            </h2>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-3">
-              {g.sessions.map((s) => (
-                <SessionCard
-                  key={s.sessionId || s.id}
-                  s={s}
-                  now={now}
-                  state={state}
-                  onOpen={onOpen}
-                  onAct={(action, file) => void act(action, file)}
-                />
+          {!agents && !error && (
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-3" aria-hidden>
+              {[0, 1].map((i) => (
+                <div key={i} className="h-36 animate-pulse rounded-[12px] bg-surface motion-reduce:animate-none" />
               ))}
             </div>
-          </section>
-        ))}
+          )}
 
-        {history.length > 0 && (
-          <section className="flex flex-col gap-2" aria-label="Sessões concluídas">
-            <h2 className="m-0 text-[12px] font-semibold tracking-[0.04em] text-muted uppercase">Concluídas</h2>
-            <ul className="m-0 flex list-none flex-col p-0">
-              {history.map((h) => (
-                <HistoryRow key={`${h.id}-${h.ended}`} h={h} now={now} />
-              ))}
-            </ul>
-          </section>
-        )}
-      </div>
+          {groups.length === 0 && agents && !error && (
+            <p className="m-0 text-[13px] text-muted">Nenhuma sessão ativa agora.</p>
+          )}
+
+          {groups.map((g) => (
+            <section key={g.key} className="flex flex-col gap-3" aria-label={`Projeto ${g.name}`}>
+              <h2 className="m-0 flex items-center gap-2 text-[12px] font-semibold tracking-[0.04em] text-muted uppercase">
+                <FolderOpen aria-hidden size={13} />
+                {g.name}
+                {g.current && <span className="font-normal tracking-normal normal-case">· esta pasta</span>}
+              </h2>
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-3">
+                {g.sessions.map((s) => (
+                  <SessionCard
+                    key={s.sessionId || s.id}
+                    s={s}
+                    now={now}
+                    state={state}
+                    onOpen={onOpen}
+                    onAct={(action, file) => void act(action, file)}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
+
+          {history.length > 0 && (
+            <section className="flex flex-col gap-2" aria-label="Sessões concluídas">
+              <h2 className="m-0 text-[12px] font-semibold tracking-[0.04em] text-muted uppercase">Concluídas</h2>
+              <ul className="m-0 flex list-none flex-col p-0">
+                {history.map((h) => (
+                  <HistoryRow key={`${h.id}-${h.ended}`} h={h} now={now} />
+                ))}
+              </ul>
+            </section>
+          )}
+        </div>
+      </Scroller>
     </section>
   )
 }

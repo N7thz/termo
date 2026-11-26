@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react'
 import { type ReactNode, useRef, useState } from 'react'
+import { Scroller } from '../../lib/Scroller'
 import { tooltip } from '../../lib/ui'
 import { MAX_PROFILES } from '../../shared/settings'
 import type { Profile, SessionKind } from '../../shared/types'
@@ -626,90 +627,88 @@ export function TabSidebar(props: Props) {
         <CollapseButton collapsed={false} onClick={props.onToggleCollapsed} />
       </div>
 
-      <nav
-        ref={navRef}
-        className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto pb-2"
-        aria-label="Abas do perfil"
-      >
-        {/* key no perfil: a troca remonta o conteúdo, que entra deslizando no sentido da troca. */}
-        <div key={profile.id} className={`flex flex-col ${slide} motion-reduce:animate-none`}>
-          {profile.pinned.length > 0 && (
-            <>
-              <p className={SECTION}>Fixadas</p>
-              {profile.pinned.map((dir) => (
-                <div key={dir} className={`${ROW} animate-row-in motion-reduce:animate-none`}>
-                  <button
-                    type="button"
-                    className="absolute inset-0 rounded-lg outline-none focus-visible:outline-2 focus-visible:outline-accent"
-                    title={`${dir}\nClique para abrir uma aba nesta pasta`}
-                    aria-label={`Abrir aba em ${dir}`}
-                    onClick={() => onNew('shell', dir)}
-                  />
-                  <Folder aria-hidden size={14} className="pointer-events-none flex-none" />
-                  <span className="pointer-events-none min-w-0 flex-1 truncate">{folderName(dir)}</span>
-                  <Button
-                    className={ROW_CLOSE}
-                    tabIndex={-1}
-                    aria-label={`Desafixar ${dir}`}
-                    onClick={() => props.onUnpin(dir)}
-                  >
-                    <X size={12} />
-                  </Button>
-                </div>
-              ))}
-            </>
-          )}
-
-          {/* A linha que separa o que é fixo do que é aberto, como no Dia (sem fixadas, não há o que separar). */}
-          {profile.pinned.length > 0 && <hr className="mx-1 my-2 h-px flex-none border-0 bg-hairline" />}
-
-          <div className="flex flex-col gap-1.5">
-            {props.groups.map((group) => {
-              const inside = tabs.filter((t) => t.group === group.id)
-              return (
-                <section key={group.id} className="flex flex-col gap-1.5" aria-label={`Grupo ${group.name}`}>
-                  <div data-drop-group={group.id}>
-                    <GroupHeader
-                      group={group}
-                      count={inside.length}
-                      {...groupAgents(inside, props.agents)}
-                      onToggle={() => props.onGroupToggle(group.id)}
-                      onRename={(name) => props.onGroupRename(group.id, name)}
-                      onDelete={() => props.onGroupDelete(group.id)}
+      <Scroller className="min-h-0 flex-1">
+        <nav ref={navRef} className="flex flex-col pb-2" aria-label="Abas do perfil">
+          {/* key no perfil: a troca remonta o conteúdo, que entra deslizando no sentido da troca. */}
+          <div key={profile.id} className={`flex flex-col ${slide} motion-reduce:animate-none`}>
+            {profile.pinned.length > 0 && (
+              <>
+                <p className={SECTION}>Fixadas</p>
+                {profile.pinned.map((dir) => (
+                  <div key={dir} className={`${ROW} animate-row-in motion-reduce:animate-none`}>
+                    <button
+                      type="button"
+                      className="absolute inset-0 rounded-lg outline-none focus-visible:outline-2 focus-visible:outline-accent"
+                      title={`${dir}\nClique para abrir uma aba nesta pasta`}
+                      aria-label={`Abrir aba em ${dir}`}
+                      onClick={() => onNew('shell', dir)}
                     />
+                    <Folder aria-hidden size={14} className="pointer-events-none flex-none" />
+                    <span className="pointer-events-none min-w-0 flex-1 truncate">{folderName(dir)}</span>
+                    <Button
+                      className={ROW_CLOSE}
+                      tabIndex={-1}
+                      aria-label={`Desafixar ${dir}`}
+                      onClick={() => props.onUnpin(dir)}
+                    >
+                      <X size={12} />
+                    </Button>
                   </div>
-                  {/* Abas do grupo recuadas, com um fio à esquerda ligando ao cabeçalho. */}
-                  {!group.collapsed && inside.length > 0 && (
-                    <div className="ml-3 flex flex-col gap-1.5 border-l border-hairline pl-1.5">
-                      {inside.map((tab) => renderTab(tab))}
+                ))}
+              </>
+            )}
+
+            {/* A linha que separa o que é fixo do que é aberto, como no Dia (sem fixadas, não há o que separar). */}
+            {profile.pinned.length > 0 && <hr className="mx-1 my-2 h-px flex-none border-0 bg-hairline" />}
+
+            <div className="flex flex-col gap-1.5">
+              {props.groups.map((group) => {
+                const inside = tabs.filter((t) => t.group === group.id)
+                return (
+                  <section key={group.id} className="flex flex-col gap-1.5" aria-label={`Grupo ${group.name}`}>
+                    <div data-drop-group={group.id}>
+                      <GroupHeader
+                        group={group}
+                        count={inside.length}
+                        {...groupAgents(inside, props.agents)}
+                        onToggle={() => props.onGroupToggle(group.id)}
+                        onRename={(name) => props.onGroupRename(group.id, name)}
+                        onDelete={() => props.onGroupDelete(group.id)}
+                      />
                     </div>
-                  )}
-                </section>
-              )
-            })}
-            {tabs.filter((t) => !t.group || !props.groups.some((g) => g.id === t.group)).map((tab) => renderTab(tab))}
-            {/* Soltar aqui (ou no vão até ele) leva a aba para o fim das soltas, fora de qualquer grupo. */}
-            <div data-drop-loose className="flex flex-col">
-              <span className="flex items-center">
-                <Button
-                  className={`${ROW} min-w-0 flex-1 focus-visible:outline-2 focus-visible:outline-accent`}
-                  onClick={() => onNew('shell')}
-                >
-                  <Plus aria-hidden size={14} /> Nova aba
-                </Button>
-                <NewShellMenu
-                  defaultShell={props.defaultShell}
-                  onPick={(kind, shellId) => onNew(kind, undefined, shellId)}
-                  triggerClassName="grid size-7 flex-none place-items-center rounded-md text-muted outline-none hover:bg-surface-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent data-open:bg-surface-hover data-open:text-text"
-                  triggerLabel="Nova aba em outro modo"
-                >
-                  <ChevronDown aria-hidden size={13} />
-                </NewShellMenu>
-              </span>
+                    {/* Abas do grupo recuadas, com um fio à esquerda ligando ao cabeçalho. */}
+                    {!group.collapsed && inside.length > 0 && (
+                      <div className="ml-3 flex flex-col gap-1.5 border-l border-hairline pl-1.5">
+                        {inside.map((tab) => renderTab(tab))}
+                      </div>
+                    )}
+                  </section>
+                )
+              })}
+              {tabs.filter((t) => !t.group || !props.groups.some((g) => g.id === t.group)).map((tab) => renderTab(tab))}
+              {/* Soltar aqui (ou no vão até ele) leva a aba para o fim das soltas, fora de qualquer grupo. */}
+              <div data-drop-loose className="flex flex-col">
+                <span className="flex items-center">
+                  <Button
+                    className={`${ROW} min-w-0 flex-1 focus-visible:outline-2 focus-visible:outline-accent`}
+                    onClick={() => onNew('shell')}
+                  >
+                    <Plus aria-hidden size={14} /> Nova aba
+                  </Button>
+                  <NewShellMenu
+                    defaultShell={props.defaultShell}
+                    onPick={(kind, shellId) => onNew(kind, undefined, shellId)}
+                    triggerClassName="grid size-7 flex-none place-items-center rounded-md text-muted outline-none hover:bg-surface-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent data-open:bg-surface-hover data-open:text-text"
+                    triggerLabel="Nova aba em outro modo"
+                  >
+                    <ChevronDown aria-hidden size={13} />
+                  </NewShellMenu>
+                </span>
+              </div>
             </div>
           </div>
-        </div>
-      </nav>
+        </nav>
+      </Scroller>
 
       {/* Os pontos do rodapé trocam de perfil, como no Dia. */}
       {profileDots(false)}

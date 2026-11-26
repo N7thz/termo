@@ -36,6 +36,10 @@ pub fn open(app: &AppHandle, cwd: Option<&str>) -> Result<(), String> {
     let label = next_label();
     cfg.label = label.clone();
     cfg.url = WebviewUrl::App(url_for(cwd).into());
+    // Nasce com o fundo do último tema usado, como a principal.
+    if let Some(color) = crate::boot_color::saved(app) {
+        cfg.background_color = Some(color);
+    }
     WebviewWindowBuilder::from_config(app, &cfg)
         .map_err(|e| e.to_string())?
         .build()

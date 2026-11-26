@@ -2,6 +2,7 @@ import { Menu, MenuContent, MenuGroup, MenuGroupLabel, MenuItem, MenuSeparator, 
 import { Check, ChevronDown, Cloud, CornerDownLeft, LoaderCircle, Plus, TriangleAlert } from 'lucide-react'
 import { type KeyboardEvent, useState } from 'react'
 import { ipc } from '../../lib/ipc'
+import { Scroller } from '../../lib/Scroller'
 import { menuContent, menuItem, menuSeparator } from '../../lib/ui'
 import type { GitInfo } from '../../shared/types'
 import { GitBranch } from '../workspace/GitDiff'
@@ -111,79 +112,81 @@ export function BranchPicker({ cwd, git, className = '' }: { cwd: string; git: G
       </MenuTrigger>
       <MenuContent
         // font-sans: na linha de contexto o menu herdaria a fonte do terminal.
-        className={`${menuContent} max-h-[min(420px,70vh)] max-w-[min(440px,90vw)] overflow-y-auto font-sans`}
+        className={`${menuContent} max-w-[min(440px,90vw)] font-sans`}
         side="top"
         align="start"
         sideOffset={6}
         collisionPadding={8}
         aria-label="Branches"
       >
-        {error && (
-          <div role="alert" className="mx-1 mb-1 flex gap-2 rounded-md bg-surface px-2.5 py-2 text-[12px] text-text">
-            <TriangleAlert aria-hidden size={14} className="mt-px flex-none text-claude" />
-            <span className="whitespace-pre-wrap break-words">{error}</span>
-          </div>
-        )}
-        {creating == null ? (
-          <MenuItem
-            className={menuItem}
-            value="__nova-branch"
-            closeOnSelect={false}
-            disabled={busy != null}
-            onSelect={() => {
-              setError(null)
-              setCreating('')
-            }}
-          >
-            <Plus aria-hidden size={13} className="flex-none text-muted" />
-            <span className="flex-1">Nova branch…</span>
-          </MenuItem>
-        ) : (
-          <div className="flex flex-col gap-1 px-1 pt-0.5 pb-1">
-            <div className="flex items-center gap-2 rounded-md border border-accent/50 bg-surface px-2.5 py-[5px] focus-within:border-accent">
-              {busy ? (
-                <LoaderCircle
-                  aria-hidden
-                  size={13}
-                  className="flex-none animate-spin text-muted motion-reduce:animate-none"
-                />
-              ) : (
-                <Plus aria-hidden size={13} className="flex-none text-muted" />
-              )}
-              <input
-                // biome-ignore lint/a11y/noAutofocus: o campo só existe depois de escolher "Nova branch"
-                autoFocus
-                value={creating}
-                onChange={(e) => setCreating(branchName(e.target.value))}
-                onKeyDown={onNameKey}
-                disabled={busy != null}
-                spellCheck={false}
-                aria-label="Nome da branch nova"
-                placeholder="nome-da-branch"
-                className="min-w-0 flex-1 border-0 bg-transparent p-0 text-text outline-none placeholder:text-muted"
-              />
-              <CornerDownLeft aria-hidden size={12} className="flex-none text-muted" />
+        <Scroller viewportClassName="max-h-[min(420px,70vh)] min-h-0">
+          {error && (
+            <div role="alert" className="mx-1 mb-1 flex gap-2 rounded-md bg-surface px-2.5 py-2 text-[12px] text-text">
+              <TriangleAlert aria-hidden size={14} className="mt-px flex-none text-claude" />
+              <span className="whitespace-pre-wrap break-words">{error}</span>
             </div>
-            <span className="px-2.5 text-[11px] text-muted">
-              A partir de {git.branch ?? (git.commit ? `@${git.commit}` : 'HEAD')}, levando as alterações atuais
-            </span>
-          </div>
-        )}
-        <MenuSeparator className={menuSeparator} />
-        {branches == null && !error && <div className="px-2.5 py-[5px] text-muted">Carregando branches…</div>}
-        {branches && branches.length === 0 && <div className="px-2.5 py-[5px] text-muted">Nenhuma branch</div>}
-        {local.length > 0 && (
-          <MenuGroup>
-            <MenuGroupLabel className={groupLabel}>Locais</MenuGroupLabel>
-            {local.map(row)}
-          </MenuGroup>
-        )}
-        {remote.length > 0 && (
-          <MenuGroup>
-            <MenuGroupLabel className={groupLabel}>Só no remoto</MenuGroupLabel>
-            {remote.map(row)}
-          </MenuGroup>
-        )}
+          )}
+          {creating == null ? (
+            <MenuItem
+              className={menuItem}
+              value="__nova-branch"
+              closeOnSelect={false}
+              disabled={busy != null}
+              onSelect={() => {
+                setError(null)
+                setCreating('')
+              }}
+            >
+              <Plus aria-hidden size={13} className="flex-none text-muted" />
+              <span className="flex-1">Nova branch…</span>
+            </MenuItem>
+          ) : (
+            <div className="flex flex-col gap-1 px-1 pt-0.5 pb-1">
+              <div className="flex items-center gap-2 rounded-md border border-accent/50 bg-surface px-2.5 py-[5px] focus-within:border-accent">
+                {busy ? (
+                  <LoaderCircle
+                    aria-hidden
+                    size={13}
+                    className="flex-none animate-spin text-muted motion-reduce:animate-none"
+                  />
+                ) : (
+                  <Plus aria-hidden size={13} className="flex-none text-muted" />
+                )}
+                <input
+                  // biome-ignore lint/a11y/noAutofocus: o campo só existe depois de escolher "Nova branch"
+                  autoFocus
+                  value={creating}
+                  onChange={(e) => setCreating(branchName(e.target.value))}
+                  onKeyDown={onNameKey}
+                  disabled={busy != null}
+                  spellCheck={false}
+                  aria-label="Nome da branch nova"
+                  placeholder="nome-da-branch"
+                  className="min-w-0 flex-1 border-0 bg-transparent p-0 text-text outline-none placeholder:text-muted"
+                />
+                <CornerDownLeft aria-hidden size={12} className="flex-none text-muted" />
+              </div>
+              <span className="px-2.5 text-[11px] text-muted">
+                A partir de {git.branch ?? (git.commit ? `@${git.commit}` : 'HEAD')}, levando as alterações atuais
+              </span>
+            </div>
+          )}
+          <MenuSeparator className={menuSeparator} />
+          {branches == null && !error && <div className="px-2.5 py-[5px] text-muted">Carregando branches…</div>}
+          {branches && branches.length === 0 && <div className="px-2.5 py-[5px] text-muted">Nenhuma branch</div>}
+          {local.length > 0 && (
+            <MenuGroup>
+              <MenuGroupLabel className={groupLabel}>Locais</MenuGroupLabel>
+              {local.map(row)}
+            </MenuGroup>
+          )}
+          {remote.length > 0 && (
+            <MenuGroup>
+              <MenuGroupLabel className={groupLabel}>Só no remoto</MenuGroupLabel>
+              {remote.map(row)}
+            </MenuGroup>
+          )}
+        </Scroller>
       </MenuContent>
     </Menu>
   )

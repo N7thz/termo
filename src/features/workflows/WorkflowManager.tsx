@@ -1,6 +1,7 @@
 import { Dialog, DialogBackdrop, DialogContent, DialogTitle } from '@ui-sdk/react/dialog'
 import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { Scroller } from '../../lib/Scroller'
 import type { Workflow } from '../../shared/types'
 import {
   COMMAND_MAX,
@@ -86,160 +87,164 @@ export function WorkflowManager({ open, onOpenChange, workflows, draft, onChange
           {editing ? (editing.index === null ? 'Novo workflow' : 'Editar workflow') : 'Workflows'}
         </DialogTitle>
         {editing ? (
-          <form
-            className="flex min-h-0 flex-col gap-3 overflow-y-auto px-4 py-3"
-            onSubmit={(e) => {
-              e.preventDefault()
-              save()
-            }}
-          >
-            <label className="flex flex-col gap-1 text-[12px] text-muted">
-              Nome
-              <input
-                autoFocus
-                className={FIELD}
-                value={editing.form.name}
-                maxLength={NAME_MAX}
-                onChange={(e) => set({ name: e.currentTarget.value })}
-                placeholder="Log do git por autor"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-[12px] text-muted">
-              Comando
-              <textarea
-                className={`${FIELD} min-h-20 resize-y font-mono text-[12.5px]`}
-                value={editing.form.command}
-                maxLength={COMMAND_MAX}
-                spellCheck={false}
-                onChange={(e) => set({ command: e.currentTarget.value })}
-                placeholder="git log --author={{autor}} -n {{quantidade}}"
-              />
-              <span>
-                {params.length > 0
-                  ? `Campos para preencher: ${params.join(', ')}.`
-                  : 'Use {{nome}} onde o valor muda a cada uso; vira um campo para preencher.'}
-              </span>
-            </label>
-            <label className="flex flex-col gap-1 text-[12px] text-muted">
-              Descrição (opcional)
-              <input
-                className={FIELD}
-                value={editing.form.description}
-                maxLength={DESCRIPTION_MAX}
-                onChange={(e) => set({ description: e.currentTarget.value })}
-              />
-            </label>
-            {error && (
-              <p role="alert" className="m-0 text-[12px] text-claude">
-                {error}
-              </p>
-            )}
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                className={BUTTON}
-                onClick={() => {
-                  setEditing(null)
-                  setError(null)
-                }}
-              >
-                Cancelar
-              </button>
-              <button
-                type="submit"
-                className={`${BUTTON} bg-accent text-on-accent hover:bg-accent hover:text-on-accent`}
-              >
-                Salvar
-              </button>
-            </div>
-          </form>
+          <Scroller className="min-h-0">
+            <form
+              className="flex flex-col gap-3 px-4 py-3"
+              onSubmit={(e) => {
+                e.preventDefault()
+                save()
+              }}
+            >
+              <label className="flex flex-col gap-1 text-[12px] text-muted">
+                Nome
+                <input
+                  autoFocus
+                  className={FIELD}
+                  value={editing.form.name}
+                  maxLength={NAME_MAX}
+                  onChange={(e) => set({ name: e.currentTarget.value })}
+                  placeholder="Log do git por autor"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-[12px] text-muted">
+                Comando
+                <textarea
+                  className={`${FIELD} min-h-20 resize-y font-mono text-[12.5px]`}
+                  value={editing.form.command}
+                  maxLength={COMMAND_MAX}
+                  spellCheck={false}
+                  onChange={(e) => set({ command: e.currentTarget.value })}
+                  placeholder="git log --author={{autor}} -n {{quantidade}}"
+                />
+                <span>
+                  {params.length > 0
+                    ? `Campos para preencher: ${params.join(', ')}.`
+                    : 'Use {{nome}} onde o valor muda a cada uso; vira um campo para preencher.'}
+                </span>
+              </label>
+              <label className="flex flex-col gap-1 text-[12px] text-muted">
+                Descrição (opcional)
+                <input
+                  className={FIELD}
+                  value={editing.form.description}
+                  maxLength={DESCRIPTION_MAX}
+                  onChange={(e) => set({ description: e.currentTarget.value })}
+                />
+              </label>
+              {error && (
+                <p role="alert" className="m-0 text-[12px] text-claude">
+                  {error}
+                </p>
+              )}
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  className={BUTTON}
+                  onClick={() => {
+                    setEditing(null)
+                    setError(null)
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className={`${BUTTON} bg-accent text-on-accent hover:bg-accent hover:text-on-accent`}
+                >
+                  Salvar
+                </button>
+              </div>
+            </form>
+          </Scroller>
         ) : (
           <div className="flex min-h-0 flex-col">
-            <ul className="m-0 min-h-0 flex-1 list-none overflow-y-auto p-1.5">
-              {workflows.map((w, i) => (
-                <li
-                  // biome-ignore lint/suspicious/noArrayIndexKey: nomes podem repetir; a lista só muda por ações daqui
-                  key={`${i}:${w.name}`}
-                  className="flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-surface-hover"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13px]">{w.name}</div>
-                    <div className="truncate font-mono text-[11.5px] text-muted">{w.command}</div>
-                  </div>
-                  <button
-                    type="button"
-                    className={BUTTON}
-                    aria-label={`Subir ${w.name}`}
-                    disabled={i === 0}
-                    onClick={() => onChange(moveItem(workflows, i, i - 1))}
+            <Scroller className="min-h-0 flex-1">
+              <ul className="m-0 list-none p-1.5">
+                {workflows.map((w, i) => (
+                  <li
+                    // biome-ignore lint/suspicious/noArrayIndexKey: nomes podem repetir; a lista só muda por ações daqui
+                    key={`${i}:${w.name}`}
+                    className="flex items-center gap-1 rounded-md px-2 py-1.5 hover:bg-surface-hover"
                   >
-                    <ArrowUp aria-hidden size={13} />
-                  </button>
-                  <button
-                    type="button"
-                    className={BUTTON}
-                    aria-label={`Descer ${w.name}`}
-                    disabled={i === workflows.length - 1}
-                    onClick={() => onChange(moveItem(workflows, i, i + 1))}
-                  >
-                    <ArrowDown aria-hidden size={13} />
-                  </button>
-                  <button
-                    type="button"
-                    className={BUTTON}
-                    aria-label={`Editar ${w.name}`}
-                    onClick={() => setEditing({ index: i, form: w })}
-                  >
-                    <Pencil aria-hidden size={13} />
-                  </button>
-                  {confirmDelete === i ? (
-                    <button
-                      type="button"
-                      className={`${BUTTON} text-claude`}
-                      onClick={() => {
-                        setConfirmDelete(null)
-                        onChange(workflows.filter((_, j) => j !== i))
-                      }}
-                      onBlur={() => setConfirmDelete(null)}
-                    >
-                      Apagar mesmo?
-                    </button>
-                  ) : (
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[13px]">{w.name}</div>
+                      <div className="truncate font-mono text-[11.5px] text-muted">{w.command}</div>
+                    </div>
                     <button
                       type="button"
                       className={BUTTON}
-                      aria-label={`Apagar ${w.name}`}
-                      onClick={() => setConfirmDelete(i)}
+                      aria-label={`Subir ${w.name}`}
+                      disabled={i === 0}
+                      onClick={() => onChange(moveItem(workflows, i, i - 1))}
                     >
-                      <Trash2 aria-hidden size={13} />
+                      <ArrowUp aria-hidden size={13} />
                     </button>
-                  )}
-                </li>
-              ))}
-              {workflows.length === 0 && (
-                <li className="px-2 py-2">
-                  <p className="m-0 mb-2 text-[12.5px] text-muted">
-                    Nenhum workflow. Sugestões, para começar (só são salvas se você adicionar):
-                  </p>
-                  <ul className="m-0 flex list-none flex-col gap-1 p-0">
-                    {EXAMPLE_WORKFLOWS.map((w) => (
-                      <li
-                        key={w.name}
-                        className="flex items-center gap-2 rounded-md border border-hairline px-2.5 py-1.5"
+                    <button
+                      type="button"
+                      className={BUTTON}
+                      aria-label={`Descer ${w.name}`}
+                      disabled={i === workflows.length - 1}
+                      onClick={() => onChange(moveItem(workflows, i, i + 1))}
+                    >
+                      <ArrowDown aria-hidden size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      className={BUTTON}
+                      aria-label={`Editar ${w.name}`}
+                      onClick={() => setEditing({ index: i, form: w })}
+                    >
+                      <Pencil aria-hidden size={13} />
+                    </button>
+                    {confirmDelete === i ? (
+                      <button
+                        type="button"
+                        className={`${BUTTON} text-claude`}
+                        onClick={() => {
+                          setConfirmDelete(null)
+                          onChange(workflows.filter((_, j) => j !== i))
+                        }}
+                        onBlur={() => setConfirmDelete(null)}
                       >
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-[13px]">{w.name}</div>
-                          <div className="truncate font-mono text-[11.5px] text-muted">{w.command}</div>
-                        </div>
-                        <button type="button" className={BUTTON} onClick={() => onChange([...workflows, w])}>
-                          <Plus aria-hidden size={13} /> Adicionar
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </li>
-              )}
-            </ul>
+                        Apagar mesmo?
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className={BUTTON}
+                        aria-label={`Apagar ${w.name}`}
+                        onClick={() => setConfirmDelete(i)}
+                      >
+                        <Trash2 aria-hidden size={13} />
+                      </button>
+                    )}
+                  </li>
+                ))}
+                {workflows.length === 0 && (
+                  <li className="px-2 py-2">
+                    <p className="m-0 mb-2 text-[12.5px] text-muted">
+                      Nenhum workflow. Sugestões, para começar (só são salvas se você adicionar):
+                    </p>
+                    <ul className="m-0 flex list-none flex-col gap-1 p-0">
+                      {EXAMPLE_WORKFLOWS.map((w) => (
+                        <li
+                          key={w.name}
+                          className="flex items-center gap-2 rounded-md border border-hairline px-2.5 py-1.5"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-[13px]">{w.name}</div>
+                            <div className="truncate font-mono text-[11.5px] text-muted">{w.command}</div>
+                          </div>
+                          <button type="button" className={BUTTON} onClick={() => onChange([...workflows, w])}>
+                            <Plus aria-hidden size={13} /> Adicionar
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </li>
+                )}
+              </ul>
+            </Scroller>
             <footer className="flex items-center gap-2 border-t border-hairline px-3 py-2 text-[11.5px] text-muted">
               <span>
                 {workflows.length} de {MAX_WORKFLOWS}

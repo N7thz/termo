@@ -31,6 +31,7 @@ export type SectionId =
   | 'workflows'
   | 'layouts'
   | 'system'
+  | 'keybindings'
 
 export interface Section {
   id: SectionId
@@ -67,10 +68,18 @@ export const SECTIONS: Section[] = [
   { id: 'workflows', label: 'Workflows', keys: ['workflows'] },
   { id: 'layouts', label: 'Layouts salvos', keys: ['layouts'] },
   { id: 'system', label: 'Avisos e sistema', keys: ['notifications', 'globalHotkey', 'tray', 'autoUpdate'] },
+  { id: 'keybindings', label: 'Atalhos de teclado', keys: ['keybindings'] },
 ]
 
 /** Chaves que são objetos: o do arquivo vai por cima do atual (arquivo antigo sem um campo novo não o zera). */
-const OBJECT_KEYS = new Set<keyof Settings>(['layout', 'highlights', 'notifications', 'tray', 'background'])
+const OBJECT_KEYS = new Set<keyof Settings>([
+  'layout',
+  'highlights',
+  'notifications',
+  'tray',
+  'background',
+  'keybindings',
+])
 
 export interface SectionPreview {
   id: SectionId

@@ -3,6 +3,7 @@ import { Activity } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { ipc } from '../../lib/ipc'
 import { actionButton, tooltip, tooltipKbd } from '../../lib/ui'
+import { keysFor } from '../tabs/shortcuts'
 import { type AgentsResponse, counts } from './sessions'
 
 /** `claude agents` custa um processo por leitura: o indicador lê devagar e para com a janela escondida. */
@@ -37,7 +38,7 @@ export function SessionsIndicator({ onOpen }: { onOpen: () => void }) {
   const label = n ? `Sessões do Claude: ${n.busy} trabalhando, ${n.waiting} esperando você` : 'Sessões do Claude Code'
 
   return (
-    <Tooltip shortcut="mod+shift+a">
+    <Tooltip shortcut={keysFor('sessions')}>
       <TooltipTrigger
         render={<button type="button" className={`${actionButton} tabular-nums`} aria-label={label} onClick={onOpen} />}
       >

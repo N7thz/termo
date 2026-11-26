@@ -1,6 +1,7 @@
 import { Folder, History, X } from 'lucide-react'
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { ipc } from '../../lib/ipc'
+import { Scroller } from '../../lib/Scroller'
 import { type HistoryEntry, type LoggedCommand, mergeHistory, oneLine, searchHistory } from './history'
 
 interface Props {
@@ -162,44 +163,41 @@ export function HistorySearch({ fontFamily, fontSize, initialQuery, cwd, session
           <X aria-hidden size={14} />
         </button>
       </div>
-      <ul
-        ref={listRef}
-        id="history-results"
-        aria-label="Comandos"
-        className="m-0 min-h-0 flex-1 list-none overflow-y-auto p-1"
-      >
-        {results.map((r, i) => (
-          <li key={r.item.command} aria-current={i === selected || undefined}>
-            {/* O teclado fica na caixa de busca (setas, Enter); o botão serve ao mouse. */}
-            <button
-              type="button"
-              tabIndex={-1}
-              onMouseMove={() => i !== selected && setSelected(i)}
-              onClick={() => onPick(r.item.command, false)}
-              className={`flex w-full cursor-pointer items-center gap-2 truncate rounded-md px-2.5 py-1 text-left ${
-                i === selected ? 'bg-surface-hover' : ''
-              }`}
-              style={{ fontFamily, fontSize }}
-            >
-              <span className="min-w-0 flex-1 truncate">
-                <Highlighted text={oneLine(r.item.command)} positions={r.match.positions} />
-              </span>
-              {r.item.command.includes('\n') && (
-                <span className="flex-none text-[10.5px] text-muted">várias linhas</span>
-              )}
-            </button>
-          </li>
-        ))}
-        {results.length === 0 && (
-          <li className="px-3 py-4 text-center text-[12.5px] text-muted">
-            {file === null
-              ? 'Lendo o histórico…'
-              : here
-                ? 'Nenhum comando rodado nesta pasta combina. Tab mostra todos.'
-                : 'Nenhum comando combina.'}
-          </li>
-        )}
-      </ul>
+      <Scroller className="min-h-0 flex-1">
+        <ul ref={listRef} id="history-results" aria-label="Comandos" className="m-0 list-none p-1">
+          {results.map((r, i) => (
+            <li key={r.item.command} aria-current={i === selected || undefined}>
+              {/* O teclado fica na caixa de busca (setas, Enter); o botão serve ao mouse. */}
+              <button
+                type="button"
+                tabIndex={-1}
+                onMouseMove={() => i !== selected && setSelected(i)}
+                onClick={() => onPick(r.item.command, false)}
+                className={`flex w-full cursor-pointer items-center gap-2 truncate rounded-md px-2.5 py-1 text-left ${
+                  i === selected ? 'bg-surface-hover' : ''
+                }`}
+                style={{ fontFamily, fontSize }}
+              >
+                <span className="min-w-0 flex-1 truncate">
+                  <Highlighted text={oneLine(r.item.command)} positions={r.match.positions} />
+                </span>
+                {r.item.command.includes('\n') && (
+                  <span className="flex-none text-[10.5px] text-muted">várias linhas</span>
+                )}
+              </button>
+            </li>
+          ))}
+          {results.length === 0 && (
+            <li className="px-3 py-4 text-center text-[12.5px] text-muted">
+              {file === null
+                ? 'Lendo o histórico…'
+                : here
+                  ? 'Nenhum comando rodado nesta pasta combina. Tab mostra todos.'
+                  : 'Nenhum comando combina.'}
+            </li>
+          )}
+        </ul>
+      </Scroller>
       <footer className="flex items-center gap-3 border-t border-border px-3 py-1.5 text-[11px] text-muted">
         <span>↑↓ escolher</span>
         <span>Enter põe na linha</span>

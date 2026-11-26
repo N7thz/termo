@@ -1,6 +1,15 @@
 import { describe, expect, test } from 'bun:test'
 import { formatShortcut } from '@ui-sdk/core/shortcuts'
-import { actionFor, keysFor, SHORTCUTS } from './shortcuts'
+import {
+  actionFor,
+  conflictOf,
+  keysFor,
+  normalizeKeys,
+  SHORTCUTS,
+  setKeybindings,
+  setRecordingShortcut,
+  uiKeys,
+} from './shortcuts'
 
 const key = (k: string, mods: Partial<KeyboardEvent> = {}) =>
   ({ key: k, code: '', ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...mods }) as KeyboardEvent
@@ -105,5 +114,54 @@ describe('tabela de atalhos', () => {
     }
     expect(keysFor('new-shell')).toBe('mod+shift+t')
     expect(keysFor('shortcuts')).toBe('mod+shift+/')
+  })
+})
+
+describe('atalhos trocados', () => {
+  const ev = (code: string, mods: Partial<KeyboardEvent> = {}) =>
+    ({ key: '', code, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...mods }) as KeyboardEvent
+
+  test('a troca vale, o padrão da ação trocada deixa de valer e desligar tira o atalho', () => {
+    setKeybindings({ 'new-shell': 'Ctrl+Alt+T', palette: '' })
+    try {
+      expect(actionFor(ev('KeyT', { ctrlKey: true, altKey: true }))).toBe('new-shell')
+      expect(actionFor(key('T', ctrlShift))).toBeNull()
+      expect(actionFor(key('P', ctrlShift))).toBeNull()
+      expect(keysFor('new-shell')).toBe('mod+alt+t')
+      expect(keysFor('palette')).toBeUndefined()
+      // As outras continuam com o padrão.
+      expect(actionFor(key('K', ctrlShift))).toBe('new-claude')
+    } finally {
+      setKeybindings({})
+    }
+  })
+
+  test('a troca vence o padrão de outra ação com a mesma combinação', () => {
+    setKeybindings({ themes: 'Ctrl+Shift+K' })
+    try {
+      expect(actionFor({ ...key('K', ctrlShift), code: 'KeyK' } as KeyboardEvent)).toBe('themes')
+    } finally {
+      setKeybindings({})
+    }
+  })
+
+  test('gravando, nenhuma ação dispara', () => {
+    setRecordingShortcut(true)
+    try {
+      expect(actionFor(key('T', ctrlShift))).toBeNull()
+    } finally {
+      setRecordingShortcut(false)
+    }
+  })
+
+  test('formato das dicas e conflitos', () => {
+    expect(uiKeys('Ctrl+Shift+Comma')).toBe('mod+shift+,')
+    expect(uiKeys('Alt+F12')).toBe('alt+f12')
+    expect(normalizeKeys('shift+mod+t')).toBe(normalizeKeys('mod+shift+t'))
+    expect(conflictOf('themes', 'Ctrl+Shift+T')).toEqual({ action: 'new-shell', label: 'Nova aba' })
+    expect(conflictOf('themes', 'Ctrl+Shift+F')?.action).toBeUndefined()
+    expect(conflictOf('themes', 'Ctrl+Shift+F')?.label).toBe('Buscar na saída')
+    expect(conflictOf('new-shell', 'Ctrl+Shift+T')).toBeNull()
+    expect(conflictOf('themes', 'Ctrl+Alt+F9')).toBeNull()
   })
 })

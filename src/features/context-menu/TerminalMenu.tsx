@@ -1,6 +1,7 @@
 import { Menu, MenuContent, MenuContextTrigger, MenuItem, MenuSeparator } from '@ui-sdk/react/menu'
 import { type ReactNode, useRef, useState } from 'react'
 import { menuContent, menuItem, menuSeparator } from '../../lib/ui'
+import { keysFor } from '../tabs/shortcuts'
 import type { TerminalActions, TerminalMenuAction } from './types'
 
 interface Props {
@@ -62,21 +63,21 @@ export function TerminalMenu({ children, actions, onAction }: Props) {
           Modo de cópia…
         </MenuItem>
         <MenuSeparator className={menuSeparator} />
-        <MenuItem className={menuItem} value="new-shell" shortcut="mod+shift+t">
+        <MenuItem className={menuItem} value="new-shell" shortcut={keysFor('new-shell')}>
           Nova aba
         </MenuItem>
-        <MenuItem className={menuItem} value="new-claude" shortcut="mod+shift+k">
+        <MenuItem className={menuItem} value="new-claude" shortcut={keysFor('new-claude')}>
           Nova aba com Claude Code
         </MenuItem>
         <MenuSeparator className={menuSeparator} />
-        <MenuItem className={menuItem} value="themes" shortcut="mod+shift+,">
+        <MenuItem className={menuItem} value="themes" shortcut={keysFor('themes')}>
           Temas…
         </MenuItem>
-        <MenuItem className={menuItem} value="settings" shortcut="mod+,">
+        <MenuItem className={menuItem} value="settings" shortcut={keysFor('settings')}>
           Configurações…
         </MenuItem>
         <MenuSeparator className={menuSeparator} />
-        <MenuItem className={menuItem} value="close" shortcut="mod+shift+w">
+        <MenuItem className={menuItem} value="close" shortcut={keysFor('close-tab')}>
           Fechar aba
         </MenuItem>
       </MenuContent>

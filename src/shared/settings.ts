@@ -55,12 +55,15 @@ export const DEFAULT_SETTINGS: Settings = {
     fit: 'cover',
     changeSecs: 0,
     shuffle: false,
+    glow: true,
+    glowStrength: 50,
   },
   layouts: [],
   dimInactivePane: true,
   minimumContrast: 1,
   oscClipboard: true,
   oscNotifications: true,
+  keybindings: {},
 }
 
 /** Mesmos níveis do Rust (CONTRAST_LEVELS em src-tauri/src/settings.rs). */

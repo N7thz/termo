@@ -55,6 +55,8 @@ export interface Settings {
   oscClipboard: boolean
   /** Programas podem mandar avisos pelo OSC 9 / OSC 777. */
   oscNotifications: boolean
+  /** Atalhos trocados: ação do app → combinação (`Ctrl+Alt+T`); `''` desliga; sem a ação, vale o padrão. */
+  keybindings: Record<string, string>
 }
 
 /** Um conjunto de abas e painéis guardado para abrir com um clique. */
@@ -94,6 +96,10 @@ export interface BackgroundSettings {
   fit: 'cover' | 'contain' | 'center' | 'tile'
   /** Troca a imagem a cada N segundos (5 a 86400); 0 = não troca. */
   changeSecs: number
+  /** Brilho suave atrás do terminal, nas cores do tema (some com a imagem atrás do terminal). */
+  glow: boolean
+  /** Intensidade do brilho em %, de 10 a 100. */
+  glowStrength: number
   /** Ordem aleatória no slideshow. */
   shuffle: boolean
 }
