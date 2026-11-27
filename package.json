@@ -20,7 +20,7 @@
     "format": "biome check --write .",
     "test": "bun test src && bun run build:cli && cargo test --manifest-path src-tauri/Cargo.toml && cargo test --manifest-path cli/Cargo.toml",
     "test:web": "bun test src",
-    "lint:rust": "cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings && cargo clippy --manifest-path cli/Cargo.toml -- -D warnings",
+    "lint:rust": "bun run build:cli && cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings && cargo clippy --manifest-path cli/Cargo.toml -- -D warnings",
     "check": "bun run typecheck && bun run lint && bun run lint:rust && bun run test",
     "release": "bun scripts/release.ts"
   },
