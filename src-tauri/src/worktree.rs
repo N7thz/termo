@@ -253,6 +253,9 @@ mod tests {
             git_full(dir, &[&who[..], &["commit", "-q", "--allow-empty", "-m", msg]].concat()).unwrap();
         };
         git_full(&repo, &["init", "-q", "-b", "main"]).unwrap();
+        // O merge commita por conta própria; no CI não há identidade global do git.
+        git_full(&repo, &["config", "user.name", "termo"]).unwrap();
+        git_full(&repo, &["config", "user.email", "termo@localhost"]).unwrap();
         commit(&repo, "inicio");
 
         let wt = create(&repo, "tarefa").unwrap();

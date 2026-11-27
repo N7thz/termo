@@ -155,7 +155,9 @@ fn matching_recent(recent: &[PathBuf], needle: &str, cwd: &Path, skip: &[PathBuf
     let mut starts = Vec::new();
     let mut contains = Vec::new();
     for dir in recent {
-        if same_dir(dir, cwd) || skip.iter().any(|s| same_dir(s, dir)) {
+        // As de `skip` vêm canonizadas (nome longo); a recente pode ter sido gravada com nome curto (8.3).
+        let canonical = dir.canonicalize().map(strip_verbatim).unwrap_or_else(|_| dir.clone());
+        if same_dir(dir, cwd) || skip.iter().any(|s| same_dir(s, dir) || same_dir(s, &canonical)) {
             continue;
         }
         let Some(name) = dir.file_name().map(|n| n.to_string_lossy().to_lowercase()) else { continue };
