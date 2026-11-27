@@ -321,8 +321,14 @@ export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
       const idx = mine.findIndex((t) => t.key === state.active)
       return withActive(state, mine[(idx + action.delta + n) % n].key)
     }
-    case 'update':
+    case 'update': {
+      // Nada mudou (o mesmo título de novo, o mesmo shell): devolve o mesmo estado, e o React não re-renderiza.
+      const tab = state.tabs.find((t) => t.key === action.key)
+      const patch = action.patch as Record<string, unknown>
+      if (!tab || Object.keys(patch).every((k) => Object.is((tab as unknown as Record<string, unknown>)[k], patch[k])))
+        return state
       return { ...state, tabs: state.tabs.map((t) => (t.key === action.key ? { ...t, ...action.patch } : t)) }
+    }
     case 'rename': {
       const label = cleanLabel(action.label)
       const tab = state.tabs.find((t) => t.key === action.key)
@@ -512,6 +518,14 @@ export function tabsToClose(state: TabsState, key: number, scope: 'others' | 'ri
   return scope === 'others' ? keys.filter((k) => k !== key) : keys.slice(idx + 1)
 }
 
+/**
+ * Título sem o indicador animado do começo (o ✳/✶/⠋ que o Claude Code e outros programas giram a cada
+ * quadro). Assim a foto da sessão só muda quando o título muda de fato, e não é salva várias vezes por segundo.
+ */
+export function stableTitle(title: string): string {
+  return title.replace(/^[⠀-⣿✀-➿·*]+\s+/u, '')
+}
+
 /** Foto do estado para salvar. `cwdOf` dá a pasta atual de cada aba (a do prompt, se já houver). */
 export function snapshot(
   state: TabsState,
@@ -533,7 +547,7 @@ export function snapshot(
       const output = outputOf(t)
       return {
         kind: t.kind,
-        title: t.title,
+        title: stableTitle(t.title),
         profile: t.profile,
         ...(cwd ? { cwd } : {}),
         ...(t.group ? { group: t.group } : {}),

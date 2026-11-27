@@ -51,8 +51,9 @@ export const ipc = {
   ack: (id: number, bytes: number) => invoke<void>('pty_ack', { id, bytes }),
   kill: (id: number) => invoke<void>('pty_kill', { id }),
 
-  /** Pastas que combinam com `query` a partir de `cwd`, cada uma com o `cd` pronto. */
-  suggestPaths: (cwd: string, query: string) => invoke<PathSuggestion[]>('suggest_paths', { cwd, query }),
+  /** Pastas que combinam com `query` a partir de `cwd`, cada uma com o `cd` pronto no formato do shell. */
+  suggestPaths: (cwd: string, query: string, shell?: string) =>
+    invoke<PathSuggestion[]>('suggest_paths', { cwd, query, shell }),
   /** Registra a pasta atual no histórico de pastas recentes (a cada mudança de pasta). */
   recordDir: (path: string) => invoke<void>('record_dir', { path }),
   /** Pastas recentes, mais relevantes primeiro. */

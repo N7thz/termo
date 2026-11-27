@@ -1,0 +1,108 @@
+{
+  "defaults": {
+    "autoUpdate": true,
+    "background": {
+      "blur": 0,
+      "changeSecs": 0,
+      "enabled": false,
+      "fit": "cover",
+      "glow": true,
+      "glowStrength": 50,
+      "images": [],
+      "opacity": 20,
+      "shuffle": false,
+      "target": "terminal"
+    },
+    "customThemes": [],
+    "defaultCwd": "",
+    "defaultShell": "auto",
+    "dimInactivePane": true,
+    "fontFamily": "'JetBrains Mono', 'Cascadia Code', 'Fira Code', Consolas, monospace",
+    "fontSize": 14,
+    "globalHotkey": "",
+    "highlights": {
+      "diffs": true,
+      "fileLinks": true,
+      "gitHashes": true,
+      "logLevels": true,
+      "network": true,
+      "rules": [
+        {
+          "color": "#e0af68",
+          "mark": false,
+          "notify": false,
+          "pattern": "\\b(TODO|FIXME|HACK)\\b"
+        }
+      ],
+      "severity": true,
+      "timestamps": true,
+      "uuids": true
+    },
+    "historySearch": true,
+    "inputEditor": false,
+    "interfaceSize": "medium",
+    "keybindings": {},
+    "layout": {
+      "diffBadge": true,
+      "sidebar": true,
+      "sidebarCollapsed": false,
+      "statusBar": true
+    },
+    "layouts": [],
+    "linkTarget": "panel",
+    "minimumContrast": 1.0,
+    "notifications": {
+      "claude": true,
+      "commandSecs": 30,
+      "commands": true,
+      "enabled": true
+    },
+    "oscClipboard": true,
+    "oscNotifications": true,
+    "profiles": [
+      {
+        "color": "green",
+        "cwd": "",
+        "id": "trabalho",
+        "name": "Trabalho",
+        "pinned": []
+      },
+      {
+        "color": "yellow",
+        "cwd": "",
+        "id": "pessoal",
+        "name": "Pessoal",
+        "pinned": []
+      }
+    ],
+    "restoreOutput": true,
+    "restoreSession": true,
+    "shellPredictions": true,
+    "startWithClaude": false,
+    "stickyCommand": true,
+    "theme": "system",
+    "tray": {
+      "closeToTray": false,
+      "enabled": false,
+      "launchAtLogin": false,
+      "lightBackground": true,
+      "minimizeToTray": false,
+      "startHidden": false
+    },
+    "workflows": []
+  },
+  "limits": {
+    "contrastLevels": [
+      1.0,
+      3.0,
+      4.5,
+      7.0
+    ],
+    "fontMax": 32,
+    "fontMin": 9,
+    "maxPattern": 200,
+    "maxPinned": 12,
+    "maxProfiles": 9,
+    "maxRules": 20
+  }
+}

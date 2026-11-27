@@ -326,7 +326,7 @@ pub struct BackgroundSettings {
     pub change_secs: u32,
     /// Ordem aleatória no slideshow.
     pub shuffle: bool,
-    /// Brilho suave atrás do terminal, nas cores do tema (some com a imagem atrás do terminal).
+    /// Brilho suave nas bordas da janela (na moldura, em volta do terminal), nas cores do tema.
     pub glow: bool,
     /// Intensidade do brilho, em %: `GLOW_MIN` a 100.
     pub glow_strength: u8,
@@ -929,7 +929,7 @@ impl SettingsStore {
         let path = dir.join("settings.json");
         let current = fs::read_to_string(&path)
             .ok()
-            .and_then(|s| serde_json::from_str::<Settings>(&s).ok())
+            .and_then(|text| parse_or_salvage(&path, &text))
             .map(|mut s| {
                 // Arquivo editado à mão pode trazer valores fora da faixa.
                 s.font_size = s.font_size.clamp(FONT_MIN, FONT_MAX);
@@ -983,6 +983,48 @@ impl SettingsStore {
         }
         Ok(cur.clone())
     }
+}
+
+/// Lê o `settings.json`. Se um campo não fecha com o tipo esperado (arquivo editado à mão, versão mais nova
+/// do Termo, tipo que mudou), não troca tudo pelos padrões: guarda uma cópia do arquivo
+/// (`settings.json.bad-<segundos>`) e aproveita cada campo que ainda vale, campo a campo. Sem isso, o
+/// primeiro salvamento gravaria os padrões por cima e levaria perfis, workflows, layouts e temas.
+fn parse_or_salvage(path: &Path, text: &str) -> Option<Settings> {
+    let err = match serde_json::from_str::<Settings>(text) {
+        Ok(s) => return Some(s),
+        Err(e) => e,
+    };
+    let backup = path.with_extension(format!("json.bad-{}", unix_secs()));
+    let saved = fs::copy(path, &backup).is_ok();
+    log::warn!(
+        "settings.json inválido ({err}); {} e os campos válidos foram aproveitados",
+        if saved { format!("cópia em {}", backup.display()) } else { "a cópia falhou".into() }
+    );
+    salvage(text)
+}
+
+/// Campo a campo: começa dos padrões e põe cada campo do arquivo que, sozinho, ainda deixa o todo válido.
+fn salvage(text: &str) -> Option<Settings> {
+    let serde_json::Value::Object(file) = serde_json::from_str::<serde_json::Value>(text).ok()? else {
+        return None;
+    };
+    let mut merged = serde_json::to_value(Settings::default()).ok()?;
+    for (key, value) in file {
+        let serde_json::Value::Object(obj) = &mut merged else { return None };
+        let previous = obj.insert(key.clone(), value);
+        if serde_json::from_value::<Settings>(merged.clone()).is_err() {
+            let serde_json::Value::Object(obj) = &mut merged else { return None };
+            match previous {
+                Some(p) => obj.insert(key, p),
+                None => obj.remove(&key),
+            };
+        }
+    }
+    serde_json::from_value(merged).ok()
+}
+
+fn unix_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 /// Grava num `.tmp` e renomeia: uma queda no meio não corrompe o arquivo.
@@ -1417,6 +1459,73 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(s.font_family, before);
+    }
+
+    #[test]
+    fn one_bad_field_keeps_the_others_and_backs_up_the_file() {
+        let dir = std::env::temp_dir().join(format!("termo-test-bad-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        // fontSize com tipo errado; startWithClaude e fontFamily válidos.
+        fs::write(
+            dir.join("settings.json"),
+            r#"{"fontSize":"grande","startWithClaude":true,"fontFamily":"Cascadia Code"}"#,
+        )
+        .unwrap();
+        let store = SettingsStore::load(&dir);
+        let s = store.get();
+        assert!(s.start_with_claude);
+        assert_eq!(s.font_family, "Cascadia Code");
+        assert_eq!(s.font_size, Settings::default().font_size);
+        let backups = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().starts_with("settings.json.bad-"))
+            .count();
+        assert_eq!(backups, 1);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn broken_json_falls_back_to_defaults_with_a_backup() {
+        let dir = std::env::temp_dir().join(format!("termo-test-broken-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("settings.json"), "{ isto não é json").unwrap();
+        let store = SettingsStore::load(&dir);
+        assert_eq!(store.get().font_size, Settings::default().font_size);
+        assert!(fs::read_dir(&dir).unwrap().filter_map(Result::ok).any(|e| e
+            .file_name()
+            .to_string_lossy()
+            .starts_with("settings.json.bad-")));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// Os padrões e limites também vivem no frontend (`src/shared/settings.ts`). Este teste confere o lado do
+    /// Rust contra `src/shared/settings.contract.json`, e o `settings.test.ts` confere o lado do TS: mudar um
+    /// padrão só de um lado quebra um dos dois. Para regravar o arquivo depois de mudar de propósito:
+    /// `TERMO_UPDATE_CONTRACT=1 cargo test --manifest-path src-tauri/Cargo.toml settings_contract`.
+    #[test]
+    fn settings_contract_matches_the_frontend() {
+        let contract = serde_json::json!({
+            "defaults": Settings::default(),
+            "limits": {
+                "fontMin": FONT_MIN,
+                "fontMax": FONT_MAX,
+                "maxProfiles": MAX_PROFILES,
+                "maxPinned": MAX_PINNED,
+                "maxRules": MAX_RULES,
+                "maxPattern": MAX_PATTERN,
+                "contrastLevels": CONTRAST_LEVELS,
+            },
+        });
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/shared/settings.contract.json");
+        let text = format!("{}
+", serde_json::to_string_pretty(&contract).unwrap());
+        if std::env::var_os("TERMO_UPDATE_CONTRACT").is_some() {
+            fs::write(&path, &text).unwrap();
+        }
+        let saved: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).expect("falta src/shared/settings.contract.json")).unwrap();
+        assert_eq!(saved, contract, "padrões ou limites do Rust mudaram: regrave o contrato (veja o comentário do teste)");
     }
 
     #[test]

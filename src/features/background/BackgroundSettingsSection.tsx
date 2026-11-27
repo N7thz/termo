@@ -72,9 +72,6 @@ export function BackgroundSettingsSection({ settings, onChange, switchClass, thu
     set({ images: addImages(bg.images, paths), enabled: true })
   }
 
-  // Com imagem atrás do terminal, a imagem manda e o brilho não aparece.
-  const imageCoversGlow = bg.enabled && bg.images.length > 0 && bg.target === 'terminal'
-
   return (
     <>
       <section className="flex flex-col gap-3 border-t border-hairline pt-3" aria-labelledby="glow-title">
@@ -84,7 +81,7 @@ export function BackgroundSettingsSection({ settings, onChange, switchClass, thu
           </h3>
           <Switch
             className={switchClass}
-            aria-label="Mostrar brilho do tema atrás do terminal"
+            aria-label="Mostrar brilho do tema nas bordas da janela"
             checked={bg.glow}
             onCheckedChange={(on) => set({ glow: on })}
           >
@@ -92,11 +89,9 @@ export function BackgroundSettingsSection({ settings, onChange, switchClass, thu
           </Switch>
         </span>
         <p className="m-0 text-[12px] text-muted">
-          {imageCoversGlow
-            ? 'A imagem de fundo atrás do terminal está no lugar do brilho.'
-            : 'Dois halos suaves nas cores do tema, atrás do texto do terminal.'}
+          Dois halos suaves nas cores do tema, nas bordas da janela, em volta do terminal.
         </p>
-        {bg.glow && !imageCoversGlow && (
+        {bg.glow && (
           <Row label="Intensidade do brilho" value={`${glow}%`}>
             <input
               type="range"

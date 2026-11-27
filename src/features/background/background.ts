@@ -117,13 +117,13 @@ export function isTranslucent(color: string | undefined): boolean {
 export const GLOW_MIN = 10
 export const clampGlow = (n: number) => clamp(n, GLOW_MIN, 100, 50)
 
-/** O brilho aparece: ligado e sem imagem atrás do terminal (a imagem manda). */
+/** O brilho aparece: fica na moldura da janela, então convive com a imagem de fundo. */
 export function wantsGlow(b: BackgroundSettings | undefined): boolean {
-  return (b?.glow ?? true) && !wantsTransparentTerminal(b)
+  return b?.glow ?? true
 }
 
 /** Opacidade máxima de cada halo em 100%: baixa para o texto nunca perder contraste. */
-const GLOW_PEAK = { dark: 0.3, light: 0.18 } as const
+const GLOW_PEAK = { dark: 0.3, light: 0.24 } as const
 
 function rgbOf(hex: string | undefined): [number, number, number] | null {
   const m = /^#([0-9a-f]{6})(?:[0-9a-f]{2})?$/i.exec(hex?.trim() ?? '')
@@ -154,11 +154,10 @@ export function glowTone(accent: string, ansi: { magenta?: string; cyan?: string
 }
 
 /**
- * Fundo do cartão do terminal com o brilho: a cor de fundo do terminal e dois halos difusos,
- * o destaque no alto à esquerda e o segundo tom embaixo à direita.
+ * Brilho da moldura da janela: dois halos difusos, o destaque no alto (ao longo da barra) e o segundo
+ * tom embaixo à esquerda (atrás da lateral), onde o cartão do terminal não cobre.
  */
 export function glowStyle(opts: {
-  base: string
   accent: string
   tone: string
   scheme: 'dark' | 'light'
@@ -169,10 +168,9 @@ export function glowStyle(opts: {
   const halo = (color: string, a: number, at: string, size: string) =>
     `radial-gradient(${size} at ${at}, color-mix(in srgb, ${color} ${pct(a)}, transparent), transparent 70%)`
   return {
-    backgroundColor: opts.base,
     backgroundImage: [
-      halo(opts.accent, alpha, '0% 0%', '70% 65%'),
-      halo(opts.tone, alpha * 0.8, '100% 100%', '65% 60%'),
+      halo(opts.accent, alpha, '0% 0%', '85% 60%'),
+      halo(opts.tone, alpha * 0.8, '0% 100%', '45% 75%'),
     ].join(', '),
   }
 }

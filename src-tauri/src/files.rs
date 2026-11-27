@@ -121,10 +121,13 @@ pub fn search(files: &[String], query: &str, limit: usize) -> Vec<FileHit> {
     hits
 }
 
+/// Lista de arquivos de uma pasta e quando foi lida.
+type CachedList = (Instant, Arc<Vec<String>>);
+
 /// Guarda a lista de arquivos de cada pasta por alguns segundos (a paleta busca a cada tecla).
 #[derive(Default)]
 pub struct FileIndex {
-    cache: Mutex<HashMap<PathBuf, (Instant, Arc<Vec<String>>)>>,
+    cache: Mutex<HashMap<PathBuf, CachedList>>,
 }
 
 impl FileIndex {

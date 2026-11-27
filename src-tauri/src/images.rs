@@ -35,6 +35,10 @@ fn resolve(cwd: Option<&Path>, raw: &str) -> Option<PathBuf> {
     if name.is_empty() || name.len() > 1024 || name.contains('\0') {
         return None;
     }
+    // Nome tirado da saída do comando: caminho de rede não é tocado (ver paths::is_network_path).
+    if crate::paths::is_network_path(name) {
+        return None;
+    }
     let p = Path::new(name);
     let full = if p.is_absolute() { p.to_path_buf() } else { cwd?.join(p) };
     (mime_of(&full).is_some() && full.is_file()).then_some(full)

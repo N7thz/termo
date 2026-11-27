@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { initialTabs, type TabsState, tabsReducer, tabsToClose, visibleTabs } from './tabs'
+import { initialTabs, stableTitle, type TabsState, tabsReducer, tabsToClose, visibleTabs } from './tabs'
 
 const open3 = (): TabsState =>
   ['a', 'b', 'c'].reduce((s, title) => tabsReducer(s, { type: 'open', kind: 'shell', title }), initialTabs)
@@ -44,6 +44,24 @@ describe('tabsReducer', () => {
     const s = tabsReducer(open3(), { type: 'update', key: 2, patch: { title: 'novo', kind: 'claude' } })
     expect(s.tabs[1]).toEqual({ key: 2, title: 'novo', kind: 'claude', profile: 'principal' })
     expect(s.tabs[0].title).toBe('a')
+  })
+
+  test('update sem mudança devolve o mesmo estado (sem re-render)', () => {
+    const s = open3()
+    expect(tabsReducer(s, { type: 'update', key: 2, patch: { title: 'b' } })).toBe(s)
+    expect(tabsReducer(s, { type: 'update', key: 9, patch: { title: 'x' } })).toBe(s)
+    expect(tabsReducer(s, { type: 'update', key: 2, patch: { title: 'b', kind: 'claude' } })).not.toBe(s)
+  })
+})
+
+describe('título estável na sessão', () => {
+  test('tira o indicador animado do começo e mantém o resto', () => {
+    expect(stableTitle('✳ Corrigindo testes')).toBe('Corrigindo testes')
+    expect(stableTitle('⠋ build')).toBe('build')
+    expect(stableTitle('· Claude Code')).toBe('Claude Code')
+    expect(stableTitle('~/projeto')).toBe('~/projeto')
+    expect(stableTitle('pwsh')).toBe('pwsh')
+    expect(stableTitle('✳')).toBe('✳')
   })
 })
 

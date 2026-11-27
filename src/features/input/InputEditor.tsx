@@ -62,7 +62,9 @@ function wordBefore(text: string, caret: number) {
   return { start, word: text.slice(start, caret) }
 }
 
-const quoteIfNeeded = (label: string) => (/\s/.test(label) ? `'${label.replace(/'/g, "''")}'` : label)
+// O PowerShell também fecha a string com as aspas tipográficas ‘ ’ ‚ ‛: elas entram dobradas, como o '.
+const quoteIfNeeded = (label: string) =>
+  /[\s'‘-‛`$&;(){}|<>@#,]/.test(label) ? `'${label.replace(/['‘-‛]/g, '$&$&')}'` : label
 
 /** Histórico do PSReadLine, lido uma vez por execução do app: serve de último recurso da sugestão em cinza. */
 let generalHistory: Promise<string[]> | null = null

@@ -7,12 +7,7 @@ import { Plus, Radio, X } from 'lucide-react'
 import { type CSSProperties, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { type AgentState, withAgentState } from './features/agent-status/agentState'
 import { BackgroundLayer, requestNextBackground } from './features/background/BackgroundLayer'
-import {
-  isBackgroundActive,
-  transparentTheme,
-  wantsGlow,
-  wantsTransparentTerminal,
-} from './features/background/background'
+import { isBackgroundActive, transparentTheme, wantsTransparentTerminal } from './features/background/background'
 import { GlowLayer } from './features/background/GlowLayer'
 import { SAVE_WORKFLOW_EVENT } from './features/blocks/commandBlocks'
 import { bootDone } from './features/boot/boot'
@@ -139,8 +134,7 @@ export function App() {
   setCustomThemes(settings.customThemes)
   const theme = useTheme(previewTheme ?? settings.theme)
   // Com imagem atrás do terminal, o fundo do xterm fica transparente para ela aparecer.
-  // O brilho do tema também fica atrás do texto (ver features/background/GlowLayer).
-  const transparentTerminal = wantsTransparentTerminal(settings.background) || wantsGlow(settings.background)
+  const transparentTerminal = wantsTransparentTerminal(settings.background)
   const terminalTheme = useMemo(
     () => (transparentTerminal ? transparentTheme(theme.terminal) : theme.terminal),
     [theme.terminal, transparentTerminal],
@@ -339,17 +333,23 @@ export function App() {
   const outputIdOf = (tab: { key: number; kind: SessionKind; outputId?: string }) =>
     keepOutput && tab.kind === 'shell' ? outputIdFor(outputIds.current, tab) : undefined
   const session = ready ? JSON.stringify(snapshot(state, (t) => workspace.info(t.key).cwd ?? t.cwd, outputIdOf)) : ''
+  // No máximo um salvamento a cada 400 ms, sempre com a foto mais nova. Não é um debounce: mudanças
+  // seguidas (um título que muda sem parar) não adiam o salvamento para sempre.
+  const pendingSession = useRef('')
+  const saveTimer = useRef<number | undefined>(undefined)
   useEffect(() => {
     if (!session || !settings.restoreSession || !IS_MAIN_WINDOW) return
-    const timer = window.setTimeout(() => {
-      const snap = JSON.parse(session) as SessionSnapshot
+    pendingSession.current = session
+    if (saveTimer.current !== undefined) return
+    saveTimer.current = window.setTimeout(() => {
+      saveTimer.current = undefined
+      const snap = JSON.parse(pendingSession.current) as SessionSnapshot
       ipc
         .saveSession(snap)
         // O texto das abas fechadas (ou de todas, com a opção desligada) sai do disco.
         .then(() => ipc.pruneScrollback(snap.tabs.flatMap((t) => (t.output ? [t.output] : []))))
         .catch((err) => console.error('[termo] falha ao salvar a sessão', err))
     }, 400)
-    return () => window.clearTimeout(timer)
   }, [session, settings.restoreSession])
 
   // Sem abas a janela continua aberta, na tela vazia com "Nova aba" e "Claude Code". A sessão vazia
@@ -837,11 +837,13 @@ export function App() {
       <WorktreeContext.Provider value={openWorktrees}>
         <RolesContext.Provider value={rolesApi}>
           <Tabs
-            className="flex h-full bg-frame"
+            className="relative isolate flex h-full bg-frame"
             activation="manual"
             value={state.active == null ? null : String(state.active)}
             onValueChange={(value) => value != null && dispatch({ type: 'activate', key: Number(value) })}
           >
+            {/* Brilho do tema nas bordas da janela: atrás da lateral, da barra e das frestas em volta do cartão. */}
+            <GlowLayer settings={settings.background} theme={theme} />
             {/* Como no Dia: a lateral ocupa a altura toda, e ela, a barra e o rodapé ficam direto sobre a moldura;
           só o terminal tem cartão. Fica sempre montada e abre/fecha pela largura (o que sobra fechada, 6px,
           é a margem esquerda), para a animação partir de onde estiver se o atalho for apertado no meio. */}
@@ -1083,7 +1085,6 @@ export function App() {
                   className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-[10px] bg-bg shadow-card outline-accent [transition:outline-color_140ms_ease-out] data-drop-active:outline-2 data-drop-active:-outline-offset-2"
                 >
                   {/* Imagem de fundo atrás das abas (o xterm fica transparente; ver features/background). */}
-                  <GlowLayer settings={settings.background} theme={theme} />
                   <BackgroundLayer settings={settings.background} target="terminal" />
                   {state.tabs.map((tab) => (
                     // Painel próprio (não o TabsPanel): na tela dividida duas abas ficam visíveis ao mesmo tempo.

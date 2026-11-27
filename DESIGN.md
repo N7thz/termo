@@ -74,6 +74,11 @@ movimento com mola e respeito a "reduzir movimento". A cor aparece pouco e signi
   100%, padrão ligado em 50%, ajuste 10–100% em Configurações › Imagem de fundo › "Brilho do tema". Some quando
   há imagem atrás do terminal; com contraste alto ou transparência reduzida fica só a cor lisa. O xterm fica
   transparente mantendo o RGB do fundo (`#rrggbb00`), para o contraste mínimo calcular contra a cor certa.
+- 2026-11-26: o brilho saiu de dentro do terminal e foi para as bordas da janela (pedido do usuário; escolhido
+  "moldura da janela"). Fica na moldura (`-z-1` na raiz, `isolate`), atrás da lateral, da barra e das frestas; o
+  cartão do terminal voltou a ser liso e opaco. Halos: destaque no alto ao longo da barra, tom ANSI embaixo à
+  esquerda (o canto de baixo à direita fica escondido pelo cartão). Pico claro subiu para 24%. Convive com a
+  imagem de fundo.
 
 ## Open questions
 

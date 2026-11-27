@@ -4,16 +4,15 @@ import type { ThemeDefinition } from '../theme/themes'
 import { glowStyle, glowTone, wantsGlow } from './background'
 
 /**
- * Brilho suave atrás das abas, nas cores do tema ativo (acompanha a troca e a prévia de tema).
- * Um por cartão, parado. Com contraste alto e com transparência reduzida, os halos somem e fica só
- * a cor de fundo do terminal.
+ * Brilho suave nas bordas da janela, nas cores do tema ativo (acompanha a troca e a prévia de tema).
+ * Fica na moldura, atrás da lateral, da barra e das frestas em volta do cartão do terminal, que segue
+ * liso. Parado; some com contraste alto e com transparência reduzida.
  */
 export function GlowLayer({ settings, theme }: { settings: BackgroundSettings; theme: ThemeDefinition }) {
   const active = wantsGlow(settings)
   const style = useMemo(() => {
     const accent = theme.ui.accent
     return glowStyle({
-      base: theme.terminal.background ?? theme.ui.bg,
       accent,
       tone: glowTone(accent, theme.terminal),
       scheme: theme.scheme,
@@ -24,7 +23,7 @@ export function GlowLayer({ settings, theme }: { settings: BackgroundSettings; t
   return (
     <div
       aria-hidden
-      className="pointer-events-none absolute inset-0 contrast-more:bg-none! reduced-transparency:bg-none!"
+      className="pointer-events-none absolute inset-0 -z-1 contrast-more:hidden reduced-transparency:hidden"
       style={style}
     />
   )

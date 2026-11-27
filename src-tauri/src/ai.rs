@@ -7,7 +7,8 @@
 //!
 //! O prompt vai pela entrada padrão (o `claude` pode ser um `.cmd`, e argumentos com quebra de linha não
 //! passam bem pelo `cmd.exe`). Roda sem ferramentas (`--tools ""`), sem salvar sessão e sem as
-//! configurações do usuário (`--setting-sources project,local`), para os hooks dele não dispararem.
+//! configurações do usuário (`--setting-sources project,local`) e com `disableAllHooks`, para nem os hooks
+//! dele nem os de um repositório clonado dispararem.
 
 use std::io::{Read, Write};
 use std::path::Path;
@@ -104,6 +105,16 @@ pub fn clean(mode: Mode, out: &str) -> String {
     cmd.strip_prefix("PS> ").or_else(|| cmd.strip_prefix("> ")).unwrap_or(cmd).trim().to_string()
 }
 
+/// Configurações que desligam todos os hooks, num arquivo (e não JSON na linha de comando: o `claude`
+/// pode ser um `.cmd`, e aspas em argumentos passam mal pelo `cmd.exe`).
+fn no_hooks_settings() -> Result<std::path::PathBuf, String> {
+    let path = std::env::temp_dir().join("termo-ai-settings.json");
+    std::fs::write(&path, NO_HOOKS).map_err(|e| format!("não foi possível preparar o Claude Code: {e}"))?;
+    Ok(path)
+}
+
+const NO_HOOKS: &str = r#"{"disableAllHooks":true}"#;
+
 /// Roda `claude -p` com o prompt na entrada padrão e devolve a resposta limpa.
 pub fn ask(claude: &Path, mode: Mode, input: &str, cwd: Option<&str>, shell: &str) -> Result<String, String> {
     if input.trim().is_empty() {
@@ -112,6 +123,9 @@ pub fn ask(claude: &Path, mode: Mode, input: &str, cwd: Option<&str>, shell: &st
     let prompt = build_prompt(mode, input, cwd, shell);
     let mut cmd = Command::new(claude);
     cmd.args(["-p", "--model", "haiku", "--tools", "", "--no-session-persistence", "--setting-sources", "project,local"]);
+    // As configurações do projeto ainda valem, e um repositório clonado pode trazer hooks no
+    // `.claude/settings.json`: com `-p` não há a pergunta de confiança na pasta, então eles rodariam.
+    cmd.arg("--settings").arg(no_hooks_settings()?);
     if let Some(dir) = cwd.filter(|d| Path::new(d).is_dir()) {
         cmd.current_dir(dir);
     }
@@ -122,11 +136,13 @@ pub fn ask(claude: &Path, mode: Mode, input: &str, cwd: Option<&str>, shell: &st
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
     let mut child = cmd.spawn().map_err(|e| format!("não foi possível rodar o Claude Code: {e}"))?;
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(prompt.as_bytes()).map_err(|e| e.to_string())?;
-    }
-    let mut stdout = child.stdout.take().ok_or("sem saída do Claude Code")?;
-    let mut stderr = child.stderr.take().ok_or("sem saída do Claude Code")?;
+    // Leitores antes de escrever: se o processo encher a saída antes de ler o prompt inteiro, escrever
+    // primeiro travaria os dois para sempre. O prompt vai numa thread própria, coberta pelo prazo abaixo.
+    let (Some(mut stdout), Some(mut stderr), Some(mut stdin)) = (child.stdout.take(), child.stderr.take(), child.stdin.take())
+    else {
+        kill_tree(&mut child);
+        return Err("sem saída do Claude Code".into());
+    };
     let out_reader = std::thread::spawn(move || {
         let mut s = String::new();
         let _ = stdout.read_to_string(&mut s);
@@ -137,13 +153,22 @@ pub fn ask(claude: &Path, mode: Mode, input: &str, cwd: Option<&str>, shell: &st
         let _ = stderr.read_to_string(&mut s);
         s
     });
+    // Ao sair da thread o stdin fecha, e o `claude` sabe que o prompt acabou.
+    std::thread::spawn(move || {
+        let _ = stdin.write_all(prompt.as_bytes());
+    });
     let started = Instant::now();
     let status = loop {
-        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
-            break status;
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {}
+            Err(e) => {
+                kill_tree(&mut child);
+                return Err(e.to_string());
+            }
         }
         if started.elapsed() > TIMEOUT {
-            let _ = child.kill();
+            kill_tree(&mut child);
             return Err("o Claude Code demorou demais para responder".into());
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -159,6 +184,23 @@ pub fn ask(claude: &Path, mode: Mode, input: &str, cwd: Option<&str>, shell: &st
         return Err("o Claude Code não respondeu nada".into());
     }
     Ok(answer)
+}
+
+/// Encerra o processo e os filhos dele: instalado pelo npm, o `claude` é um `claude.cmd` que abre o `node`,
+/// e matar só o `cmd.exe` deixaria o `node` rodando (gastando cota e CPU).
+fn kill_tree(child: &mut std::process::Child) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &child.id().to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .status();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 #[cfg(test)]

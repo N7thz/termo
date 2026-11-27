@@ -113,10 +113,10 @@ describe('estilo', () => {
 describe('brilho do tema', () => {
   const bg = (over: Partial<typeof DEFAULT_SETTINGS.background> = {}) => ({ ...DEFAULT_SETTINGS.background, ...over })
 
-  test('liga por padrão e some só com a imagem atrás do terminal', () => {
+  test('liga por padrão e convive com a imagem de fundo', () => {
     expect(wantsGlow(bg())).toBe(true)
     expect(wantsGlow(bg({ glow: false }))).toBe(false)
-    expect(wantsGlow(bg({ enabled: true, images: ['C:/a.png'], target: 'terminal' }))).toBe(false)
+    expect(wantsGlow(bg({ enabled: true, images: ['C:/a.png'], target: 'terminal' }))).toBe(true)
     expect(wantsGlow(bg({ enabled: true, images: ['C:/a.png'], target: 'window' }))).toBe(true)
     expect(wantsGlow(bg({ enabled: false, images: ['C:/a.png'] }))).toBe(true)
   })
@@ -134,10 +134,10 @@ describe('brilho do tema', () => {
 
   test('halo mais fraco no tema claro e proporcional à intensidade', () => {
     const style = (scheme: 'dark' | 'light', strength: number) =>
-      String(glowStyle({ base: '#000000', accent: '#ff0000', tone: '#00ff00', scheme, strength }).backgroundImage)
+      String(glowStyle({ accent: '#ff0000', tone: '#00ff00', scheme, strength }).backgroundImage)
     expect(style('dark', 100)).toContain('#ff0000 30%')
     expect(style('dark', 50)).toContain('#ff0000 15%')
-    expect(style('light', 100)).toContain('#ff0000 18%')
+    expect(style('light', 100)).toContain('#ff0000 24%')
     expect(style('dark', 100)).toContain('#00ff00 24%')
   })
 })

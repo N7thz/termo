@@ -104,7 +104,7 @@ export interface BackgroundSettings {
   fit: 'cover' | 'contain' | 'center' | 'tile'
   /** Troca a imagem a cada N segundos (5 a 86400); 0 = não troca. */
   changeSecs: number
-  /** Brilho suave atrás do terminal, nas cores do tema (some com a imagem atrás do terminal). */
+  /** Brilho suave nas bordas da janela (na moldura, em volta do terminal), nas cores do tema. */
   glow: boolean
   /** Intensidade do brilho em %, de 10 a 100. */
   glowStrength: number

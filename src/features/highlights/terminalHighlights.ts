@@ -1,4 +1,4 @@
-import type { IDecoration, IDisposable, ILink, Terminal } from '@xterm/xterm'
+import type { IDecoration, IDisposable, ILink, IMarker, Terminal } from '@xterm/xterm'
 import { ipc } from '../../lib/ipc'
 import type { HighlightSettings } from '../../shared/types'
 import { openLink } from '../browser/links'
@@ -36,6 +36,8 @@ interface Options {
 
 /** Quantas linhas para trás olhar depois de uma saída grande (o resto fica sem marca). */
 const MAX_SCAN = 2000
+/** Intervalo da varredura: com saída contínua ela roda a cada SCAN_MS, sem esperar a saída parar. */
+const SCAN_MS = 80
 
 const hexAlpha = (hex: string, alpha: number) => {
   const n = Number.parseInt(hex.slice(1), 16)
@@ -59,11 +61,16 @@ const hexAlpha = (hex: string, alpha: number) => {
 export class TerminalHighlights implements IDisposable {
   private opts: Options
   private rules: CompiledRule[]
-  private scannedTo = 0
+  /**
+   * Até onde já foi varrido. É um marcador (e não um número de linha) porque, com o histórico de rolagem
+   * cheio, cada linha nova descarta uma antiga e os índices absolutos param de crescer; o marcador acompanha.
+   */
+  private scanned: IMarker | undefined
   /** A saída está dentro de um diff (para não tingir "- item" de listas comuns). */
   private inDiff = false
   private timer: ReturnType<typeof setTimeout> | undefined
-  private decorations: IDecoration[] = []
+  /** Set: com o histórico cheio cada linha nova descarta decorações, e tirar de um array custaria O(n) cada. */
+  private decorations = new Set<IDecoration>()
   private disposables: IDisposable[] = []
   private gate = triggerGate()
 
@@ -121,9 +128,28 @@ export class TerminalHighlights implements IDisposable {
     }
   }
 
+  /** Limita a frequência sem adiar: saída contínua (build, `tail -f`) é varrida a cada SCAN_MS. */
   private schedule() {
+    if (this.timer !== undefined) return
+    this.timer = setTimeout(() => {
+      this.timer = undefined
+      this.scan()
+    }, SCAN_MS)
+  }
+
+  /**
+   * Pula o que já está no buffer (o texto da sessão anterior, restaurado ao reabrir): ele fica sem
+   * contador de erros e sem gatilhos, que são para saída nova.
+   */
+  skipExisting() {
     clearTimeout(this.timer)
-    this.timer = setTimeout(() => this.scan(), 80)
+    this.timer = undefined
+    this.markScanned()
+  }
+
+  private markScanned() {
+    this.scanned?.dispose()
+    this.scanned = this.term.registerMarker(0)
   }
 
   private scan() {
@@ -131,13 +157,14 @@ export class TerminalHighlights implements IDisposable {
     const buf = this.term.buffer.active
     if (buf.type === 'alternate') return
     const cursorRow = buf.baseY + buf.cursorY
-    // Depois de um `clear` o buffer encolhe: volta o ponteiro.
-    if (this.scannedTo > cursorRow) this.scannedTo = 0
-    const from = Math.max(this.scannedTo, cursorRow - MAX_SCAN)
+    // Marcador descartado: a linha saiu do histórico (saída maior que ele) ou houve um `clear`.
+    const last = this.scanned && !this.scanned.isDisposed ? this.scanned.line : -1
+    const from =
+      last >= 0 && last <= cursorRow ? Math.max(last, cursorRow - MAX_SCAN) : Math.max(0, cursorRow - MAX_SCAN)
     const tokens = { logLevels: settings.logLevels, timestamps: settings.timestamps, uuids: settings.uuids }
     const anyToken = tokens.logLevels || tokens.timestamps || tokens.uuids
     if (!settings.severity && !settings.diffs && !anyToken && this.rules.length === 0) {
-      this.scannedTo = cursorRow
+      this.markScanned()
       return
     }
 
@@ -146,48 +173,48 @@ export class TerminalHighlights implements IDisposable {
       // Linha quebrada continua a anterior: já foi tratada junto.
       if (!line || line.isWrapped) continue
       const text = line.translateToString(true)
+      // Um marcador por linha, criado só se algo for marcado nela, e dividido entre as decorações.
+      let rowMarker: IMarker | undefined
+      const marker = () => {
+        rowMarker ??= this.term.registerMarker(row - cursorRow)
+        return rowMarker
+      }
       if (settings.diffs) {
         const diff = diffLine(text, this.inDiff)
         this.inDiff = diff.inDiff
         if (diff.kind === 'added' || diff.kind === 'removed') {
-          this.tintLine(row - cursorRow, this.ansi(diff.kind === 'added' ? 'green' : 'red'))
+          this.tintLine(marker(), this.ansi(diff.kind === 'added' ? 'green' : 'red'))
           continue
         }
         if (diff.kind === 'hunk') {
-          this.paint(row - cursorRow, 0, text.length, this.ansi('cyan'))
+          this.paint(marker(), 0, text.length, this.ansi('cyan'))
           continue
         }
       }
       if (!text.trim()) continue
-      const offset = row - cursorRow
+      // A linha lógica inteira (com as continuações quebradas) para classificar e para os gatilhos: um
+      // "error" que caiu na segunda linha física também conta. As cores ficam na primeira linha física.
+      const full = logicalText(buf, row, cursorRow, text)
 
       if (settings.severity) {
-        const severity = classifyLine(text)
+        const severity = classifyLine(full)
         if (severity) {
-          this.markLine(offset, severity === 'error' ? colors.error : colors.warning)
+          this.markLine(marker(), severity === 'error' ? colors.error : colors.warning)
           onSeverity(severity)
         }
       }
       if (anyToken) {
-        for (const t of findTokens(text, tokens)) this.paint(offset, t.start, t.end - t.start, this.tokenColor(t.kind))
+        for (const t of findTokens(text, tokens))
+          this.paint(marker(), t.start, t.end - t.start, this.tokenColor(t.kind))
       }
       if (this.opts.onTrigger) {
-        for (const t of findTriggers(text, this.rules)) if (this.gate(t.pattern)) this.opts.onTrigger(t)
+        for (const t of findTriggers(full, this.rules)) if (this.gate(t.pattern)) this.opts.onTrigger(t)
       }
       for (const hit of findCustom(text, this.rules)) {
-        const marker = this.term.registerMarker(offset)
-        if (!marker) continue
-        const deco = this.term.registerDecoration({
-          marker,
-          x: hit.start,
-          width: Math.max(1, hit.end - hit.start),
-          foregroundColor: hit.color,
-          layer: 'top',
-        })
-        if (deco) this.track(deco)
+        this.paint(marker(), hit.start, Math.max(1, hit.end - hit.start), hit.color)
       }
     }
-    this.scannedTo = cursorRow
+    this.markScanned()
   }
 
   /** Cor da paleta ANSI do tema atual do terminal (com uma reserva neutra se o tema não tiver). */
@@ -214,17 +241,14 @@ export class TerminalHighlights implements IDisposable {
   }
 
   /** Pinta o texto de um trecho da linha (por cima das cores que o programa já mandou). */
-  private paint(offset: number, x: number, width: number, color: string) {
-    if (width <= 0) return
-    const marker = this.term.registerMarker(offset)
-    if (!marker) return
+  private paint(marker: IMarker | undefined, x: number, width: number, color: string) {
+    if (width <= 0 || !marker) return
     const deco = this.term.registerDecoration({ marker, x, width, foregroundColor: color, layer: 'top' })
     if (deco) this.track(deco)
   }
 
   /** Fundo levemente tingido na linha inteira, sem barra nem régua (linhas de diff). */
-  private tintLine(offset: number, color: string) {
-    const marker = this.term.registerMarker(offset)
+  private tintLine(marker: IMarker | undefined, color: string) {
     if (!marker) return
     const deco = this.term.registerDecoration({ marker, x: 0, width: this.term.cols, layer: 'bottom' })
     if (!deco) return
@@ -235,8 +259,7 @@ export class TerminalHighlights implements IDisposable {
     this.track(deco)
   }
 
-  private markLine(offset: number, color: string) {
-    const marker = this.term.registerMarker(offset)
+  private markLine(marker: IMarker | undefined, color: string) {
     if (!marker) return
     const deco = this.term.registerDecoration({
       marker,
@@ -255,16 +278,28 @@ export class TerminalHighlights implements IDisposable {
   }
 
   private track(deco: IDecoration) {
-    this.decorations.push(deco)
-    deco.onDispose(() => {
-      const i = this.decorations.indexOf(deco)
-      if (i >= 0) this.decorations.splice(i, 1)
-    })
+    this.decorations.add(deco)
+    deco.onDispose(() => this.decorations.delete(deco))
   }
 
   dispose() {
     clearTimeout(this.timer)
+    this.scanned?.dispose()
     for (const d of [...this.decorations]) d.dispose()
     for (const d of this.disposables) d.dispose()
   }
+}
+
+/** Limite de linhas físicas juntadas numa linha lógica (uma linha gigante não vira uma string gigante). */
+const MAX_WRAPPED = 8
+
+/** A linha `row` com as continuações quebradas que já passaram (antes de `end`). */
+function logicalText(buf: Terminal['buffer']['active'], row: number, end: number, first: string): string {
+  let text = first
+  for (let r = row + 1; r < end && r <= row + MAX_WRAPPED; r++) {
+    const next = buf.getLine(r)
+    if (!next?.isWrapped) break
+    text += next.translateToString(true)
+  }
+  return text
 }

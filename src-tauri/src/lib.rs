@@ -109,11 +109,13 @@ fn launch_info(cli: State<CliArgs>, settings: State<SettingsStore>) -> LaunchInf
     }
 }
 
+/// `async`: comando síncrono roda na thread principal, e abrir a sessão confere a pasta no disco (uma pasta
+/// de rede fora do ar esperaria o tempo limite com a janela congelada), procura executáveis e cria o processo.
 #[tauri::command]
-fn pty_create(
+async fn pty_create(
     webview: Webview,
-    ptys: State<Ptys>,
-    settings: State<SettingsStore>,
+    ptys: State<'_, Ptys>,
+    settings: State<'_, SettingsStore>,
     opts: CreateSessionOptions,
     on_event: Channel<PtyEvent>,
 ) -> Result<CreateSessionResult, String> {
@@ -197,19 +199,21 @@ async fn suggest_paths(
     recent: State<'_, recent::RecentDirs>,
     cwd: String,
     query: String,
+    shell: Option<String>,
 ) -> Result<Vec<paths::PathSuggestion>, String> {
     let dir = std::path::Path::new(&cwd);
-    if !dir.is_dir() || query.len() > 512 {
+    if paths::is_network_path(&cwd) || query.len() > 512 || !dir.is_dir() {
         return Ok(Vec::new());
     }
-    Ok(paths::suggest(dir, &query, &recent.ranked()))
+    Ok(paths::suggest_for(dir, &query, &recent.ranked(), shell.as_deref().unwrap_or("pwsh")))
 }
 
 /// Branch e alterações do git da pasta; `None` fora de repositório.
 #[tauri::command]
 async fn git_info(cwd: String) -> Option<git::GitInfo> {
     let dir = std::path::Path::new(&cwd);
-    if !dir.is_dir() {
+    // A pasta vem do prompt (OSC 633), que qualquer saída pode imitar: nada de pasta de rede (ver paths).
+    if paths::is_network_path(&cwd) || !dir.is_dir() {
         return None;
     }
     git::git_info(dir)
@@ -218,6 +222,9 @@ async fn git_info(cwd: String) -> Option<git::GitInfo> {
 /// Branches locais e remotas da pasta; `None` fora de repositório.
 #[tauri::command]
 async fn git_branches(cwd: String) -> Option<Vec<git::Branch>> {
+    if paths::is_network_path(&cwd) {
+        return None;
+    }
     git::branches(std::path::Path::new(&cwd))
 }
 
@@ -283,6 +290,7 @@ async fn worktree_discard(cwd: String, path: String) -> Result<(), String> {
 /// Versão do node que o shell da aba resolve (`node` vem do prompt) e se a pasta é um projeto Node.
 #[tauri::command]
 async fn node_info(cache: State<'_, node::VersionCache>, node: Option<String>, cwd: Option<String>) -> Result<node::NodeInfo, String> {
+    let cwd = cwd.filter(|c| !paths::is_network_path(c));
     Ok(node::node_info(&cache, node.as_deref(), cwd.as_deref()))
 }
 
@@ -295,6 +303,7 @@ async fn node_versions() -> node::NodeVersions {
 /// Dos nomes citados na saída de um comando, as imagens que existem (caminhos absolutos).
 #[tauri::command]
 async fn image_existing(cwd: Option<String>, candidates: Vec<String>) -> Vec<String> {
+    let cwd = cwd.filter(|c| !paths::is_network_path(c));
     images::existing(cwd.as_deref(), &candidates)
 }
 
@@ -306,7 +315,7 @@ async fn image_preview(path: String) -> Result<images::Preview, String> {
 
 /// Abre a imagem no visualizador padrão do sistema (só arquivos de imagem).
 #[tauri::command]
-fn image_open(app: AppHandle, path: String) -> Result<(), String> {
+async fn image_open(app: AppHandle, path: String) -> Result<(), String> {
     images::check_openable(&path)?;
     app.opener().open_path(path, None::<&str>).map_err(|e| e.to_string())
 }
@@ -361,7 +370,9 @@ async fn recent_dirs(recent: State<'_, recent::RecentDirs>, limit: Option<usize>
 /// Registra a pasta atual de uma aba (a cada prompt) no histórico de pastas recentes.
 #[tauri::command]
 async fn record_dir(recent: State<'_, recent::RecentDirs>, path: String) -> Result<(), String> {
-    recent.record(&path);
+    if !paths::is_network_path(&path) {
+        recent.record(&path);
+    }
     Ok(())
 }
 
@@ -459,8 +470,9 @@ async fn update_install(app: AppHandle) -> Result<(), String> {
     updater::install(&app).await
 }
 
+/// `async`: decodificar uma imagem grande da área de transferência não pode travar a janela.
 #[tauri::command]
-fn clipboard_read(app: AppHandle) -> ClipboardContent {
+async fn clipboard_read(app: AppHandle) -> ClipboardContent {
     let clip = app.clipboard();
     ClipboardContent {
         text: clip.read_text().ok().filter(|t| !t.is_empty()),
@@ -486,7 +498,8 @@ async fn open_in_editor(
     if editor::open_in_vscode(&file, line, column) {
         return Ok(());
     }
-    // Sem VS Code: executável ou script abre a pasta (com o arquivo selecionado), nunca roda.
+    // Sem VS Code: só texto, imagem, PDF e mídia abrem no app padrão; o resto abre a pasta (com o arquivo
+    // selecionado) e nunca roda.
     if editor::runs_when_opened(&file) {
         return app.opener().reveal_item_in_dir(&file).map_err(|e| e.to_string());
     }
@@ -495,7 +508,7 @@ async fn open_in_editor(
 
 /// Abre uma pasta no Explorador de Arquivos.
 #[tauri::command]
-fn open_folder(app: AppHandle, path: String) -> Result<(), String> {
+async fn open_folder(app: AppHandle, path: String) -> Result<(), String> {
     if !std::path::Path::new(&path).is_dir() {
         return Err(format!("pasta não encontrada: {path}"));
     }

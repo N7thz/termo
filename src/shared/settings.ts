@@ -20,7 +20,7 @@ export const DEFAULT_SETTINGS: Settings = {
     diffs: true,
     timestamps: true,
     uuids: true,
-    rules: [{ pattern: String.raw`\b(TODO|FIXME|HACK)\b`, color: '#e0af68' }],
+    rules: [{ pattern: String.raw`\b(TODO|FIXME|HACK)\b`, color: '#e0af68', notify: false, mark: false }],
   },
   layout: { sidebar: true, sidebarCollapsed: false, statusBar: true, diffBadge: true },
   profiles: [

@@ -14,9 +14,14 @@ jobs:
         with:
           bun-version: 1.3.10
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          # O cli/ é um workspace à parte: sem ele aqui, o check o recompila do zero toda vez.
+          workspaces: |
+            src-tauri -> target
+            cli -> target
       - run: bun install --frozen-lockfile
       # O tauri::generate_context! exige a pasta do frontend compilado.
       - run: bun run build:web

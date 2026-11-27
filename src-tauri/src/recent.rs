@@ -102,7 +102,12 @@ impl RecentDirs {
         let t = now();
         let mut list = self.entries.lock().unwrap().clone();
         list.sort_by(|a, b| score(b, t).total_cmp(&score(a, t)));
-        list.into_iter().map(|e| PathBuf::from(e.path)).filter(|p| p.is_dir()).collect()
+        // Pastas de rede gravadas antes ficam de fora: conferir se existem abriria conexão a cada sugestão.
+        list.into_iter()
+            .filter(|e| !crate::paths::is_network_path(&e.path))
+            .map(|e| PathBuf::from(e.path))
+            .filter(|p| p.is_dir())
+            .collect()
     }
 }
 

@@ -7,6 +7,7 @@
 
 use serde::Serialize;
 use std::collections::HashMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
@@ -222,7 +223,9 @@ fn project_root(cwd: &Path) -> Option<PathBuf> {
 
 fn wanted_version(root: &Path) -> Option<String> {
     [".nvmrc", ".node-version"].iter().find_map(|f| {
-        let text = std::fs::read_to_string(root.join(f)).ok()?;
+        // Só o começo: o arquivo tem uma linha, e um gigante não pode ser lido inteiro a cada prompt.
+        let mut text = String::new();
+        std::fs::File::open(root.join(f)).ok()?.take(4096).read_to_string(&mut text).ok()?;
         let line = text
             .lines()
             .map(str::trim)

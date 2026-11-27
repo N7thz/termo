@@ -38,6 +38,9 @@ fn parse_response(raw: &[u8]) -> Result<&[u8], String> {
     Ok(&raw[split + 4..])
 }
 
+/// Resposta máxima lida do painel do coord (o estado de todas as sessões cabe com folga).
+const MAX_RESPONSE: u64 = 4 * 1024 * 1024;
+
 fn get(path: &str, timeout: Duration) -> std::io::Result<Vec<u8>> {
     request("GET", path, timeout)
 }
@@ -50,8 +53,9 @@ fn request(method: &str, path: &str, timeout: Duration) -> std::io::Result<Vec<u
         stream,
         "{method} {path} HTTP/1.0\r\nHost: 127.0.0.1:{PORT}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
     )?;
+    // A porta é fixa e sem autenticação: qualquer processo local pode atendê-la. Lê no máximo 4 MiB.
     let mut buf = Vec::new();
-    stream.read_to_end(&mut buf)?;
+    stream.take(MAX_RESPONSE).read_to_end(&mut buf)?;
     Ok(buf)
 }
 

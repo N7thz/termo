@@ -45,6 +45,7 @@ import { attachProgramOsc, type Progress } from './programOsc'
 import { type CellGeometry, QuickSelectOverlay } from './QuickSelectOverlay'
 import { findTargets, readScreen, type Target } from './quickSelect'
 import { StickyCommand, type StickyPlace } from './StickyCommand'
+import { webglPool } from './webglPool'
 
 interface Props {
   kind: SessionKind
@@ -158,6 +159,9 @@ export function TerminalView({
   const wrapRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
+  const visibleRef = useRef(visible)
+  /** Dá (ou renova no pool) o WebGL deste terminal; definido junto com o terminal. */
+  const attachWebglRef = useRef<() => void>(() => undefined)
   const fitRef = useRef<FitAddon | null>(null)
   const pickRef = useRef<(item: PathSuggestion) => void>(() => {})
   const dismissRef = useRef<() => void>(() => {})
@@ -361,7 +365,7 @@ export function TerminalView({
     const scroll = outputId ? attachScrollback(term, outputId) : null
     // Blocos por comando: barra de status na margem, duração e copiar/explicar na linha do prompt.
     const blocks = new CommandBlocks(term, {
-      copy: (text) => void ipc.writeClipboard(text),
+      copy: (text) => void ipc.writeClipboard(text).catch(() => undefined),
       failColor: () => term.options.theme?.red ?? term.options.theme?.foreground ?? 'red',
       cwd: () => shell.cwd,
       filter: (b) => setBlockFilter(b),
@@ -434,22 +438,53 @@ export function TerminalView({
     } catch (err) {
       console.warn('[termo] ligaduras indisponíveis', err)
     }
-    try {
-      const webgl = new WebglAddon()
-      webgl.onContextLoss(() => webgl.dispose())
-      term.loadAddon(webgl)
-    } catch (err) {
-      console.warn('[termo] WebGL indisponível, usando renderizador DOM', err)
+    // WebGL pelo pool da janela (ver webglPool): as abas escondidas há mais tempo voltam ao renderizador
+    // DOM, e o terminal ganha o WebGL de novo ao aparecer (também depois de o contexto se perder).
+    let webgl: WebglAddon | null = null
+    let webglRetries = 0
+    let webglRetry: ReturnType<typeof setTimeout> | undefined
+    const releaseWebgl = () => {
+      webglPool.remove(webglSlot)
+      const w = webgl
+      webgl = null
+      w?.dispose()
     }
+    const attachWebgl = () => {
+      if (webgl || disposed) return
+      try {
+        const w = new WebglAddon()
+        w.onContextLoss(() => {
+          releaseWebgl()
+          // Perdeu o contexto (driver, GPU reiniciada): tenta de novo algumas vezes se ainda estiver na tela.
+          if (webglRetries++ < 3) {
+            clearTimeout(webglRetry)
+            webglRetry = setTimeout(() => visibleRef.current && attachWebglRef.current(), 1000)
+          }
+        })
+        term.loadAddon(w)
+        webgl = w
+        webglPool.touch(webglSlot)
+      } catch (err) {
+        console.warn('[termo] WebGL indisponível, usando renderizador DOM', err)
+      }
+    }
+    const webglSlot = { visible: () => visibleRef.current, release: releaseWebgl }
+    attachWebglRef.current = () => (webgl ? webglPool.touch(webglSlot) : attachWebgl())
+    attachWebgl()
 
     sendRef.current = (data) => send(data)
     const send = (data: string) => {
-      if (sessionId != null) void ipc.write(sessionId, data)
+      // Falha só entre o fim do processo e o aviso de saída: o texto não tem para onde ir.
+      if (sessionId != null) void ipc.write(sessionId, data).catch(() => undefined)
     }
 
     // Copiar e colar compartilhados pelo teclado (Ctrl+C/Ctrl+V) e pelo menu do botão direito.
     const copySelection = () => {
-      void ipc.writeClipboard(term.getSelection())
+      // Sem aviso, a pessoa colaria o que já estava na área de transferência achando que é a seleção.
+      void ipc.writeClipboard(term.getSelection()).catch((err) =>
+        term.write(`
+${warn(`não foi possível copiar: ${err}`)}`),
+      )
       term.clearSelection()
     }
     // Caminhos (imagem colada ou arquivos arrastados) entram na linha do shell ou na caixa estilo Warp.
@@ -630,7 +665,7 @@ export function TerminalView({
         if (query == null || !dir || input === dismissedInput) return hide()
         dismissedInput = null
         const seq = ++requestSeq
-        const items = await ipc.suggestPaths(dir, query).catch(() => [])
+        const items = await ipc.suggestPaths(dir, query, shellFamilyRef.current).catch(() => [])
         if (disposed || seq !== requestSeq) return
         setPosition(computePosition())
         setSuggestions(items)
@@ -729,7 +764,8 @@ export function TerminalView({
         return false
       }
       // Blocos: Ctrl+↑/↓ seleciona, e com um bloco selecionado Ctrl+C, Ctrl+Shift+C, Enter, / e Esc agem nele.
-      if (kind === 'shell' && !term.buffer.active.type.startsWith('alt')) {
+      // kindRef: a aba aberta como Claude vira shell quando o Claude não está instalado.
+      if (kindRef.current === 'shell' && !term.buffer.active.type.startsWith('alt')) {
         const action = blockKeyAction(e, blocks.hasSelection(), term.hasSelection())
         if (action) {
           e.preventDefault()
@@ -793,7 +829,7 @@ export function TerminalView({
     })
     term.onWriteParsed(refresh)
     term.onResize(({ cols, rows }) => {
-      if (sessionId != null) void ipc.resize(sessionId, cols, rows)
+      if (sessionId != null && !exited) void ipc.resize(sessionId, cols, rows).catch(() => undefined)
     })
     term.onTitleChange((t) => cbRef.current.onTitle(t))
 
@@ -808,35 +844,46 @@ export function TerminalView({
       if (disposed) return
       fit.fit()
       // Texto da última vez (sessão restaurada), antes do shell novo.
-      if (restoreOutput) await scroll?.restore()
+      if (restoreOutput) {
+        await scroll?.restore()
+        // Depois do texto restaurado (e do separador, escrito em seguida): ele não conta erros nem dispara gatilhos.
+        term.write('', () => highlights.skipExisting())
+      }
       if (disposed) return
+      // Tamanho pedido ao abrir: se o terminal mudar enquanto o shell abre (o resize só vai ao backend
+      // depois que a sessão existe), o tamanho certo é mandado em seguida.
+      const opened = { cols: term.cols, rows: term.rows }
+      // Bytes desenhados antes de a sessão ter id: confirmados de uma vez quando ela tiver.
+      let earlyAck = 0
       try {
-        const res = await ipc.createSession(
-          { kind, cols: term.cols, rows: term.rows, cwd, shell: shellProfile, launch },
-          (ev) => {
-            if (ev.kind === 'data') {
-              // Confirma só depois de desenhar: é o que segura o backend quando a saída é enorme.
-              term.write(ev.data, () => {
-                if (sessionId != null) void ipc.ack(sessionId, ev.bytes)
-              })
-            } else if (ev.kind === 'agent') {
-              cbRef.current.onAgent?.(ev.state)
-              setAgentState(ev.state)
-            } else {
-              exited = true
-              setDead(true)
-              hide()
-              cbRef.current.onProgress?.(null)
-              // Sessão aberta pelo coord: a aba some junto com o claude (ou com o fechar-sessao.ps1).
-              if (launch?.closeOnExit) return cbRef.current.onClose()
-              const code = ev.code == null ? '' : ` (código ${ev.code})`
-              term.write(`\r\n${dim(`[processo encerrado${code}: pressione qualquer tecla para fechar a aba]`)}\r\n`)
-            }
-          },
-        )
-        if (disposed) return void ipc.kill(res.id)
+        const res = await ipc.createSession({ kind, ...opened, cwd, shell: shellProfile, launch }, (ev) => {
+          if (ev.kind === 'data') {
+            // Confirma só depois de desenhar: é o que segura o backend quando a saída é enorme.
+            term.write(ev.data, () => {
+              if (sessionId != null) void ipc.ack(sessionId, ev.bytes).catch(() => undefined)
+              else earlyAck += ev.bytes
+            })
+          } else if (ev.kind === 'agent') {
+            cbRef.current.onAgent?.(ev.state)
+            setAgentState(ev.state)
+          } else {
+            exited = true
+            setDead(true)
+            hide()
+            cbRef.current.onProgress?.(null)
+            // Sessão aberta pelo coord: a aba some junto com o claude (ou com o fechar-sessao.ps1).
+            if (launch?.closeOnExit) return cbRef.current.onClose()
+            const code = ev.code == null ? '' : ` (código ${ev.code})`
+            term.write(`\r\n${dim(`[processo encerrado${code}: pressione qualquer tecla para fechar a aba]`)}\r\n`)
+          }
+        })
+        if (disposed) return void ipc.kill(res.id).catch(() => undefined)
         sessionId = res.id
         setPtyId(res.id)
+        if (earlyAck > 0) void ipc.ack(res.id, earlyAck).catch(() => undefined)
+        if (term.cols !== opened.cols || term.rows !== opened.rows) {
+          void ipc.resize(res.id, term.cols, term.rows).catch(() => undefined)
+        }
         for (const w of res.warnings) term.write(warn(w))
         if (res.kind !== kind) cbRef.current.onKind(res.kind)
         setShellFamily(
@@ -862,7 +909,7 @@ export function TerminalView({
       cancelAnimationFrame(stickyFrame)
       ro.disconnect()
       wrap.removeEventListener('paste', onEditorPaste, true)
-      if (sessionId != null) void ipc.kill(sessionId)
+      if (sessionId != null) void ipc.kill(sessionId).catch(() => undefined)
       highlights.dispose()
       highlightsRef.current = null
       cbRef.current.onActions?.(null)
@@ -875,9 +922,17 @@ export function TerminalView({
       unlistenDrop?.()
       programOsc.dispose()
       cbRef.current.onProgress?.(null)
+      clearTimeout(webglRetry)
+      webglPool.remove(webglSlot)
       term.dispose()
     }
   }, [])
+
+  // Ao aparecer, o terminal volta (ou vai para a frente) no pool de WebGL.
+  useEffect(() => {
+    visibleRef.current = visible
+    if (visible) attachWebglRef.current()
+  }, [visible])
 
   // Configurações e cores dos destaques valem para a saída daqui em diante.
   useEffect(() => {

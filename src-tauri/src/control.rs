@@ -15,7 +15,7 @@ use std::hash::{BuildHasher, Hasher};
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -25,6 +25,8 @@ use tauri::{AppHandle, Emitter, Manager};
 
 pub const EVENT: &str = "cli-action";
 const FILE: &str = "control.json";
+/// Conexões atendidas ao mesmo tempo (o `termo` abre uma por comando e fecha logo).
+const MAX_CONNECTIONS: usize = 32;
 /// Tempo para a interface responder (abrir aba é rápido; a janela pode estar acordando da bandeja).
 const REPLY_TIMEOUT: Duration = Duration::from_secs(10);
 /// Maior pedido aceito: texto do `send` e um comando longo cabem com folga.
@@ -583,13 +585,22 @@ pub fn serve(app: &AppHandle, config_dir: &Path) -> std::io::Result<()> {
     app.manage(ControlPath(file));
     let app = app.clone();
     std::thread::spawn(move || {
+        // Uma thread por conexão, com teto: um processo local abrindo conexões sem parar não esgota o app.
+        let open = Arc::new(AtomicUsize::new(0));
         for stream in listener.incoming().flatten() {
+            if open.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
+                open.fetch_sub(1, Ordering::SeqCst);
+                drop(stream);
+                continue;
+            }
             let app = app.clone();
             let token = info.token.clone();
+            let open = Arc::clone(&open);
             std::thread::spawn(move || {
                 if let Err(e) = handle(&app, stream, &token) {
                     log::debug!("controle: {e}");
                 }
+                open.fetch_sub(1, Ordering::SeqCst);
             });
         }
     });

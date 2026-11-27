@@ -9,6 +9,34 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
+/// Caminho de rede (UNC: `\\servidor\pasta`, `//servidor/pasta`, `\\?\UNC\...`), fora o WSL
+/// (`\\wsl.localhost\...` e `\\wsl$\...`, que são locais).
+///
+/// A pasta atual da aba (`OSC 633;P;Cwd=`) e os caminhos citados na saída chegam de qualquer programa que
+/// escreva no terminal (um `cat`, um servidor SSH, um log). Tocar num caminho de rede só para mostrar a
+/// branch ou uma prévia abriria uma conexão SMB/WebDAV sozinha, e o Windows manda nela o hash NTLM da
+/// pessoa; com o servidor fora do ar, cada chamada ainda espera o tempo limite da rede. Por isso esses
+/// recursos automáticos ignoram caminhos de rede.
+pub fn is_network_path(p: &str) -> bool {
+    let s = p.trim().replace('/', "\\");
+    let Some(rest) = s.strip_prefix(r"\\") else { return false };
+    // Formato estendido: `\\?\C:\` e `\\.\C:\` são locais; `\\?\UNC\host\...` é rede; o resto (`\\.\pipe\`,
+    // dispositivos) também fica de fora.
+    if let Some(r) = rest.strip_prefix(r"?\").or_else(|| rest.strip_prefix(r".\")) {
+        if r.get(..4).is_some_and(|h| h.eq_ignore_ascii_case(r"UNC\")) {
+            return !is_wsl_host(&r[4..]);
+        }
+        let b = r.as_bytes();
+        return !(b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':');
+    }
+    !is_wsl_host(rest)
+}
+
+fn is_wsl_host(rest: &str) -> bool {
+    let host = rest.split('\\').next().unwrap_or("");
+    host.eq_ignore_ascii_case("wsl.localhost") || host.eq_ignore_ascii_case("wsl$")
+}
+
 /// Poucas por vez: a lista é um atalho e não pode cobrir o terminal.
 pub const MAX_SUGGESTIONS: usize = 5;
 
@@ -52,14 +80,54 @@ fn matching_dirs(dir: &Path, prefix: &str, skip: Option<&str>) -> Vec<String> {
     starts
 }
 
+/// Aspas simples para o PowerShell: além do `'`, ele aceita as aspas tipográficas ‘ ’ ‚ ‛ como aspa simples.
+/// Um nome de pasta com uma delas fecharia a string, e o resto do nome rodaria como comando.
+const PS_SINGLE_QUOTES: [char; 5] = ['\'', '\u{2018}', '\u{2019}', '\u{201A}', '\u{201B}'];
+
 /// `cd projeto` ou `cd '../minha pasta'` (aspas simples do PowerShell quando precisa).
 pub fn cd_command(path: &str) -> String {
-    let needs_quotes = path.chars().any(|c| c.is_whitespace() || "'\"`$&;(){}[]@#,|<>".contains(c));
+    let needs_quotes = path
+        .chars()
+        .any(|c| c.is_whitespace() || c.is_control() || PS_SINGLE_QUOTES.contains(&c) || "\"`$&;(){}[]@#,|<>".contains(c));
     if needs_quotes {
-        format!("cd '{}'", path.replace('\'', "''"))
+        // Dentro das aspas simples, cada aspa (de qualquer tipo) vale como literal se vier dobrada.
+        let mut quoted = String::with_capacity(path.len() + 2);
+        for c in path.chars() {
+            if PS_SINGLE_QUOTES.contains(&c) {
+                quoted.push(c);
+            }
+            quoted.push(c);
+        }
+        format!("cd '{quoted}'")
     } else {
         format!("cd {path}")
     }
+}
+
+/// O `cd` no formato do shell da aba, ou `None` quando o nome não dá para escrever com segurança nele
+/// (a sugestão some). O clique executa o comando, então ele nunca pode sair da string.
+pub fn cd_command_for(path: &str, family: &str) -> Option<String> {
+    if path.chars().any(char::is_control) {
+        return None;
+    }
+    match family {
+        // cmd: aspas duplas não protegem `"`, e `%`/`!` expandem variáveis mesmo entre aspas.
+        "cmd" => (!path.contains(['"', '%', '!'])).then(|| format!("cd /d \"{path}\"")),
+        // bash (Git Bash e WSL): aspas simples, e a aspa simples vira '\''.
+        "bash" | "wsl" => {
+            let safe = path.chars().all(|c| c.is_alphanumeric() || "._-/~+".contains(c));
+            Some(if safe { format!("cd {path}") } else { format!("cd '{}'", path.replace('\'', r"'\''")) })
+        }
+        _ => Some(cd_command(path)),
+    }
+}
+
+/// [`suggest`] com o `cd` no formato do shell da aba (`pwsh`, `powershell`, `cmd`, `bash` ou `wsl`).
+pub fn suggest_for(cwd: &Path, query: &str, recent: &[PathBuf], family: &str) -> Vec<PathSuggestion> {
+    suggest(cwd, query, recent)
+        .into_iter()
+        .filter_map(|s| Some(PathSuggestion { command: cd_command_for(&s.label, family)?, ..s }))
+        .collect()
 }
 
 /// Último nome digitado, para buscar nas pastas recentes: `../termo\` → `termo`.
@@ -271,5 +339,43 @@ mod tests {
         assert_eq!(cd_command("src"), "cd src");
         assert_eq!(cd_command("../a b"), "cd '../a b'");
         assert_eq!(cd_command("it's"), "cd 'it''s'");
+    }
+
+    #[test]
+    fn network_paths_are_recognized() {
+        for p in [r"\\servidor\pasta", "//servidor/pasta", r"\\?\UNC\servidor\pasta", r"\\10.0.0.1\c$", r"\\.\pipe\x"] {
+            assert!(is_network_path(p), "{p}");
+        }
+        for p in [
+            r"C:\Users",
+            "D:/estudos",
+            r"\\wsl.localhost\Ubuntu\home",
+            r"\\wsl$\Ubuntu",
+            r"\\?\C:\x",
+            r"\\?\UNC\wsl.localhost\Ubuntu",
+            "src",
+            "",
+        ] {
+            assert!(!is_network_path(p), "{p}");
+        }
+    }
+
+    #[test]
+    fn typographic_quotes_cannot_close_the_powershell_string() {
+        // ‘ e ’ fecham uma string de aspas simples no PowerShell: precisam vir dobradas.
+        assert_eq!(cd_command("a\u{2019};calc"), "cd 'a\u{2019}\u{2019};calc'");
+        assert_eq!(cd_command("x\u{2018}y"), "cd 'x\u{2018}\u{2018}y'");
+        assert_eq!(cd_command("\u{201A}\u{201B}"), "cd '\u{201A}\u{201A}\u{201B}\u{201B}'");
+    }
+
+    #[test]
+    fn cd_follows_the_shell_family() {
+        assert_eq!(cd_command_for("a b", "pwsh").as_deref(), Some("cd 'a b'"));
+        assert_eq!(cd_command_for("a b&c", "cmd").as_deref(), Some("cd /d \"a b&c\""));
+        assert_eq!(cd_command_for("50%", "cmd"), None);
+        assert_eq!(cd_command_for("a\"b", "cmd"), None);
+        assert_eq!(cd_command_for("src/app", "bash").as_deref(), Some("cd src/app"));
+        assert_eq!(cd_command_for("it's;x", "wsl").as_deref(), Some(r"cd 'it'\''s;x'"));
+        assert_eq!(cd_command_for("a\nb", "pwsh"), None);
     }
 }
