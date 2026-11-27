@@ -1,6 +1,6 @@
 {
   "name": "termo",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Terminal moderno inspirado no Warp, com ligaduras, imagens e atalho para o Claude Code",
   "private": true,
   "type": "module",
