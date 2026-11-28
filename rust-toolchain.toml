@@ -1,0 +1,6 @@
+# Versão do Rust do projeto (local e CI). O CI com `stable` quebrava a cada versão nova do clippy.
+# Para atualizar: troque aqui, rode `bun run check` e corrija os avisos novos no mesmo commit.
+[toolchain]
+channel = "1.100.1"
+components = ["clippy"]
+profile = "minimal"

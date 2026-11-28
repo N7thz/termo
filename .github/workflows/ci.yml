@@ -13,9 +13,8 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.10
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
+      # Instala a versão do rust-toolchain.toml.
+      - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:
           # O cli/ é um workspace à parte: sem ele aqui, o check o recompila do zero toda vez.
@@ -36,7 +35,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.10
-      - uses: dtolnay/rust-toolchain@stable
+      - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
